@@ -8,6 +8,7 @@ export function buildSysNav(): NavGroup[] {
         { path: '/sys/users', label: '用户管理', icon: 'TeamOutlined' },
         { path: '/sys/roles', label: '角色管理', icon: 'SafetyCertificateOutlined' },
         { path: '/projects', label: '项目管理', icon: 'AppstoreOutlined' },
+        { path: '/sys/knowledge', label: '知识库', icon: 'ReadOutlined' },
         { path: '/sys/settings', label: '设置', icon: 'SettingOutlined' },
       ],
     },

@@ -53,7 +53,7 @@
           <h3>规范校验</h3>
           <div v-for="(iss, i) in draft.specIssues" :key="i">
             <a-tag :color="iss.level === 'error' ? 'red' : iss.level === 'warn' ? 'orange' : 'green'">{{ iss.level }}</a-tag>
-            {{ iss.message }}
+            {{ iss.rule }} · {{ iss.message }}
           </div>
         </div>
         <div class="card mb">

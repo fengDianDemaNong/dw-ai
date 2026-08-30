@@ -3,7 +3,9 @@
     <PageHeader :title="layer" :subtitle="rule?.note || '按分层规范建模。先看总览，再进域看表。'">
       <template #actions>
         <a-button @click="router.push(specLayerHref(layer))">规则设定</a-button>
-        <a-button @click="router.push(layerAiHref(layer))">AI 设计</a-button>
+        <a-tooltip :title="hasAiCap('model_design') ? '' : '本组织未开通此项'">
+          <a-button :disabled="!hasAiCap('model_design')" @click="router.push(layerAiHref(layer))">AI 设计</a-button>
+        </a-tooltip>
         <a-button v-if="generateTo" @click="router.push(generateTo)">从 {{ prev?.layer }} 生成</a-button>
         <a-button v-if="canWrite" @click="openCreateDomain">新增主题域</a-button>
         <a-button v-if="canWrite" type="primary" @click="creating = true">新增表</a-button>
@@ -127,7 +129,7 @@ import PageHeader from '../../components/PageHeader.vue';
 import TableFormModal from '../../components/TableFormModal.vue';
 import { generateHref, layerAiHref, layerHref, layerTone, parseLayerParam } from '../../config/layers';
 import { hydrateLayerRule, maskingLabel, nullLabel, specLayerHref } from '../../config/layerPolicies';
-import { addDomain, can, projectDomains, projectLayerRules, projectTables, removeDomain, updateDomain } from '../../stores/app';
+import { addDomain, can, hasAiCap, projectDomains, projectLayerRules, projectTables, removeDomain, updateDomain } from '../../stores/app';
 import type { Domain, WarehouseTable } from '../../types';
 
 const route = useRoute();

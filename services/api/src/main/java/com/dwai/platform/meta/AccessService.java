@@ -9,15 +9,18 @@ import com.dwai.platform.meta.entity.ProjectEntity;
 import com.dwai.platform.meta.entity.ProjectMemberEntity;
 import com.dwai.platform.meta.entity.TenantEntity;
 import com.dwai.platform.meta.entity.TenantGrantEntity;
+import com.dwai.platform.meta.entity.TenantLicenseEntity;
 import com.dwai.platform.meta.entity.UserEntity;
 import com.dwai.platform.meta.entity.UserTenantEntity;
 import com.dwai.platform.meta.mapper.PlatformAccessMapper;
 import com.dwai.platform.meta.mapper.ProjectMapper;
 import com.dwai.platform.meta.mapper.ProjectMemberMapper;
 import com.dwai.platform.meta.mapper.TenantGrantMapper;
+import com.dwai.platform.meta.mapper.TenantLicenseMapper;
 import com.dwai.platform.meta.mapper.TenantMapper;
 import com.dwai.platform.meta.mapper.UserMapper;
 import com.dwai.platform.meta.mapper.UserTenantMapper;
+import com.dwai.platform.meta.support.AiCaps;
 import com.dwai.platform.meta.support.Jsons;
 import com.dwai.platform.meta.support.Perms;
 import org.springframework.http.HttpStatus;
@@ -35,6 +38,7 @@ public class AccessService {
   private final TenantMapper tenants;
   private final PlatformAccessMapper access;
   private final TenantGrantMapper grants;
+  private final TenantLicenseMapper licenses;
   private final DwaiProperties props;
 
   public AccessService(
@@ -45,6 +49,7 @@ public class AccessService {
       TenantMapper tenants,
       PlatformAccessMapper access,
       TenantGrantMapper grants,
+      TenantLicenseMapper licenses,
       DwaiProperties props) {
     this.projects = projects;
     this.members = members;
@@ -53,6 +58,7 @@ public class AccessService {
     this.tenants = tenants;
     this.access = access;
     this.grants = grants;
+    this.licenses = licenses;
     this.props = props;
   }
 
@@ -159,6 +165,37 @@ public class AccessService {
     if (r == null || r.isBlank()) r = roles.get("*");
     if ("admin".equals(r) || "modeler".equals(r) || "viewer".equals(r)) return r;
     return "viewer";
+  }
+
+  public List<String> licensedAiCaps(String tenantId) {
+    TenantLicenseEntity lic = licenses.selectById(tenantId);
+    List<String> modules = lic == null ? List.of("warehouse") : Jsons.strings(lic.getModules());
+    boolean warehouse = modules.contains("warehouse");
+    return AiCaps.licensed(warehouse, lic == null ? List.of() : Jsons.strings(lic.getAiCaps()));
+  }
+
+  public List<String> effectiveAiCaps(String userId, String tenantId) {
+    List<String> licensed = licensedAiCaps(tenantId);
+    if (props.isStandard() || userId == null || tenantId == null) return licensed;
+    TenantGrantEntity g = platformGrantOf(userId, tenantId);
+    if (g == null) return licensed;
+    return AiCaps.effective(licensed, Jsons.strings(g.getAiCaps()));
+  }
+
+  public List<String> currentAiCaps() {
+    String tid = TenantContext.tenantId();
+    if (tid == null || tid.isBlank()) return List.of();
+    return effectiveAiCaps(TenantContext.user(), tid);
+  }
+
+  public boolean hasAiCap(String cap) {
+    return currentAiCaps().contains(cap);
+  }
+
+  public void requireAiCap(String cap) {
+    if (!hasAiCap(cap)) {
+      throw new ResponseStatusException(HttpStatus.FORBIDDEN, "本组织未开通此项");
+    }
   }
 
   public boolean grantCoversProject(String userId, String tenantId, String projectId) {

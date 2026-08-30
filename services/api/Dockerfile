@@ -12,7 +12,7 @@ RUN apt-get update \
     && useradd -r -u 1001 dwai \
     && mkdir -p /app/data /app/app /app/libs \
     && chown -R dwai:dwai /app
-COPY --from=build --chown=dwai:dwai /app/target/dw-ai-api-0.1.2.jar /app/app/dw-ai-api.jar
+COPY --from=build --chown=dwai:dwai /app/target/dw-ai-api-0.1.3.jar /app/app/dw-ai-api.jar
 COPY --from=build --chown=dwai:dwai /app/target/lib /app/libs
 USER dwai
 ENV DW_AI_HOME=/app

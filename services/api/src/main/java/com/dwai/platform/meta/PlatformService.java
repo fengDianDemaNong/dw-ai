@@ -18,6 +18,7 @@ import com.dwai.platform.meta.mapper.TenantLicenseMapper;
 import com.dwai.platform.meta.mapper.TenantMapper;
 import com.dwai.platform.meta.mapper.UserMapper;
 import com.dwai.platform.meta.mapper.UserTenantMapper;
+import com.dwai.platform.meta.support.AiCaps;
 import com.dwai.platform.meta.support.Jsons;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -96,6 +97,7 @@ public class PlatformService {
         ? List.of("warehouse", "serve", "quality", "materialize", "dev")
         : req.modules();
     lic.setModules(Jsons.toJson(modules));
+    lic.setAiCaps(Jsons.toJson(AiCaps.licensed(modules.contains("warehouse"), null)));
     licenses.insert(lic);
     upsertTenantRole(admin.getId(), t.getId(), "admin");
     ProjectEntity p = new ProjectEntity();
@@ -106,6 +108,7 @@ public class PlatformService {
     p.setDescription("");
     p.setOwner(admin.getId());
     p.setCreatedAt(LocalDate.now());
+    p.setEngines(Jsons.toJson(List.of()));
     projects.insert(p);
     upsertMember(p.getId(), admin.getId(), "admin");
     upsertPref("tenant", t.getId());
@@ -122,13 +125,16 @@ public class PlatformService {
       if (!blank(req.name())) t.setName(req.name().trim());
       if (req.modules() != null) {
         TenantLicenseEntity lic = licenses.selectById(id);
+        List<String> modules = req.modules();
         if (lic == null) {
           lic = new TenantLicenseEntity();
           lic.setTenantId(id);
-          lic.setModules(Jsons.toJson(req.modules()));
+          lic.setModules(Jsons.toJson(modules));
+          lic.setAiCaps(Jsons.toJson(AiCaps.licensed(modules.contains("warehouse"), null)));
           licenses.insert(lic);
         } else {
-          lic.setModules(Jsons.toJson(req.modules()));
+          lic.setModules(Jsons.toJson(modules));
+          lic.setAiCaps(Jsons.toJson(AiCaps.licensed(modules.contains("warehouse"), null)));
           licenses.updateById(lic);
         }
       }

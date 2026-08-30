@@ -1,12 +1,25 @@
 <template>
   <div class="page copilot">
-    <PageHeader
-      title="AI 设计规范"
-      subtitle="用对话描述业务，生成主题域 / 分层 / 数据等级 / 词根草案。勾选后同步进当前项目。"
+    <PageHeader :title="pageTitle" :subtitle="pageSubtitle">
+      <template v-if="canSwitchMode" #actions>
+        <a-radio-group v-model:value="mode" size="small" button-style="solid">
+          <a-radio-button value="design">设计</a-radio-button>
+          <a-radio-button value="ask">问答</a-radio-button>
+        </a-radio-group>
+      </template>
+    </PageHeader>
+    <a-alert
+      v-if="!canUseSpecAi"
+      type="warning"
+      show-icon
+      class="cap-alert"
+      message="本组织未开通此项"
+      description="未开通规范设计或规范问答。请联系平台开通仓建设下的 AI 能力。"
     />
-    <SpecReadonlyTip />
+    <SpecReadonlyTip v-else-if="isDesign" />
+    <p v-if="canUseSpecAi" class="ctx">已带本项目规范：{{ specContext }}</p>
 
-    <div class="split">
+    <div v-if="canUseSpecAi" class="split" :class="{ ask: isAsk }">
       <section class="chat">
         <div ref="listRef" class="msgs">
           <div v-if="!turns.length" class="empty">
@@ -33,9 +46,9 @@
         </div>
       </section>
 
-      <section class="draft-pane">
+      <section v-if="isDesign" class="draft-pane">
         <div v-if="!proposal" class="idle">
-          对话生成草案后，这里可以勾选条目，确认后写入主题域、分层规范、数据等级、词根库。
+          对话生成草案后，这里可以勾选条目，确认后写入主题域、分层规范、数据等级、词根库。默认增量补全；覆盖须勾选「已存在则覆盖」。
         </div>
         <template v-else>
           <div class="draft-head">
@@ -128,6 +141,9 @@
           </div>
         </template>
       </section>
+      <section v-else class="draft-pane idle-ask">
+        问答只解释当前项目已有约定，不生成可同步草案。
+      </section>
     </div>
   </div>
 </template>
@@ -135,16 +151,48 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { Modal } from 'ant-design-vue';
+import { Modal, message } from 'ant-design-vue';
+import { api, useRemoteApi } from '../../api/client';
 import PageHeader from '../../components/PageHeader.vue';
 import SpecReadonlyTip from '../../components/SpecReadonlyTip.vue';
 import { replySpecChat, SPEC_STARTERS, type SpecChatTurn } from '../../engine/specChat';
 import { exportLabel, gradesForIndustry, queryLabel } from '../../config/grades';
-import { applySpecProposal, can, currentProject } from '../../stores/app';
+import {
+  applySpecProposal,
+  can,
+  canWriteSpec,
+  currentProject,
+  hasAiCap,
+  projectDomains,
+  projectGrades,
+  projectLayerRules,
+  projectRoots,
+} from '../../stores/app';
 import type { SpecProposal } from '../../types';
 
 const router = useRouter();
 const canWrite = computed(() => can('spec:write'));
+const canDesign = computed(() => hasAiCap('spec_design') && canWriteSpec.value);
+const canAsk = computed(() => hasAiCap('spec_ask'));
+const canUseSpecAi = computed(() => hasAiCap('spec_design') || hasAiCap('spec_ask'));
+const canSwitchMode = computed(() => canDesign.value && canAsk.value);
+const mode = ref<'design' | 'ask'>(canDesign.value ? 'design' : 'ask');
+watch([canDesign, canAsk], () => {
+  if (!canDesign.value && canAsk.value) mode.value = 'ask';
+  if (canDesign.value && !canAsk.value) mode.value = 'design';
+});
+const isDesign = computed(() => mode.value === 'design' && canDesign.value);
+const isAsk = computed(() => !isDesign.value && canUseSpecAi.value);
+const pageTitle = computed(() => (isAsk.value ? '规范问答' : 'AI 设计规范'));
+const pageSubtitle = computed(() =>
+  isAsk.value
+    ? '只解释本项目已有约定，不写入规范。需要读规范权限。'
+    : '用对话描述业务，生成主题域 / 分层 / 数据等级 / 词根草案。默认增量补全，项目管理员可勾选后同步。'
+);
+const specContext = computed(() => {
+  const p = currentProject.value;
+  return `${p?.name ?? '未选项目'} · 主题域 ${projectDomains.value.length} · 分层 ${projectLayerRules.value.length} · 等级 ${projectGrades.value.length} · 词根 ${projectRoots.value.length}`;
+});
 const starters = SPEC_STARTERS;
 const draft = ref('');
 const thinking = ref(false);
@@ -267,18 +315,45 @@ function onKey(e: KeyboardEvent) {
 
 async function send(text?: string) {
   const content = (text ?? draft.value).trim();
-  if (!content || thinking.value) return;
+  if (!content || thinking.value || !canUseSpecAi.value) return;
   draft.value = '';
   turns.value.push({ role: 'user', text: content });
   thinking.value = true;
   await scroll();
-  await new Promise((r) => setTimeout(r, 450));
-  const reply = replySpecChat(content, proposal.value);
-  const isFresh = !proposal.value || reply.proposal.industry !== proposal.value.industry || /帮我设计|重新设计|整个数仓|我做的是/.test(content);
-  if (isFresh) selectAll(reply.proposal);
-  else mergeSelection(reply.proposal);
-  proposal.value = reply.proposal;
-  turns.value.push({ role: 'assistant', text: reply.text });
+  let llmText = '';
+  let fallback = false;
+  if (useRemoteApi() && currentProject.value?.id) {
+    try {
+      const r = await api.ai.chat({
+        message: content,
+        slot: isAsk.value ? 'spec.ask.system' : 'spec.system',
+        projectId: currentProject.value.id,
+      });
+      if (r.fallback) {
+        fallback = true;
+        message.warning(r.error || '大模型代发失败，改用内置草案');
+      }
+      if (r.text) llmText = r.text;
+    } catch (e) {
+      fallback = true;
+      message.warning(e instanceof Error ? e.message : '大模型代发失败，改用内置草案');
+    }
+  }
+  const prompt = llmText && isDesign.value ? `${content}\n\n（模型建议：${llmText}）` : content;
+  const reply = replySpecChat(prompt, isDesign.value ? proposal.value : null);
+  if (isDesign.value) {
+    const isFresh =
+      !proposal.value ||
+      reply.proposal.industry !== proposal.value.industry ||
+      /帮我设计|重新设计|整个数仓|我做的是/.test(content);
+    if (isFresh) selectAll(reply.proposal);
+    else mergeSelection(reply.proposal);
+    proposal.value = reply.proposal;
+  }
+  turns.value.push({
+    role: 'assistant',
+    text: !fallback && llmText ? llmText : reply.text,
+  });
   thinking.value = false;
   persistChat();
   await scroll();
@@ -323,6 +398,22 @@ onMounted(() => {
   flex-direction: column;
   overflow: hidden;
   padding-bottom: 16px;
+}
+.cap-alert {
+  margin-bottom: 12px;
+}
+.ctx {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.split.ask {
+  grid-template-columns: 1fr;
+}
+.idle-ask {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 24px 8px;
 }
 .split {
   flex: 1;

@@ -11,16 +11,20 @@
     <nav class="groups">
       <div v-for="(group, i) in groups" :key="i" class="group">
         <div v-if="group.title" class="gtitle">{{ group.title }}</div>
-        <router-link
+        <a-tooltip
           v-for="item in group.items"
           :key="item.path"
-          :to="item.path"
-          class="item"
-          :class="{ active: active === item.path }"
+          :title="item.disabled ? item.disabledReason : ''"
         >
-          <component :is="icons[item.icon]" class="ico" />
-          <span>{{ item.label }}</span>
-        </router-link>
+          <span v-if="item.disabled" class="item off">
+            <component :is="icons[item.icon]" class="ico" />
+            <span>{{ item.label }}</span>
+          </span>
+          <router-link v-else :to="item.path" class="item" :class="{ active: active === item.path }">
+            <component :is="icons[item.icon]" class="ico" />
+            <span>{{ item.label }}</span>
+          </router-link>
+        </a-tooltip>
       </div>
     </nav>
   </aside>
@@ -31,12 +35,16 @@ import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { activeNavPath, buildNavGroups } from '../config/nav';
 import { navIcons } from '../config/navIcons';
-import { can, hasModule, projectLayerRules } from '../stores/app';
+import { can, hasAiCap, hasModule, projectLayerRules } from '../stores/app';
 
 const icons = navIcons;
 const route = useRoute();
 const groups = computed(() =>
-  buildNavGroups(projectLayerRules.value, { hasModule, can })
+  buildNavGroups(projectLayerRules.value, {
+    hasModule,
+    can,
+    specAiDisabled: !hasAiCap('spec_design') && !hasAiCap('spec_ask'),
+  })
 );
 const active = computed(() => activeNavPath(route.path, groups.value));
 </script>
@@ -113,6 +121,11 @@ const active = computed(() => activeNavPath(route.path, groups.value));
 .item.active {
   background: rgba(34, 211, 238, 0.12);
   color: #67e8f9;
+}
+
+.item.off {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .ico {

@@ -14,7 +14,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/** 安装包把控制台放在 libs/web。根路径跳到登录；/login 回 index.html 交给 Vue。 */
+/** 安装包把控制台放在 web/。根路径跳到登录；/login 回 index.html 交给 Vue。 */
 @Controller
 public class SpaIndexController {
   private final DwaiProperties props;

@@ -5,7 +5,7 @@ server:
 spring:
   web:
     resources:
-      static-locations: file:${WEB_STATIC_DIR:libs/web}/
+      static-locations: file:${WEB_STATIC_DIR:web}/
   datasource:
     url: ${DB_URL:}
     username: ${DB_USER:}

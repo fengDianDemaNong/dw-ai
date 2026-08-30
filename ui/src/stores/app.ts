@@ -16,9 +16,13 @@ import type {
   SpecDomainDraft,
   SpecRootDraft,
   Tenant,
+  TenantKnowledgeArticle,
   TenantLicense,
   WarehouseTable,
   WordRoot,
+  AiCap,
+  EngineKind,
+  KnowledgeSection,
 } from '../types';
 import {
   DEMO_ACCOUNTS_MULTI,
@@ -41,7 +45,7 @@ import {
 import { clusterLogs, scoreCluster } from '../engine/materialize';
 import { checkDuplicate } from '../engine/metrics';
 import { buildSpecPack, type SpecPack } from '../engine/specIo';
-import { api, authToken, setAuthToken, useRemoteApi, type Session, type Snapshot } from '../api/client';
+import { api, authToken, setAuthToken, useRemoteApi, type KnowledgeArticleDto, type Session, type Snapshot } from '../api/client';
 import { isMultiTenant } from '../config/runtime';
 import { loadPlatformAppearance, loadTenantAppearance, loadTenantLlm } from './prefs';
 
@@ -119,6 +123,7 @@ function load(): AppState {
           parsed.serveFolders = extra.serveFolders;
           parsed.serveMetrics = extra.serveMetrics;
         }
+        if (!Array.isArray(parsed.knowledgeArticles)) parsed.knowledgeArticles = [];
         hydrateIam(parsed);
         return parsed;
       }
@@ -132,10 +137,12 @@ function load(): AppState {
 const loaded = load();
 const state = reactive({
   ...loaded,
+  knowledgeArticles: loaded.knowledgeArticles ?? ([] as TenantKnowledgeArticle[]),
   currentUserId: (sessionStorage.getItem('dw-ai.userId') || null) as string | null,
   currentUsername: sessionStorage.getItem('dw-ai.username') || '',
   platformAdmin: false,
   tenantRole: null as string | null,
+  sessionAiCaps: null as AiCap[] | null,
 });
 
 function persist(scope?: 'spec' | 'tables' | 'drafts' | 'members') {
@@ -185,12 +192,14 @@ function applyMe(user: Session['user'] & {
   platformAdmin?: boolean;
   tenantRole?: string | null;
   deployMode?: string;
+  aiCaps?: string[];
 }) {
   state.currentUserId = user.userId;
   state.currentUser = user.displayName || user.userId;
   state.currentUsername = user.username || state.currentUsername;
   state.platformAdmin = Boolean(user.platformAdmin);
   state.tenantRole = user.tenantRole ?? null;
+  state.sessionAiCaps = Array.isArray(user.aiCaps) ? (user.aiCaps as AiCap[]) : null;
   if (user.tenantId) {
     state.currentTenantId = user.tenantId;
     sessionStorage.setItem('dw-ai.tenantId', user.tenantId);
@@ -208,6 +217,7 @@ function applySession(s: Session) {
   state.members = s.members;
   state.licenses = s.licenses;
   applyMe(s.user);
+  if (state.currentTenantId) void loadTenantKnowledge(state.currentTenantId);
 }
 
 /** 会话里的租户列表应是当前用户全部可用租户，不是只含当前这一家。 */
@@ -243,11 +253,21 @@ export async function refreshSession() {
   applySession(await api.session());
 }
 
+const BOOT_KEY = 'dw-ai.boot';
+
 export async function bootstrapRemote() {
-  if (!useRemoteApi() || !authToken()) return;
+  if (!useRemoteApi()) return;
   try {
     const cfg = await api.authConfig();
     if (cfg.deployMode) sessionStorage.setItem('dw-ai.deployMode', cfg.deployMode);
+    if (cfg.sessionEpoch) {
+      const prev = sessionStorage.getItem(BOOT_KEY);
+      if (prev && prev !== cfg.sessionEpoch) {
+        setAuthToken(null);
+      }
+      sessionStorage.setItem(BOOT_KEY, cfg.sessionEpoch);
+    }
+    if (!authToken()) return;
     applySession(await api.session());
     await refreshMyTenants();
     await loadPlatformAppearance();
@@ -258,9 +278,7 @@ export async function bootstrapRemote() {
     const savedPid = sessionStorage.getItem('dw-ai.projectId');
     if (
       savedPid &&
-      state.projects.some(
-        (p) => p.id === savedPid && (state.tenantRole === 'admin' || isProjectActive(p))
-      )
+      state.projects.some((p) => p.id === savedPid && isProjectActive(p))
     ) {
       state.currentProjectId = savedPid;
     }
@@ -268,7 +286,7 @@ export async function bootstrapRemote() {
       applySnapshot(state.currentProjectId, await api.snapshot(state.currentProjectId));
     }
   } catch {
-    setAuthToken(null);
+    if (authToken()) setAuthToken(null);
   }
 }
 
@@ -484,6 +502,15 @@ export function hasModule(mod: ProductModule): boolean {
   return Boolean(lic?.modules.includes(mod));
 }
 
+/** 会话里的 aiCaps 已是许可 ∩ 授权码交集；空数组 = 未开通。本地演示无列表时，仓建设即三项全开。 */
+export function hasAiCap(cap: AiCap): boolean {
+  if (!hasModule('warehouse')) return false;
+  const lic = state.licenses.find((l) => l.tenantId === state.currentTenantId);
+  const caps = lic?.aiCaps ?? state.sessionAiCaps;
+  if (caps == null) return true;
+  return caps.includes(cap);
+}
+
 export const projectMemberList = computed(() =>
   state.members.filter((m) => m.projectId === state.currentProjectId)
 );
@@ -591,8 +618,8 @@ export async function switchTenant(tenantId: string) {
 export async function enterProject(projectId: string) {
   const p = state.projects.find((x) => x.id === projectId);
   if (!p) return;
-  if (!isProjectActive(p) && state.tenantRole !== 'admin') {
-    message.error('项目已停用');
+  if (!isProjectActive(p)) {
+    message.error('项目已停用，不能进入');
     return;
   }
   state.currentTenantId = p.tenantId;
@@ -639,12 +666,14 @@ export async function createProject(input: {
   owner: string;
   adminUserId?: string;
   bootstrapSpec?: boolean;
+  engines?: EngineKind[];
 }): Promise<Project> {
   if (useRemoteApi()) {
     const project = await api.createProject({
       ...input,
       owner: input.adminUserId || input.owner,
       adminUserId: input.adminUserId,
+      engines: input.engines,
     });
     state.projects.push(project);
     if (!state.members.some((m) => m.projectId === project.id && m.userId === state.currentUser)) {
@@ -666,6 +695,7 @@ export async function createProject(input: {
     owner: input.owner || state.currentUser,
     createdAt: new Date().toISOString().slice(0, 10),
     status: 'active',
+    engines: input.engines ?? [],
   };
   state.projects.push(project);
   state.members.push({ projectId: project.id, userId: state.currentUser, role: 'admin' });
@@ -696,8 +726,78 @@ export async function patchProject(projectId: string, body: Record<string, unkno
   if (typeof body.description === 'string') p.description = body.description;
   if (typeof body.owner === 'string') p.owner = body.owner;
   if (typeof body.status === 'string') p.status = body.status;
+  if (Array.isArray(body.engines)) p.engines = body.engines as EngineKind[];
   persist();
   return p;
+}
+
+export async function setProjectEngines(projectId: string, engines: EngineKind[]) {
+  return patchProject(projectId, { engines });
+}
+
+function toKnowledgeArticle(d: KnowledgeArticleDto): TenantKnowledgeArticle {
+  return {
+    id: d.id,
+    tenantId: d.tenantId,
+    engine: d.engine as EngineKind,
+    title: d.title,
+    summary: d.summary ?? '',
+    body: d.body ?? '',
+    sourceUrl: d.sourceUrl,
+    sourceLabel: d.sourceLabel,
+    sections: ((d.sections ?? []) as unknown as KnowledgeSection[]),
+    notes: d.notes,
+    importedAt: d.importedAt ?? '',
+    importedBy: d.importedBy ?? '',
+  };
+}
+
+export async function loadTenantKnowledge(tenantId?: string) {
+  const tid = tenantId || state.currentTenantId;
+  if (!useRemoteApi() || !tid) return;
+  try {
+    state.knowledgeArticles = (await api.org.knowledge(tid)).map(toKnowledgeArticle);
+  } catch {
+    /* 保持现有列表 */
+  }
+}
+
+export const tenantKnowledgeArticles = computed(() =>
+  (state.knowledgeArticles ?? []).filter((a) => a.tenantId === state.currentTenantId)
+);
+
+export async function importKnowledgeFile(
+  text: string,
+  filename: string,
+  mode: 'merge' | 'replace-engine' = 'merge'
+) {
+  if (!state.currentTenantId) {
+    message.error('请先进入组织');
+    return 0;
+  }
+  if (useRemoteApi()) {
+    const r = await api.org.importKnowledge(state.currentTenantId, { text, filename, mode });
+    await loadTenantKnowledge(state.currentTenantId);
+    message.success(`已导入 ${r.articles.length} 篇`);
+    return r.articles.length;
+  }
+  message.warning('本地演示未持久化导入，请接上 API');
+  return 0;
+}
+
+export async function removeImportedArticle(articleId: string, engine: EngineKind) {
+  if (!state.currentTenantId) return;
+  if (useRemoteApi()) {
+    await api.org.deleteKnowledge(state.currentTenantId, engine, articleId);
+    await loadTenantKnowledge(state.currentTenantId);
+    message.success('已删除导入篇');
+    return;
+  }
+  state.knowledgeArticles = (state.knowledgeArticles ?? []).filter(
+    (a) => !(a.tenantId === state.currentTenantId && a.engine === engine && a.id === articleId)
+  );
+  persist();
+  message.success('已删除导入篇');
 }
 
 export async function removeProject(projectId: string) {

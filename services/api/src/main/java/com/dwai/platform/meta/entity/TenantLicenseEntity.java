@@ -12,9 +12,13 @@ public class TenantLicenseEntity {
   private String tenantId;
   @TableField(typeHandler = JsonbStringTypeHandler.class)
   private String modules;
+  @TableField(typeHandler = JsonbStringTypeHandler.class)
+  private String aiCaps;
 
   public String getTenantId() { return tenantId; }
   public void setTenantId(String tenantId) { this.tenantId = tenantId; }
   public String getModules() { return modules; }
   public void setModules(String modules) { this.modules = modules; }
+  public String getAiCaps() { return aiCaps; }
+  public void setAiCaps(String aiCaps) { this.aiCaps = aiCaps; }
 }

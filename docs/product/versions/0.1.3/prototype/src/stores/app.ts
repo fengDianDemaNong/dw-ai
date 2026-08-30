@@ -1690,11 +1690,7 @@ export function createTenant(input: {
     owner: admin.displayName,
     status: 'active',
     modules: input.modules.length ? input.modules : ['warehouse'],
-    aiCaps: input.modules.includes('warehouse')
-      ? input.aiCaps?.length
-        ? input.aiCaps
-        : [...ALL_AI_CAPS]
-      : [],
+    aiCaps: input.modules.includes('warehouse') ? [...ALL_AI_CAPS] : [],
   };
   state.tenants.push(tenant);
   ensureUserInTenant(admin.id, tenant.id, 'admin');
@@ -1743,18 +1739,14 @@ export function setTenantName(tenantId: string, name: string): boolean {
   return true;
 }
 
-export function setTenantModules(tenantId: string, modules: ProductModule[], aiCaps?: AiCap[]) {
+export function setTenantModules(tenantId: string, modules: ProductModule[]) {
   if (!requirePlatformAdmin()) return;
   const t = state.tenants.find((x) => x.id === tenantId);
   if (!t) return;
   t.modules = modules.length ? modules : ['warehouse'];
-  if (aiCaps) {
-    t.aiCaps = t.modules.includes('warehouse') ? aiCaps : [];
-  } else if (!t.modules.includes('warehouse')) {
-    t.aiCaps = [];
-  }
+  t.aiCaps = t.modules.includes('warehouse') ? [...ALL_AI_CAPS] : [];
   persist();
-  message.success(`「${t.name}」模块与 AI 能力已更新`);
+  message.success(`「${t.name}」开通功能已更新`);
 }
 
 export function setTenantAdmin(

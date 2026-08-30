@@ -87,6 +87,7 @@ export function createSeed(): AppState {
       },
       { tenantId: T2, modules: ['warehouse'] },
     ],
+    knowledgeArticles: [],
     domains: seedDomains(P1),
     layerRules,
     grades: seedGrades(P1),

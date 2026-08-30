@@ -2,27 +2,34 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PID_FILE="$ROOT/logs/api.pid"
+# shellcheck disable=SC1091
+source "$ROOT/conf/env.sh"
+# shellcheck disable=SC1091
+source "$(dirname "$0")/lib.sh"
+PORT="${SERVER_PORT:-8080}"
 
-if [[ ! -f "$PID_FILE" ]]; then
-  echo "未发现运行中的进程"
+pids=""
+while read -r p; do
+  [[ -n "$p" ]] && pids="$pids $p"
+done < <(dwai_app_pids | dwai_unique_pids)
+
+if [[ -z "${pids// /}" ]]; then
+  while read -r lp; do
+    [[ -z "$lp" ]] && continue
+    cmd="$(ps -p "$lp" -o args= 2>/dev/null || true)"
+    if [[ "$cmd" == *"$APP_JAR"* ]]; then
+      pids="$pids $lp"
+    fi
+  done < <(dwai_listen_pids "$PORT")
+fi
+
+pids="${pids# }"
+if [[ -z "$pids" ]]; then
+  echo "未发现本安装的运行进程"
   exit 0
 fi
 
-PID="$(cat "$PID_FILE")"
-if kill -0 "$PID" 2>/dev/null; then
-  kill "$PID"
-  for _ in $(seq 1 20); do
-    if ! kill -0 "$PID" 2>/dev/null; then
-      break
-    fi
-    sleep 0.3
-  done
-  if kill -0 "$PID" 2>/dev/null; then
-    kill -9 "$PID" 2>/dev/null || true
-  fi
-  echo "已停止 PID=$PID"
-else
-  echo "进程不存在 PID=$PID"
-fi
-rm -f "$PID_FILE"
+for pid in $pids; do
+  dwai_stop_pid "$pid"
+done
+echo "已停止 PID $pids"

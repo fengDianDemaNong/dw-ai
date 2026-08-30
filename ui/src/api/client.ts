@@ -69,6 +69,7 @@ export type AuthConfig = {
   allowLogin?: boolean;
   allowDevLogin: boolean;
   casdoorConfigured: boolean;
+  sessionEpoch?: string;
   casdoor?: { issuer: string; audience: string };
 };
 
@@ -86,6 +87,7 @@ export type Me = {
   landingProjectId?: string | null;
   needSelectTenant?: boolean;
   deployMode?: string;
+  aiCaps?: string[];
 };
 
 export type OrgUser = {
@@ -109,6 +111,28 @@ export type Grant = {
   projectIds?: string[];
   projectScopes?: { projectId: string; role: string }[];
   defaultRole?: string;
+  aiCaps?: string[];
+};
+
+export type AiPromptsDto = {
+  defaults: Record<string, string>;
+  overrides: Record<string, string>;
+  effective: Record<string, string>;
+};
+
+export type KnowledgeArticleDto = {
+  id: string;
+  tenantId: string;
+  engine: string;
+  title: string;
+  summary: string;
+  body: string;
+  sourceUrl?: string;
+  sourceLabel?: string;
+  sections?: Record<string, unknown>[];
+  notes?: string[];
+  importedAt?: string;
+  importedBy?: string;
 };
 
 export type Appearance = { theme: string; menuPos: string };
@@ -232,6 +256,7 @@ export const api = {
         projectScopes?: { projectId: string; role: string }[];
         defaultRole?: string;
         kind?: string;
+        aiCaps?: string[];
       }
     ) => req<Grant>(`/api/tenants/${tenantId}/grants`, { method: 'POST', body: JSON.stringify(body) }),
     patchGrant: (
@@ -245,6 +270,7 @@ export const api = {
         projectScopes?: { projectId: string; role: string }[];
         defaultRole?: string;
         kind?: string;
+        aiCaps?: string[];
       }
     ) =>
       req<Grant>(`/api/tenants/${tenantId}/grants/${grantId}`, {
@@ -257,6 +283,26 @@ export const api = {
       req<void>(`/api/tenants/${tenantId}/grants/${grantId}`, { method: 'DELETE' }),
     transferAdmin: (tenantId: string, userId: string) =>
       req<void>(`/api/tenants/${tenantId}/transfer-admin`, { method: 'POST', body: JSON.stringify({ userId }) }),
+    aiPrompts: (tenantId: string) => req<AiPromptsDto>(`/api/tenants/${tenantId}/ai-prompts`),
+    putAiPrompts: (tenantId: string, overrides: Record<string, string>) =>
+      req<AiPromptsDto>(`/api/tenants/${tenantId}/ai-prompts`, {
+        method: 'PUT',
+        body: JSON.stringify({ overrides }),
+      }),
+    knowledge: (tenantId: string) => req<KnowledgeArticleDto[]>(`/api/tenants/${tenantId}/knowledge`),
+    importKnowledge: (tenantId: string, body: { text: string; filename?: string; mode?: string }) =>
+      req<{ articles: KnowledgeArticleDto[]; warnings: string[]; format: string }>(
+        `/api/tenants/${tenantId}/knowledge/import`,
+        { method: 'POST', body: JSON.stringify(body) }
+      ),
+    deleteKnowledge: (tenantId: string, engine: string, articleId: string) =>
+      req<void>(`/api/tenants/${tenantId}/knowledge/${encodeURIComponent(engine)}/${encodeURIComponent(articleId)}`, {
+        method: 'DELETE',
+      }),
+  },
+  knowledge: {
+    manuals: (engine?: string) =>
+      req<Record<string, unknown>[]>(`/api/knowledge/manuals${engine ? `?engine=${encodeURIComponent(engine)}` : ''}`),
   },
   versions: {
     list: (projectId: string, tableId: string) =>
@@ -276,16 +322,23 @@ export const api = {
       }),
   },
   ai: {
-    chat: (message: string) =>
-      req<{ source: string; text?: string | null }>('/api/ai/chat', {
+    chat: (body: { message: string; slot?: string; projectId?: string; tableId?: string; history?: unknown[] }) =>
+      req<{ source: string; text?: string | null; fallback?: boolean; error?: string }>('/api/ai/chat', {
         method: 'POST',
-        body: JSON.stringify({ message }),
+        body: JSON.stringify(body),
       }),
-    layerChat: (projectId: string, layer: string, message: string, tableId?: string) =>
-      req<{ source: string; text?: string | null }>(`/api/projects/${projectId}/layers/${layer}/ai/chat`, {
-        method: 'POST',
-        body: JSON.stringify({ message, tableId }),
-      }),
+    layerChat: (
+      projectId: string,
+      layer: string,
+      body: { message: string; slot?: string; tableId?: string; history?: unknown[] }
+    ) =>
+      req<{ source: string; text?: string | null; fallback?: boolean; error?: string }>(
+        `/api/projects/${projectId}/layers/${layer}/ai/chat`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ slot: 'model.system', ...body }),
+        }
+      ),
     apply: (projectId: string, layer: string, tables: unknown[]) =>
       req<WarehouseTable[]>(`/api/projects/${projectId}/layers/${layer}/ai/apply`, {
         method: 'POST',
@@ -302,6 +355,7 @@ export const api = {
     owner: string;
     adminUserId?: string;
     bootstrapSpec?: boolean;
+    engines?: string[];
   }) => req<Project>('/api/projects', { method: 'POST', body: JSON.stringify(body) }),
   patchProject: (projectId: string, body: Record<string, unknown>) =>
     req<Project>(`/api/projects/${projectId}`, { method: 'PATCH', body: JSON.stringify(body) }),

@@ -30,6 +30,10 @@
           <template v-else-if="column.key === 'scope'">
             {{ scopeLine(record) }}
           </template>
+          <template v-else-if="column.key === 'aiCaps'">
+            <span v-if="!record.aiCaps?.length" class="muted">不限制</span>
+            <a-tag v-for="c in record.aiCaps" :key="c">{{ aiCapLabel(c as AiCap) }}</a-tag>
+          </template>
           <template v-else-if="column.key === 'ok'">
             <a-tag :color="record.valid ? 'green' : 'default'">{{ record.valid ? '有效' : '已失效' }}</a-tag>
           </template>
@@ -243,6 +247,10 @@
             <p v-if="!grantProjectList.length" class="hint">本组织还没有可指定的项目。</p>
           </div>
         </a-form-item>
+        <a-form-item label="AI 能力">
+          <p class="lead">不勾选表示不额外限制，沿用本组织已开通的 AI。勾选后只开这些项（仍须组织许可里有）。</p>
+          <a-checkbox-group v-model:value="grantForm.aiCaps" :options="aiCapOpts" />
+        </a-form-item>
       </a-form>
     </a-modal>
 
@@ -260,7 +268,15 @@ import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import { api, type Grant, type OrgUser } from '../api/client';
 import PageHeader from '../components/PageHeader.vue';
-import { MODULE_OPTIONS, PROJECT_ROLE_LABEL, TENANT_ROLE_LABEL, type ProjectRole } from '../config/iam';
+import {
+  AI_CAP_OPTIONS,
+  MODULE_OPTIONS,
+  PROJECT_ROLE_LABEL,
+  TENANT_ROLE_LABEL,
+  aiCapLabel,
+  type AiCap,
+  type ProjectRole,
+} from '../config/iam';
 import { isMultiTenant } from '../config/runtime';
 import { app, isRealTenantAdmin, isTenantAdmin, refreshSession, sessionAccount } from '../stores/app';
 
@@ -307,7 +323,10 @@ const grantForm = reactive({
   projectIds: [] as string[],
   defaultRole: 'viewer' as ProjectRole,
   projectRoles: {} as Record<string, ProjectRole>,
+  aiCaps: [] as AiCap[],
 });
+
+const aiCapOpts = AI_CAP_OPTIONS.map((c) => ({ value: c.value, label: `${c.label}（${c.hint}）` }));
 
 const tenantRoleOpts = (Object.keys(TENANT_ROLE_LABEL) as ('admin' | 'member')[]).map((v) => ({
   value: v,
@@ -364,6 +383,7 @@ const grantCols = [
   { title: '种类', key: 'kind', width: 90 },
   { title: '到期', key: 'expires', width: 160 },
   { title: '范围', key: 'scope' },
+  { title: 'AI 能力', key: 'aiCaps', width: 180 },
   { title: '状态', key: 'ok', width: 80 },
   { title: '操作', key: 'act', width: 200 },
 ];
@@ -576,6 +596,7 @@ function resetGrantForm() {
   grantForm.projectIds = [];
   grantForm.defaultRole = 'viewer';
   grantForm.projectRoles = {};
+  grantForm.aiCaps = [];
 }
 
 function startCreateGrant() {
@@ -602,6 +623,7 @@ function startEditGrant(g: Grant) {
     }
   }
   grantForm.projectRoles = nextRoles;
+  grantForm.aiCaps = [...((g.aiCaps ?? []) as AiCap[])];
   openGrant.value = true;
 }
 
@@ -633,6 +655,7 @@ async function submitGrant() {
             projectId: id,
             role: grantForm.projectRoles[id] || grantForm.defaultRole || 'viewer',
           })),
+      aiCaps: grantForm.aiCaps,
     };
     if (editingGrant.value) {
       await api.org.patchGrant(tid.value, editingGrant.value.id, body);

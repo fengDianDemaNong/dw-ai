@@ -20,6 +20,7 @@ import com.dwai.platform.meta.mapper.TenantLicenseMapper;
 import com.dwai.platform.meta.mapper.TenantMapper;
 import com.dwai.platform.meta.mapper.UserMapper;
 import com.dwai.platform.meta.mapper.UserTenantMapper;
+import com.dwai.platform.meta.support.AiCaps;
 import com.dwai.platform.meta.support.Jsons;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -188,11 +189,13 @@ public class AuthService {
   public ApiModels.TenantDto toTenant(TenantEntity t) {
     TenantLicenseEntity lic = licenses.selectById(t.getId());
     List<String> modules = lic == null ? List.of("warehouse") : Jsons.strings(lic.getModules());
-    return new ApiModels.TenantDto(t.getId(), t.getCode(), t.getName(), t.getOwner(), nz(t.getStatus(), "active"), modules);
+    List<String> aiCaps = AiCaps.licensed(modules.contains("warehouse"), lic == null ? List.of() : Jsons.strings(lic.getAiCaps()));
+    return new ApiModels.TenantDto(t.getId(), t.getCode(), t.getName(), t.getOwner(), nz(t.getStatus(), "active"), modules, aiCaps);
   }
 
   private ApiModels.Me toMe(UserEntity u, TenantEntity t, String tenantRole) {
     Landing land = landing(u, t, tenantRole);
+    List<String> aiCaps = t == null ? List.of() : acl.effectiveAiCaps(u.getId(), t.getId());
     return new ApiModels.Me(
         u.getId(),
         u.getDisplayName(),
@@ -206,7 +209,8 @@ public class AuthService {
         land.path,
         land.projectId,
         land.needSelect,
-        props.isStandard() ? "standard" : "multi");
+        props.isStandard() ? "standard" : "multi",
+        aiCaps);
   }
 
   private Landing landing(UserEntity u, TenantEntity t, String tenantRole) {
@@ -230,6 +234,7 @@ public class AuthService {
     List<ProjectEntity> list = projects.selectList(
         Wrappers.<ProjectEntity>lambdaQuery().eq(ProjectEntity::getTenantId, tenantId));
     for (ProjectEntity p : list) {
+      if (!isActive(p)) continue;
       ProjectMemberEntity m = members.selectOne(Wrappers.<ProjectMemberEntity>lambdaQuery()
           .eq(ProjectMemberEntity::getProjectId, p.getId())
           .eq(ProjectMemberEntity::getUserId, userId));
@@ -238,6 +243,7 @@ public class AuthService {
     if (acl.platformGrantOf(userId, tenantId) != null) {
       List<String> scoped = acl.grantProjectIds(userId, tenantId);
       for (ProjectEntity p : list) {
+        if (!isActive(p)) continue;
         if (scoped.isEmpty() || scoped.contains(p.getId())) return p.getId();
       }
     }
@@ -246,6 +252,10 @@ public class AuthService {
 
   private static ResponseStatusException badLogin() {
     return new ResponseStatusException(HttpStatus.UNAUTHORIZED, "用户名或密码错误");
+  }
+
+  private static boolean isActive(ProjectEntity p) {
+    return p.getStatus() == null || p.getStatus().isBlank() || "active".equalsIgnoreCase(p.getStatus());
   }
 
   private static String nz(String v, String d) {

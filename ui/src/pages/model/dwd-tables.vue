@@ -3,7 +3,9 @@
     <PageHeader :title="title" :subtitle="subtitle">
       <template #actions>
         <a-button @click="router.push(layerHref(layer))">返回总览</a-button>
-        <a-button @click="router.push(layerAiHref(layer))">AI 设计</a-button>
+        <a-tooltip :title="hasAiCap('model_design') ? '' : '本组织未开通此项'">
+          <a-button :disabled="!hasAiCap('model_design')" @click="router.push(layerAiHref(layer))">AI 设计</a-button>
+        </a-tooltip>
         <a-button v-if="canWrite" type="primary" @click="openCreate">新增表</a-button>
       </template>
     </PageHeader>
@@ -28,7 +30,10 @@
           {{ record.columns.length }}
         </template>
         <template v-else-if="column.key === 'action'">
-          <a class="ml" @click="router.push(layerAiHref(layer, record.id))">AI</a>
+          <a-tooltip :title="hasAiCap('model_design') ? '' : '本组织未开通此项'">
+            <a v-if="hasAiCap('model_design')" class="ml" @click="router.push(layerAiHref(layer, record.id))">AI</a>
+            <span v-else class="ml muted">AI</span>
+          </a-tooltip>
           <template v-if="canWrite">
             <a @click="edit = record">编辑</a>
             <a-popconfirm :title="deleteConfirmTitle(record.id)" @confirm="removeTable(record.id)">
@@ -56,7 +61,7 @@ import PageHeader from '../../components/PageHeader.vue';
 import GradeTag from '../../components/GradeTag.vue';
 import TableFormModal from '../../components/TableFormModal.vue';
 import { layerAiHref, layerHref, parseLayerParam, TABLE_STATUS_LABEL } from '../../config/layers';
-import { can, projectDomains, projectTables, removeTable, tableDependents } from '../../stores/app';
+import { can, hasAiCap, projectDomains, projectTables, removeTable, tableDependents } from '../../stores/app';
 import type { WarehouseTable } from '../../types';
 
 const route = useRoute();
@@ -113,5 +118,9 @@ function go(id: string) {
 <style scoped>
 .ml {
   margin-right: 10px;
+}
+.muted {
+  color: var(--muted);
+  cursor: not-allowed;
 }
 </style>

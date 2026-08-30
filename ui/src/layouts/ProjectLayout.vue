@@ -26,6 +26,7 @@ import {
   can,
   currentTenant,
   ensureProjectSnapshot,
+  hasAiCap,
   hasModule,
   isRealTenantAdmin,
   leaveProject,
@@ -35,7 +36,13 @@ import { appearanceOf } from '../stores/prefs';
 
 const router = useRouter();
 const tenant = currentTenant;
-const groups = computed(() => buildNavGroups(projectLayerRules.value, { hasModule, can }));
+const groups = computed(() =>
+  buildNavGroups(projectLayerRules.value, {
+    hasModule,
+    can,
+    specAiDisabled: !hasAiCap('spec_design') && !hasAiCap('spec_ask'),
+  })
+);
 const menuPos = computed(() => appearanceOf('tenant', tenant.value?.id).menuPos);
 
 onMounted(() => {

@@ -1,6 +1,6 @@
 <template>
   <div class="page">
-    <PageHeader title="租户管理" subtitle="开停租户、指定管理员、勾选开通功能与 AI 能力。进入租户每次都须输入该租户签发的授权码。种子演示码：XINGHE-DEMO。">
+    <PageHeader title="租户管理" subtitle="开停租户、指定管理员、勾选开通功能。进入租户每次都须输入该租户签发的授权码。种子演示码：XINGHE-DEMO。">
       <template #actions>
         <a-button type="primary" @click="openCreate = true">新建租户</a-button>
       </template>
@@ -18,12 +18,6 @@
             {{ moduleLabel(m) }}{{ isShipped(m) ? '' : '（未上线）' }}
           </a-tag>
           <span v-if="!record.modules?.length" class="muted">未开通</span>
-        </template>
-        <template v-else-if="column.key === 'aiCaps'">
-          <template v-if="record.modules.includes('warehouse')">
-            <a-tag v-for="c in displayAiCaps(record)" :key="c">{{ aiCapLabel(c) }}</a-tag>
-          </template>
-          <span v-else class="muted">仓建设未开</span>
         </template>
         <template v-else-if="column.key === 'act'">
           <a-space>
@@ -48,14 +42,6 @@
         <a-form-item label="开通功能" required>
           <p class="lead">勾选该租户可以使用的功能。未上线的模块勾选后仅记开通，控制台暂不出现菜单。</p>
           <a-checkbox-group v-model:value="createForm.modules" :options="moduleOpts" class="mods" />
-        </a-form-item>
-        <a-form-item label="AI 能力">
-          <p class="hint">挂在仓建设下。未开仓建设则无效。默认三项全开。</p>
-          <a-checkbox-group
-            v-model:value="createForm.aiCaps"
-            :options="aiCapOpts"
-            :disabled="!createForm.modules.includes('warehouse')"
-          />
         </a-form-item>
         <a-form-item label="租户管理员">
           <a-radio-group v-model:value="createForm.adminMode">
@@ -92,14 +78,6 @@
           <p class="lead">勾选该租户可以使用的功能。未上线的模块勾选后仅记开通，控制台暂不出现菜单。</p>
           <a-checkbox-group v-model:value="editForm.modules" :options="moduleOpts" class="mods" />
         </a-form-item>
-        <a-form-item label="AI 能力">
-          <p class="hint">未开仓建设则无效。空 = 仓建设下三项全开。</p>
-          <a-checkbox-group
-            v-model:value="editForm.aiCaps"
-            :options="aiCapOpts"
-            :disabled="!editForm.modules.includes('warehouse')"
-          />
-        </a-form-item>
         <a-form-item label="指定管理员（已有账号）">
           <a-select v-model:value="editForm.userId" :options="accountOpts" allow-clear placeholder="不改则留空" />
         </a-form-item>
@@ -118,8 +96,8 @@ import { computed, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { message } from 'ant-design-vue';
 import PageHeader from '../../components/PageHeader.vue';
-import { AI_CAP_OPTIONS, ALL_AI_CAPS, ALL_MODULES, MODULE_OPTIONS, aiCapLabel } from '../../config/iam';
-import type { AiCap, ProductModule, Tenant } from '../../types';
+import { ALL_MODULES, MODULE_OPTIONS } from '../../config/iam';
+import type { ProductModule, Tenant } from '../../types';
 import {
   app,
   createTenant,
@@ -149,7 +127,6 @@ const createForm = reactive({
   code: '',
   name: '',
   modules: [...ALL_MODULES] as ProductModule[],
-  aiCaps: [...ALL_AI_CAPS] as AiCap[],
   adminMode: 'existing' as 'existing' | 'new',
   userId: app.accounts.find((a) => !a.platformAdmin)?.id ?? '',
   username: '',
@@ -160,7 +137,6 @@ const createForm = reactive({
 const editForm = reactive({
   name: '',
   modules: [] as ProductModule[],
-  aiCaps: [] as AiCap[],
   userId: '',
 });
 
@@ -176,16 +152,8 @@ const tenantCols = [
   { title: '管理员', dataIndex: 'owner', width: 100 },
   { title: '状态', key: 'status', width: 90 },
   { title: '开通功能', key: 'modules' },
-  { title: 'AI 能力', key: 'aiCaps' },
   { title: '操作', key: 'act', width: 200 },
 ];
-
-const aiCapOpts = AI_CAP_OPTIONS.map((c) => ({ value: c.value, label: `${c.label}（${c.hint}）` }));
-
-function displayAiCaps(t: Tenant): AiCap[] {
-  if (!t.modules.includes('warehouse')) return [];
-  return t.aiCaps?.length ? t.aiCaps : [...ALL_AI_CAPS];
-}
 
 function moduleLabel(m: ProductModule) {
   return MODULE_OPTIONS.find((x) => x.value === m)?.label ?? m;
@@ -221,7 +189,6 @@ function edit(t: Tenant) {
   editing.value = t;
   editForm.name = t.name;
   editForm.modules = [...t.modules];
-  editForm.aiCaps = displayAiCaps(t);
   editForm.userId = '';
   openEdit.value = true;
 }
@@ -235,7 +202,6 @@ function submitCreate() {
     code: createForm.code,
     name: createForm.name,
     modules: createForm.modules,
-    aiCaps: createForm.modules.includes('warehouse') ? createForm.aiCaps : [],
     admin:
       createForm.adminMode === 'existing'
         ? { mode: 'existing', userId: createForm.userId }
@@ -263,7 +229,7 @@ function submitEdit() {
     return;
   }
   if (!setTenantName(editing.value.id, editForm.name)) return;
-  setTenantModules(editing.value.id, editForm.modules, editForm.aiCaps);
+  setTenantModules(editing.value.id, editForm.modules);
   if (editForm.userId) {
     setTenantAdmin(editing.value.id, { mode: 'existing', userId: editForm.userId });
   }

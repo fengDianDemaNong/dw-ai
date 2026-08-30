@@ -2,7 +2,9 @@
   <div class="page">
     <PageHeader title="概况" :subtitle="`${project?.name} · 规范中心与建模中心`">
       <template #actions>
-        <a-button @click="router.push('/w/spec/copilot')">AI 设计规范</a-button>
+        <a-tooltip :title="hasSpecAi ? '' : '本组织未开通此项'">
+          <a-button :disabled="!hasSpecAi" @click="router.push('/w/spec/copilot')">AI 设计规范</a-button>
+        </a-tooltip>
         <a-button v-if="firstModelLayer" @click="router.push(layerHref(firstModelLayer))">{{ firstModelLayer }} 总览</a-button>
         <a-button v-if="firstOds" type="primary" @click="router.push('/w/model/ods-dwd')">从 ODS 建模</a-button>
       </template>
@@ -84,11 +86,14 @@ import { layerHref } from '../config/layers';
 import {
   canWriteSpec,
   currentProject,
+  hasAiCap,
   projectDomains,
   projectLayerRules,
   projectRoots,
   projectTables,
 } from '../stores/app';
+
+const hasSpecAi = computed(() => hasAiCap('spec_design') || hasAiCap('spec_ask'));
 
 const router = useRouter();
 const project = currentProject;

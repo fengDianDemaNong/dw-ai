@@ -5,6 +5,8 @@ export interface NavItem {
   path: string;
   label: string;
   icon: string;
+  disabled?: boolean;
+  disabledReason?: string;
 }
 
 export interface NavGroup {
@@ -40,6 +42,10 @@ export const navGroups: NavGroup[] = [
     items: [{ path: '/w/members', label: '项目成员', icon: 'TeamOutlined' }],
   },
   {
+    title: '',
+    items: [{ path: '/w/knowledge', label: '知识库', icon: 'ReadOutlined' }],
+  },
+  {
     title: '规范中心',
     module: 'warehouse',
     perm: 'spec:read',
@@ -62,7 +68,11 @@ export const navGroups: NavGroup[] = [
 
 export function buildNavGroups(
   layers: { layer: string }[],
-  access?: { hasModule: (m: ProductModule) => boolean; can: (p: Perm) => boolean }
+  access?: {
+    hasModule: (m: ProductModule) => boolean;
+    can: (p: Perm) => boolean;
+    specAiDisabled?: boolean;
+  }
 ): NavGroup[] {
   return navGroups
     .map((g) => {
@@ -70,7 +80,19 @@ export function buildNavGroups(
         if (g.module && !access.hasModule(g.module)) return null;
         if (g.perm && !access.can(g.perm)) return null;
       }
-      if (g.title !== '建模中心') return g;
+      const items =
+        g.title === '规范中心'
+          ? g.items.map((item) =>
+              item.path === '/w/spec/copilot'
+                ? {
+                    ...item,
+                    disabled: Boolean(access?.specAiDisabled),
+                    disabledReason: '本组织未开通此项',
+                  }
+                : item
+            )
+          : g.items;
+      if (g.title !== '建模中心') return { ...g, items };
       return {
         ...g,
         items: [

@@ -95,13 +95,15 @@
 
 工作台「设置」在大模型下方增加 **AI 提示词**。按槽位存，不让用户从零写整套产品逻辑。
 
-本版槽位：
+本版槽位（设置页同时标明对话接口、确认接口与会改的数据）：
 
-| 槽位 | 用途 |
-|---|---|
-| `spec.system` | 规范设计系统提示 |
-| `spec.ask.system` | 规范问答系统提示 |
-| `model.system` | 建模系统提示（见 [02-modeling-center.md](./02-modeling-center.md)） |
+| 槽位 | 用途 | 对话 | 确认后写库 |
+|---|---|---|---|
+| `spec.system` | 规范设计系统提示 | `POST /api/ai/chat` | `PUT /api/projects/{id}/spec`（主题域 / 分层 / 等级 / 词根） |
+| `spec.ask.system` | 规范问答系统提示 | `POST /api/ai/chat` | 不写库 |
+| `model.system` | 建模系统提示（见 [02-modeling-center.md](./02-modeling-center.md)） | `POST /api/projects/{id}/layers/{layer}/ai/chat` | `POST .../ai/apply`（本层表 / 草稿，记版本） |
+
+从 ODS/DWD 生成没有提示词槽，确认后走普通 `tables` / `drafts`。
 
 规则：
 

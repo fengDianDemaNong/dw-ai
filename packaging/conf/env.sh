@@ -21,6 +21,9 @@ DB_PASSWORD=
 # DB_PASSWORD=dwai
 
 DW_AI_MODE=multi
+# 空库首次启动自动创建的平台用户（与 seed 演示账号无关）。登录后请改密。
+BOOTSTRAP_ADMIN_USER=admin
+BOOTSTRAP_ADMIN_PASSWORD=admin123
 DW_AI_LLM_SECRET=dw-ai-llm-dev-secret-change-me-32b
 SECURITY_MODE=dev
 JWT_SECRET=dw-ai-dev-secret-change-me-please-32b
@@ -42,5 +45,5 @@ DS_TOKEN=
 DS_PROJECT_CODE=0
 
 CORS_ORIGINS=*
-# 留空则 start.sh 使用安装目录 libs/web
+# 留空则 start.sh 使用安装目录 web/
 WEB_STATIC_DIR=

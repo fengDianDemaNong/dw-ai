@@ -17,9 +17,13 @@ import java.util.List;
 @RequestMapping("/api/tenants/{id}")
 public class TenantAdminController {
   private final TenantAdminService tenants;
+  private final AiPromptService prompts;
+  private final KnowledgeService knowledge;
 
-  public TenantAdminController(TenantAdminService tenants) {
+  public TenantAdminController(TenantAdminService tenants, AiPromptService prompts, KnowledgeService knowledge) {
     this.tenants = tenants;
+    this.prompts = prompts;
+    this.knowledge = knowledge;
   }
 
   @GetMapping("/users")
@@ -113,5 +117,32 @@ public class TenantAdminController {
   @PostMapping("/transfer-admin")
   public void transfer(@PathVariable String id, @RequestBody ApiModels.TransferAdminReq req) {
     tenants.transferAdmin(id, req == null ? null : req.userId());
+  }
+
+  @GetMapping("/ai-prompts")
+  public ApiModels.AiPromptsDto aiPrompts(@PathVariable String id) {
+    return prompts.get(id);
+  }
+
+  @PutMapping("/ai-prompts")
+  public ApiModels.AiPromptsDto putAiPrompts(@PathVariable String id, @RequestBody ApiModels.AiPromptsPutReq body) {
+    return prompts.put(id, body);
+  }
+
+  @GetMapping("/knowledge")
+  public java.util.List<ApiModels.KnowledgeArticleDto> knowledge(@PathVariable String id) {
+    return knowledge.listImported(id);
+  }
+
+  @PostMapping("/knowledge/import")
+  public java.util.Map<String, Object> importKnowledge(
+      @PathVariable String id, @RequestBody ApiModels.KnowledgeImportReq body) {
+    return knowledge.importArticles(id, body);
+  }
+
+  @DeleteMapping("/knowledge/{engine}/{articleId}")
+  public void deleteKnowledge(
+      @PathVariable String id, @PathVariable String engine, @PathVariable String articleId) {
+    knowledge.deleteImported(id, engine, articleId);
   }
 }

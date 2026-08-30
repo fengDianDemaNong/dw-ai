@@ -5,8 +5,17 @@
         <a-button @click="router.push(layerHref(layer))">返回总览</a-button>
       </template>
     </PageHeader>
+    <a-alert
+      v-if="!hasModelAi"
+      type="warning"
+      show-icon
+      class="cap-alert"
+      message="本组织未开通此项"
+      description="未开通建模 AI。请联系平台在仓建设下勾选「建模 AI」。"
+    />
+    <p v-else class="ctx">已带本项目规范：{{ modelContext }}</p>
 
-    <div class="split">
+    <div v-if="hasModelAi" class="split">
       <section class="chat">
         <div ref="listRef" class="msgs">
           <div v-if="!turns.length" class="empty">
@@ -75,7 +84,16 @@ import { modelStarters, replyModelChat, type ModelChatProposal, type ModelChatTu
 import { api, useRemoteApi } from '../../api/client';
 import PageHeader from '../../components/PageHeader.vue';
 import { layerHref, parseLayerParam } from '../../config/layers';
-import { app, applyModelProposal, canWriteModel, currentProject, projectDomains, projectTables } from '../../stores/app';
+import {
+  app,
+  applyModelProposal,
+  canWriteModel,
+  currentProject,
+  hasAiCap,
+  projectDomains,
+  projectLayerRules,
+  projectTables,
+} from '../../stores/app';
 import { LLM_PROVIDERS, llmOf } from '../../stores/prefs';
 
 const route = useRoute();
@@ -93,9 +111,16 @@ const llmHint = computed(() => {
   const name = LLM_PROVIDERS.find((p) => p.value === c.provider)?.label ?? c.provider;
   return `本组织已配置 ${name} / ${c.model || '未填模型'}，对话由服务端代发，密钥不出浏览器。`;
 });
+const hasModelAi = computed(() => hasAiCap('model_design'));
+const modelContext = computed(() => {
+  const domains = projectDomains.value.map((d) => d.code).join('、') || '无';
+  const rule = projectLayerRules.value.find((r) => r.layer === layer.value);
+  const tablesHint = tables.value.length ? `${tables.value.length} 张已有表` : '尚无表';
+  return `${currentProject.value?.name ?? '未选项目'} · 域 ${domains} · ${tablesHint}${rule ? ` · ${rule.naming}` : ''}`;
+});
 const subtitle = computed(() => {
   const focusName = focus.value ? `当前针对 ${focus.value.name}。` : '';
-  return `用对话完成本层建模。${focusName}${llmHint.value}`;
+  return `用对话完成本层建模，已带本项目规范。${focusName}${llmHint.value}`;
 });
 
 const draft = ref('');
@@ -146,7 +171,7 @@ function onKey(e: KeyboardEvent) {
 
 async function send(text?: string) {
   const content = (text ?? draft.value).trim();
-  if (!content || thinking.value) return;
+  if (!content || thinking.value || !hasModelAi.value) return;
   draft.value = '';
   turns.value.push({ role: 'user', text: content });
   thinking.value = true;
@@ -159,9 +184,14 @@ async function send(text?: string) {
   };
   let prompt = content;
   const cfg = llmOf(app.currentTenantId);
-  if (cfg.enabled && useRemoteApi()) {
+  if (cfg.enabled && useRemoteApi() && currentProject.value?.id) {
     try {
-      const r = await api.ai.chat(content);
+      const r = await api.ai.layerChat(currentProject.value.id, layer.value, {
+        message: content,
+        slot: 'model.system',
+        tableId: focus.value?.id,
+      });
+      if (r.fallback) message.warning(r.error || '大模型代发失败，改用内置草案');
       if (r.text) prompt = `${content}\n\n（模型建议：${r.text}）`;
     } catch (e) {
       message.warning(e instanceof Error ? e.message : '大模型代发失败，改用内置草案');
@@ -214,6 +244,14 @@ onMounted(() => {
   flex-direction: column;
   overflow: hidden;
   padding-bottom: 16px;
+}
+.cap-alert {
+  margin-bottom: 12px;
+}
+.ctx {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--muted);
 }
 .split {
   flex: 1;

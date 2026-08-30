@@ -4,15 +4,30 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck disable=SC1091
 source "$ROOT/conf/env.sh"
-PID_FILE="$ROOT/logs/api.pid"
+# shellcheck disable=SC1091
+source "$(dirname "$0")/lib.sh"
 PORT="${SERVER_PORT:-8080}"
 
-if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
-  echo "运行中 PID=$(cat "$PID_FILE")  端口 $PORT"
+pids="$(dwai_app_pids | dwai_unique_pids | tr '\n' ' ')"
+pids="${pids%% }"
+listen="$(dwai_listen_pids "$PORT" | dwai_unique_pids | tr '\n' ' ')"
+listen="${listen%% }"
+
+if [[ -n "$pids" ]]; then
+  echo "运行中  本安装进程 ${pids}  端口 $PORT"
+  if [[ -n "$listen" ]]; then
+    echo "端口 $PORT 监听 PID ${listen}"
+  fi
   if command -v curl >/dev/null 2>&1; then
     curl -fsS "http://127.0.0.1:${PORT}/api/health" && echo
   fi
   exit 0
 fi
+
+if [[ -n "$listen" ]]; then
+  echo "本安装未找到 DwaiApplication，但端口 $PORT 已被占用 PID ${listen}" >&2
+  exit 1
+fi
+
 echo "未运行"
 exit 1

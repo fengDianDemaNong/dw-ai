@@ -1,12 +1,14 @@
 package com.dwai.platform.meta.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.dwai.platform.meta.support.JsonbStringTypeHandler;
 
 import java.time.LocalDate;
 
-@TableName("projects")
+@TableName(value = "projects", autoResultMap = true)
 public class ProjectEntity {
   @TableId(type = IdType.INPUT)
   private String id;
@@ -17,6 +19,8 @@ public class ProjectEntity {
   private String owner;
   private LocalDate createdAt;
   private String status;
+  @TableField(typeHandler = JsonbStringTypeHandler.class)
+  private String engines;
 
   public String getId() { return id; }
   public void setId(String id) { this.id = id; }
@@ -34,4 +38,6 @@ public class ProjectEntity {
   public void setCreatedAt(LocalDate createdAt) { this.createdAt = createdAt; }
   public String getStatus() { return status; }
   public void setStatus(String status) { this.status = status; }
+  public String getEngines() { return engines; }
+  public void setEngines(String engines) { this.engines = engines; }
 }

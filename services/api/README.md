@@ -11,11 +11,11 @@ cd services/api
 mvn spring-boot:run
 ```
 
-H2 文件默认 `./data/dwai`（相对进程工作目录）。Flyway 只建表。演示账号：
+H2 文件默认 `./data/dwai`（相对进程工作目录）。Flyway 只建表。空库会自动创建平台用户 `admin` / `admin123`。演示租户：
 
 ```bash
 # 先完成一次启动建表，再（可另开终端，H2 AUTO_SERVER 允许并行）
-java -cp "target/dw-ai-api-0.1.2.jar:target/lib/*" com.dwai.platform.SeedMain
+java -cp "target/dw-ai-api-0.1.3.jar:target/lib/*" com.dwai.platform.SeedMain
 ```
 
 | 变量 | 含义 | 默认 |
@@ -26,6 +26,7 @@ java -cp "target/dw-ai-api-0.1.2.jar:target/lib/*" com.dwai.platform.SeedMain
 | `SECURITY_MODE` | `dev` 或 `oidc` | `dev` |
 | `CORS_ORIGINS` | 控制台来源 | 本机 5173 / 80 |
 | `WEB_STATIC_DIR` | 托管控制台静态目录 | 空 |
+| `BOOTSTRAP_ADMIN_USER` / `BOOTSTRAP_ADMIN_PASSWORD` | 空库初始平台用户 | `admin` / `admin123` |
 
 健康检查：`GET http://127.0.0.1:8080/api/health`
 

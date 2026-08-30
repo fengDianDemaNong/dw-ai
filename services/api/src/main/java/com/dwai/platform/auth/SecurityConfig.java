@@ -9,6 +9,8 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
+import org.springframework.security.oauth2.jwt.BadJwtException;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
@@ -68,7 +70,7 @@ public class SecurityConfig {
   }
 
   @Bean
-  JwtDecoder jwtDecoder(DwaiProperties props) {
+  JwtDecoder jwtDecoder(DwaiProperties props, JwtSessionEpoch epoch) {
     DwaiProperties.Security sec = props.getSecurity();
     if (sec.isOidc() && sec.getCasdoor().configured()) {
       // Casdoor 默认 RS256；启动时不拉 metadata，避免没装 Casdoor 就起不来
@@ -78,6 +80,14 @@ public class SecurityConfig {
     }
     byte[] secret = sec.getJwtSecret().getBytes(StandardCharsets.UTF_8);
     SecretKeySpec key = new SecretKeySpec(secret, "HmacSHA256");
-    return NimbusJwtDecoder.withSecretKey(key).macAlgorithm(MacAlgorithm.HS256).build();
+    JwtDecoder decoder = NimbusJwtDecoder.withSecretKey(key).macAlgorithm(MacAlgorithm.HS256).build();
+    return token -> {
+      Jwt jwt = decoder.decode(token);
+      String boot = jwt.getClaimAsString(JwtSessionEpoch.CLAIM);
+      if (boot == null || !boot.equals(epoch.id())) {
+        throw new BadJwtException("session expired");
+      }
+      return jwt;
+    };
   }
 }

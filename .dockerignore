@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+**/dist
+**/target
+.git
+.idea
+.DS_Store
+*.local
+.env
+.env.local
+release
+docs
+infra
+agent-transcripts

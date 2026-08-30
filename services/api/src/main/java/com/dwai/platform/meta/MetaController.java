@@ -22,15 +22,17 @@ public class MetaController {
   private final TableService tables;
   private final TableVersionService versions;
   private final AiService ai;
+  private final KnowledgeService knowledge;
 
   public MetaController(
       ProjectService projects, SpecService spec, TableService tables,
-      TableVersionService versions, AiService ai) {
+      TableVersionService versions, AiService ai, KnowledgeService knowledge) {
     this.projects = projects;
     this.spec = spec;
     this.tables = tables;
     this.versions = versions;
     this.ai = ai;
+    this.knowledge = knowledge;
   }
 
   @GetMapping("/health")
@@ -293,6 +295,12 @@ public class MetaController {
 
   @PostMapping("/ai/chat")
   public java.util.Map<String, Object> aiChat(@RequestBody ApiModels.AiChatReq body) {
-    return ai.chat(body == null ? null : body.message());
+    return ai.chat(body);
+  }
+
+  @GetMapping("/knowledge/manuals")
+  public java.util.List<java.util.Map<String, Object>> manuals(
+      @org.springframework.web.bind.annotation.RequestParam(required = false) String engine) {
+    return knowledge.manuals(engine);
   }
 }

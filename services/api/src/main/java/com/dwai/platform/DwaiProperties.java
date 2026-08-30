@@ -15,6 +15,7 @@ public class DwaiProperties {
   private final StarRocks starrocks = new StarRocks();
   private final DolphinScheduler dolphinscheduler = new DolphinScheduler();
   private final Web web = new Web();
+  private final Bootstrap bootstrap = new Bootstrap();
 
   public String getDeployMode() { return deployMode; }
   public void setDeployMode(String deployMode) { this.deployMode = deployMode; }
@@ -28,9 +29,24 @@ public class DwaiProperties {
   public StarRocks getStarrocks() { return starrocks; }
   public DolphinScheduler getDolphinscheduler() { return dolphinscheduler; }
   public Web getWeb() { return web; }
+  public Bootstrap getBootstrap() { return bootstrap; }
+
+  /** 空库首次启动时补一个平台用户，与演示 seed 无关。 */
+  public static class Bootstrap {
+    private String adminUsername = "admin";
+    private String adminPassword = "admin123";
+    private String adminDisplayName = "平台管理员";
+
+    public String getAdminUsername() { return adminUsername; }
+    public void setAdminUsername(String adminUsername) { this.adminUsername = adminUsername; }
+    public String getAdminPassword() { return adminPassword; }
+    public void setAdminPassword(String adminPassword) { this.adminPassword = adminPassword; }
+    public String getAdminDisplayName() { return adminDisplayName; }
+    public void setAdminDisplayName(String adminDisplayName) { this.adminDisplayName = adminDisplayName; }
+  }
 
   public static class Web {
-    /** 安装包把控制台静态文件放在 libs/web，由此目录托管 SPA */
+    /** 安装包把控制台静态文件放在 web/，由此目录托管 SPA */
     private String staticDir = "";
     private String corsOrigins = "http://127.0.0.1:5173,http://localhost:5173,http://localhost,http://127.0.0.1";
 

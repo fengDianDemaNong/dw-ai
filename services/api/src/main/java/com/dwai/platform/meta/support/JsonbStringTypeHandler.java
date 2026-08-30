@@ -30,19 +30,23 @@ public class JsonbStringTypeHandler extends BaseTypeHandler<String> {
 
   @Override
   public String getNullableResult(ResultSet rs, String columnName) throws SQLException {
-    Object v = rs.getObject(columnName);
-    return v == null ? null : v.toString();
+    return asJsonText(rs.getString(columnName), rs.getObject(columnName));
   }
 
   @Override
   public String getNullableResult(ResultSet rs, int columnIndex) throws SQLException {
-    Object v = rs.getObject(columnIndex);
-    return v == null ? null : v.toString();
+    return asJsonText(rs.getString(columnIndex), rs.getObject(columnIndex));
   }
 
   @Override
   public String getNullableResult(CallableStatement cs, int columnIndex) throws SQLException {
-    Object v = cs.getObject(columnIndex);
-    return v == null ? null : v.toString();
+    return asJsonText(cs.getString(columnIndex), cs.getObject(columnIndex));
+  }
+
+  private static String asJsonText(String asString, Object asObject) {
+    if (asString != null && !asString.isBlank()) {
+      return asString;
+    }
+    return asObject == null ? null : asObject.toString();
   }
 }

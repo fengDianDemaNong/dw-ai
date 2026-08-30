@@ -25,6 +25,10 @@ mybatis-plus:
 dwai:
   deploy-mode: ${DW_AI_MODE:multi}
   llm-secret: ${DW_AI_LLM_SECRET:dw-ai-llm-dev-secret-change-me-32b}
+  bootstrap:
+    admin-username: ${BOOTSTRAP_ADMIN_USER:admin}
+    admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:admin123}
+    admin-display-name: ${BOOTSTRAP_ADMIN_NAME:平台管理员}
   security:
     # dev = HS256 开发令牌；oidc = 校验 Casdoor JWT。接口形态相同。
     mode: ${SECURITY_MODE:dev}

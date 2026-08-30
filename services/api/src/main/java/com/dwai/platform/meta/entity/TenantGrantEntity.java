@@ -25,6 +25,8 @@ public class TenantGrantEntity {
   private String projectIds;
   @TableField(value = "project_roles", typeHandler = JsonbStringTypeHandler.class)
   private String projectRoles;
+  @TableField(typeHandler = JsonbStringTypeHandler.class)
+  private String aiCaps;
 
   public String getId() { return id; }
   public void setId(String id) { this.id = id; }
@@ -48,4 +50,6 @@ public class TenantGrantEntity {
   public void setProjectIds(String projectIds) { this.projectIds = projectIds; }
   public String getProjectRoles() { return projectRoles; }
   public void setProjectRoles(String projectRoles) { this.projectRoles = projectRoles; }
+  public String getAiCaps() { return aiCaps; }
+  public void setAiCaps(String aiCaps) { this.aiCaps = aiCaps; }
 }

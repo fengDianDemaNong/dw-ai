@@ -27,6 +27,20 @@ export const MODULE_OPTIONS: { value: ProductModule; label: string; shipped?: bo
 
 export const ALL_MODULES: ProductModule[] = MODULE_OPTIONS.map((m) => m.value);
 
+export type AiCap = 'spec_design' | 'spec_ask' | 'model_design';
+
+export const AI_CAP_OPTIONS: { value: AiCap; label: string; hint: string }[] = [
+  { value: 'spec_design', label: '规范设计', hint: '对话 + 勾选同步' },
+  { value: 'spec_ask', label: '规范问答', hint: '只读，不写库' },
+  { value: 'model_design', label: '建模 AI', hint: '分层对话 + 写入 / 记版本' },
+];
+
+export const ALL_AI_CAPS: AiCap[] = AI_CAP_OPTIONS.map((c) => c.value);
+
+export function aiCapLabel(cap: AiCap) {
+  return AI_CAP_OPTIONS.find((x) => x.value === cap)?.label ?? cap;
+}
+
 export const TENANT_ROLE_LABEL: Record<'admin' | 'member', string> = {
   admin: '管理员',
   member: '普通成员',

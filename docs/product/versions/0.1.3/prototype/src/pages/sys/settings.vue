@@ -71,22 +71,75 @@
     </section>
 
     <section v-if="scope === 'tenant'" class="card mt">
+      <h3>AI 会改什么、走哪些接口</h3>
+      <p class="muted">
+        对话本身只换文本，确认后才写当前<strong>项目</strong>的数据。提示词按租户共用，注入的是当前项目摘要。
+        未开大模型时不读下面的槽位，页面仍可用内置草案。
+      </p>
+      <a-table :data-source="opRows" :columns="opCols" :pagination="false" size="small" row-key="key" class="op-table">
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'chat'">
+            <code>{{ record.chat }}</code>
+            <div class="cell-n">{{ record.chatNote }}</div>
+          </template>
+          <template v-else-if="column.key === 'confirm'">
+            <code>{{ record.confirm }}</code>
+            <div class="cell-n">{{ record.payload }}</div>
+          </template>
+          <template v-else-if="column.key === 'writes'">
+            {{ record.writes }}
+          </template>
+        </template>
+      </a-table>
+    </section>
+
+    <section v-if="scope === 'tenant'" class="card mt">
       <h3>AI 提示词</h3>
       <p class="muted">
-        按槽位覆盖产品默认，不从零写整套逻辑。代发前由服务端替换占位符。
+        三个槽位覆盖产品默认，不从零写整套逻辑。代发前由服务端替换占位符。
         <template v-if="!llm.enabled">先启用大模型，提示词才会用于代发；未开启时仍走内置草案，不读这些槽位。</template>
       </p>
       <p class="vars">
         可用变量：
-        <code v-for="p in AI_PROMPT_PLACEHOLDERS" :key="p.key">{{ p.key }}</code>
+        <span v-for="p in AI_PROMPT_PLACEHOLDERS" :key="p.key" class="var">
+          <code>{{ p.key }}</code>
+          <em>{{ p.desc }}</em>
+        </span>
       </p>
       <div v-for="s in AI_PROMPT_SLOTS" :key="s.slot" class="slot">
         <div class="slot-h">
-          <b>{{ s.label }}</b>
-          <span>{{ s.hint }}</span>
+          <div>
+            <b>{{ s.label }}</b>
+            <code class="slot-id">{{ s.slot }}</code>
+            <span>{{ s.hint }}</span>
+          </div>
           <a-button size="small" @click="resetSlot(s.slot)">恢复默认</a-button>
         </div>
-        <a-textarea v-model:value="promptDraft[s.slot]" :auto-size="{ minRows: 4, maxRows: 10 }" />
+        <dl class="meta">
+          <div>
+            <dt>用在</dt>
+            <dd>{{ s.page }} · {{ s.cap }}</dd>
+          </div>
+          <div>
+            <dt>对话</dt>
+            <dd>
+              <code>{{ s.chat }}</code>
+              {{ s.chatNote }}
+            </dd>
+          </div>
+          <div>
+            <dt>确认后</dt>
+            <dd>
+              <code>{{ s.confirm }}</code>
+              {{ s.payload }}
+            </dd>
+          </div>
+          <div>
+            <dt>会改的数据</dt>
+            <dd>{{ s.writes }}</dd>
+          </div>
+        </dl>
+        <a-textarea v-model:value="promptDraft[s.slot]" :auto-size="{ minRows: 8, maxRows: 18 }" />
       </div>
       <a-button type="primary" :disabled="!tenantId" @click="savePrompts">保存提示词</a-button>
     </section>
@@ -99,7 +152,7 @@ import { useRoute } from 'vue-router';
 import { message } from 'ant-design-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import { app } from '../../stores/app';
-import { AI_PROMPT_PLACEHOLDERS, AI_PROMPT_SLOTS, DEFAULT_AI_PROMPTS } from '../../config/aiPrompts';
+import { AI_OPS_WITHOUT_SLOT, AI_PROMPT_PLACEHOLDERS, AI_PROMPT_SLOTS, DEFAULT_AI_PROMPTS } from '../../config/aiPrompts';
 import type { AiPromptSlot } from '../../types';
 import {
   appearanceOf,
@@ -130,6 +183,34 @@ const promptDraft = reactive<Record<AiPromptSlot, string>>({
   'spec.ask.system': DEFAULT_AI_PROMPTS['spec.ask.system'],
   'model.system': DEFAULT_AI_PROMPTS['model.system'],
 });
+
+const opRows = [
+  ...AI_PROMPT_SLOTS.map((s) => ({
+    key: s.slot,
+    name: `${s.label}（${s.slot}）`,
+    chat: s.chat,
+    chatNote: s.chatNote,
+    confirm: s.confirm,
+    payload: s.payload,
+    writes: s.writes,
+  })),
+  ...AI_OPS_WITHOUT_SLOT.map((s) => ({
+    key: s.label,
+    name: s.label,
+    chat: s.chat,
+    chatNote: s.prompt,
+    confirm: s.confirm,
+    payload: s.payload,
+    writes: s.writes,
+  })),
+];
+
+const opCols = [
+  { title: '功能', dataIndex: 'name', width: 220 },
+  { title: '对话接口', key: 'chat' },
+  { title: '确认后接口 / payload', key: 'confirm' },
+  { title: '会改的数据', key: 'writes', width: 280 },
+];
 
 function loadPrompts(id: string | null) {
   for (const s of AI_PROMPT_SLOTS) {
@@ -245,35 +326,107 @@ h3 {
   max-width: 560px;
 }
 
+.op-table {
+  margin-top: 4px;
+}
+
+.op-table :deep(code),
+.meta code,
+.slot-id {
+  font-size: 11px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.cell-n {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .vars {
-  margin: 0 0 12px;
+  margin: 0 0 16px;
   font-size: 12px;
   color: var(--muted);
 }
 
-.vars code {
-  margin-right: 8px;
-  font-size: 11px;
+.var {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  margin: 0 12px 6px 0;
+}
+
+.var em {
+  font-style: normal;
+  color: var(--muted);
 }
 
 .slot {
-  margin-bottom: 16px;
+  margin-bottom: 22px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.slot:last-of-type {
+  border-bottom: 0;
 }
 
 .slot-h {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-bottom: 6px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
 }
 
 .slot-h b {
-  font-size: 13px;
+  margin-right: 8px;
+  font-size: 14px;
+}
+
+.slot-id {
+  margin-right: 8px;
 }
 
 .slot-h span {
-  flex: 1;
+  display: inline;
   font-size: 12px;
   color: var(--muted);
+}
+
+.meta {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.02);
+}
+
+.meta > div {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.meta dt {
+  margin: 0;
+  color: var(--muted);
+}
+
+.meta dd {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .themes {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 </style>

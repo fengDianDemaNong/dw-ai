@@ -4,7 +4,9 @@
       <template #actions>
         <a-button @click="back">返回列表</a-button>
         <a-button @click="goVersions">版本</a-button>
-        <a-button @click="goAi">AI 改这张表</a-button>
+        <a-tooltip :title="hasAiCap('model_design') ? '' : '本组织未开通此项'">
+          <a-button :disabled="!hasAiCap('model_design')" @click="goAi">AI 改这张表</a-button>
+        </a-tooltip>
         <a-button v-if="canWrite" @click="editing = true">编辑</a-button>
         <a-popconfirm v-if="canWrite" :title="deleteConfirmTitle" @confirm="onRemove">
           <a-button danger>删除</a-button>
@@ -86,7 +88,7 @@ import DdlPreview from '../../components/DdlPreview.vue';
 import TableFormModal from '../../components/TableFormModal.vue';
 import GradeTag from '../../components/GradeTag.vue';
 import { layerAiHref, layerHref, layerVersionsHref, parseLayerParam, TABLE_STATUS_LABEL } from '../../config/layers';
-import { can, projectGrades, projectTables, removeTable, tableDependents } from '../../stores/app';
+import { can, hasAiCap, projectGrades, projectTables, removeTable, tableDependents } from '../../stores/app';
 
 const route = useRoute();
 const router = useRouter();

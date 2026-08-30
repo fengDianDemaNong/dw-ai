@@ -3,7 +3,9 @@
     <PageHeader title="词根库" subtitle="AI 生成字段名与度量别名的依据。业务词根按主题域归属。">
       <template #actions>
         <a-button @click="router.push('/w/spec/io')">导入导出</a-button>
-        <a-button @click="router.push('/w/spec/copilot')">AI 设计</a-button>
+        <a-tooltip :title="hasSpecAi ? '' : '本组织未开通此项'">
+          <a-button :disabled="!hasSpecAi" @click="router.push('/w/spec/copilot')">AI 设计</a-button>
+        </a-tooltip>
         <a-button v-if="canWrite" type="primary" @click="openCreate">新增词根</a-button>
       </template>
     </PageHeader>
@@ -73,11 +75,12 @@ import { useRouter } from 'vue-router';
 import { message } from 'ant-design-vue';
 import PageHeader from '../../components/PageHeader.vue';
 import SpecReadonlyTip from '../../components/SpecReadonlyTip.vue';
-import { addRoot, can, projectDomains, projectRoots, removeRoot, updateRoot } from '../../stores/app';
+import { addRoot, can, hasAiCap, projectDomains, projectRoots, removeRoot, updateRoot } from '../../stores/app';
 import type { RootKind, WordRoot } from '../../types';
 
 const router = useRouter();
 const canWrite = computed(() => can('spec:write'));
+const hasSpecAi = computed(() => hasAiCap('spec_design') || hasAiCap('spec_ask'));
 
 const kind = ref<RootKind>('biz');
 const open = ref(false);

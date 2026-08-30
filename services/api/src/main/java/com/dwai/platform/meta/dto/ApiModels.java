@@ -20,9 +20,10 @@ public final class ApiModels {
       String landing,
       String landingProjectId,
       boolean needSelectTenant,
-      String deployMode) {}
+      String deployMode,
+      java.util.List<String> aiCaps) {}
 
-  public record TenantDto(String id, String code, String name, String owner, String status, java.util.List<String> modules) {}
+  public record TenantDto(String id, String code, String name, String owner, String status, java.util.List<String> modules, java.util.List<String> aiCaps) {}
 
   public record OrgUserDto(
       String id, String username, String displayName, String status, String tenantRole, boolean platformAdmin) {}
@@ -64,7 +65,8 @@ public final class ApiModels {
       java.util.List<String> modules,
       java.util.List<String> projectIds,
       java.util.List<GrantProjectScope> projectScopes,
-      String defaultRole) {}
+      String defaultRole,
+      java.util.List<String> aiCaps) {}
 
   public record AppearanceDto(String theme, String menuPos) {}
 
@@ -73,7 +75,8 @@ public final class ApiModels {
   public record GrantDto(
       String id, String tenantId, String code, String kind, String expiresAt, boolean valid, String createdAt,
       java.util.List<String> modules, java.util.List<String> projectIds,
-      java.util.List<GrantProjectScope> projectScopes, String defaultRole) {}
+      java.util.List<GrantProjectScope> projectScopes, String defaultRole,
+      java.util.List<String> aiCaps) {}
 
   public record TableVersionDto(
       String id, String tableId, String projectId, int version, String note, String createdBy, String createdAt,
@@ -81,7 +84,20 @@ public final class ApiModels {
 
   public record RestoreReq(String note) {}
 
-  public record AiChatReq(String message, String tableId, java.util.List<java.util.Map<String, Object>> history) {}
+  public record AiChatReq(
+      String message, String tableId, java.util.List<java.util.Map<String, Object>> history,
+      String slot, String projectId) {}
+
+  public record AiPromptsDto(Map<String, String> defaults, Map<String, String> overrides, Map<String, String> effective) {}
+
+  public record AiPromptsPutReq(Map<String, String> overrides) {}
+
+  public record KnowledgeImportReq(String text, String filename, String mode) {}
+
+  public record KnowledgeArticleDto(
+      String id, String tenantId, String engine, String title, String summary, String body,
+      String sourceUrl, String sourceLabel, List<Map<String, Object>> sections, List<String> notes,
+      String importedAt, String importedBy) {}
 
   public record AiApplyReq(java.util.List<TableDraft> tables) {}
 
@@ -105,16 +121,17 @@ public final class ApiModels {
       String adminUsername,
       String adminPassword,
       String adminDisplayName,
-      String adminUserId) {}
+      String adminUserId,
+      java.util.List<String> aiCaps) {}
 
-  public record PatchAdminTenantReq(String status, String name, String owner, java.util.List<String> modules) {}
+  public record PatchAdminTenantReq(String status, String name, String owner, java.util.List<String> modules, java.util.List<String> aiCaps) {}
 
-  public record LicenseDto(String tenantId, List<String> modules) {}
+  public record LicenseDto(String tenantId, List<String> modules, List<String> aiCaps) {}
 
   public record ProjectDto(
-      String id, String tenantId, String code, String name, String description, String owner, String createdAt, String status) {}
+      String id, String tenantId, String code, String name, String description, String owner, String createdAt, String status, List<String> engines) {}
 
-  public record PatchProjectReq(String name, String description, String owner, String status, String code) {}
+  public record PatchProjectReq(String name, String description, String owner, String status, String code, List<String> engines) {}
 
   public record MemberDto(String projectId, String userId, String role) {}
 
@@ -176,7 +193,7 @@ public final class ApiModels {
       List<RootDto> roots) {}
 
   public record CreateProjectReq(
-      String code, String name, String description, String owner, String adminUserId, Boolean bootstrapSpec) {}
+      String code, String name, String description, String owner, String adminUserId, Boolean bootstrapSpec, List<String> engines) {}
 
   public record CreateTenantReq(String code, String name, String owner) {}
 

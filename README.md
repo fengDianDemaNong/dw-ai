@@ -2,15 +2,16 @@
 
 多租户数据 AI 平台。当前交付：**规范中心**、**建模中心**（以及登录 / 工作台 / 平台管理）。开发中心、沉淀优化、数据服务尚未上线。
 
-**0.1.2**：默认嵌入式 H2（也可 MySQL / PostgreSQL）；演示数据需手动灌入；安装包业务 jar 与依赖分离。功能说明（含截图）：[docs/user/产品手册.md](docs/user/产品手册.md)。安装与升级：[docs/user/使用说明.md](docs/user/使用说明.md)。
+**0.1.3**：默认嵌入式 H2（也可 MySQL / PostgreSQL）；演示数据需手动灌入；安装包业务 jar 与依赖分离。功能说明（含截图）：[docs/user/产品手册.md](docs/user/产品手册.md)。安装与升级：[docs/user/使用说明.md](docs/user/使用说明.md)。
 
 ## 文档与原型
 
-- 产品设计：[docs/product/](docs/product/) — 当前设计 **0.1.1**，底座发布 **0.1.2**
-- 技术方案：[docs/tech/](docs/tech/)（含 [0.1.2](docs/tech/03-0.1.2.md)）
+- 产品设计：[docs/product/](docs/product/) — 当前设计 **0.1.3**
+- 技术方案：[docs/tech/](docs/tech/)（含 [0.1.3](docs/tech/04-0.1.3.md)）
 
 ```bash
-npm run proto          # 产品原型 0.1.1 → http://127.0.0.1:4183/
+npm run proto          # 产品原型 0.1.3 → http://127.0.0.1:4203/
+npm run proto -- 0.1.1 # 0.1.1 → 4183
 npm run proto -- 0.1.0 # 冻结的仓建设原型 → 4173
 npm run dev            # 功能实现 → http://127.0.0.1:5173/
 ```
@@ -22,7 +23,7 @@ npm install
 # 终端 1
 cd services/api && mvn spring-boot:run
 # 终端 2：灌演示数据（须 API 已启动过一次建表）
-cd services/api && java -cp "target/dw-ai-api-0.1.2.jar:target/lib/*" com.dwai.platform.SeedMain
+cd services/api && java -cp "target/dw-ai-api-0.1.3.jar:target/lib/*" com.dwai.platform.SeedMain
 # 终端 3
 npm run dev:api
 ```
@@ -41,7 +42,7 @@ docker compose --profile postgres up -d
 安装包：
 
 ```bash
-./package.sh                 # release/dw-ai-0.1.2.tar.gz 与 dw-ai-0.1.2-app.tar.gz
+./package.sh                 # release/dw-ai-0.1.3.tar.gz 与 dw-ai-0.1.3-app.tar.gz
 # 解压后 ./bin/start.sh && ./bin/seed.sh → http://127.0.0.1:8080/
 ```
 

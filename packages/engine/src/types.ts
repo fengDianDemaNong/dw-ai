@@ -11,6 +11,9 @@ export type TenantStatus = 'active' | 'disabled';
 export type AccountStatus = 'active' | 'disabled';
 export type TenantOrgRole = 'admin' | 'member';
 export type ProductModule = 'warehouse' | 'serve' | 'quality' | 'materialize' | 'dev';
+export type AiCap = 'spec_design' | 'spec_ask' | 'model_design';
+export type AiPromptSlot = 'spec.system' | 'spec.ask.system' | 'model.system';
+export type EngineKind = 'hive' | 'spark' | 'clickhouse' | 'doris';
 
 export interface Tenant {
   id: string;
@@ -19,6 +22,8 @@ export interface Tenant {
   owner: string;
   status?: TenantStatus;
   modules?: ProductModule[];
+  /** 空 = 仓建设已开则三项全开 */
+  aiCaps?: AiCap[];
 }
 
 export interface Project {
@@ -30,6 +35,8 @@ export interface Project {
   owner: string;
   createdAt: string;
   status?: string;
+  /** 本项目开通的引擎知识库；空 = 未挂手册 */
+  engines?: EngineKind[];
 }
 
 export interface Domain {
@@ -394,6 +401,31 @@ export interface ProjectMember {
 export interface TenantLicense {
   tenantId: string;
   modules: ProductModule[];
+  aiCaps?: AiCap[];
+}
+
+export interface KnowledgeSection {
+  heading: string;
+  body: string;
+  sql?: string;
+  sqlCaption?: string;
+  note?: string;
+}
+
+/** 工作台导入的一篇手册，属于租户 + 引擎 */
+export interface TenantKnowledgeArticle {
+  id: string;
+  tenantId: string;
+  engine: EngineKind;
+  title: string;
+  summary: string;
+  body: string;
+  sourceUrl?: string;
+  sourceLabel?: string;
+  sections: KnowledgeSection[];
+  notes?: string[];
+  importedAt: string;
+  importedBy: string;
 }
 
 export interface AppState {
@@ -420,6 +452,7 @@ export interface AppState {
   /** 数据服务（新）：与旧 metrics 隔离 */
   serveFolders: ServeFolder[];
   serveMetrics: ServeMetric[];
+  knowledgeArticles?: TenantKnowledgeArticle[];
 }
 
 export type ServeScope = 'public' | 'business' | 'personal';

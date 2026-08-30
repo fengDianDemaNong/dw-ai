@@ -6,7 +6,9 @@
     >
       <template #actions>
         <a-button @click="router.push('/w/spec/io')">导入导出</a-button>
-        <a-button @click="router.push('/w/spec/copilot')">AI 设计分层</a-button>
+        <a-tooltip :title="hasSpecAi ? '' : '本组织未开通此项'">
+          <a-button :disabled="!hasSpecAi" @click="router.push('/w/spec/copilot')">AI 设计分层</a-button>
+        </a-tooltip>
         <a-button v-if="canWrite" type="primary" @click="openCreate">新增分层</a-button>
       </template>
     </PageHeader>
@@ -116,13 +118,14 @@ import {
   NULL_OPTIONS,
   nullLabel,
 } from '../../config/layerPolicies';
-import { addLayer, can, projectLayerRules, removeLayer, updateLayer } from '../../stores/app';
+import { addLayer, can, hasAiCap, projectLayerRules, removeLayer, updateLayer } from '../../stores/app';
 import type { LayerRule, MaskingPolicy, NullPolicy } from '../../types';
 
 const router = useRouter();
 const route = useRoute();
 const layers = projectLayerRules;
 const canWrite = computed(() => can('spec:write'));
+const hasSpecAi = computed(() => hasAiCap('spec_design') || hasAiCap('spec_ask'));
 const rows = computed(() => layers.value.map((r) => hydrateLayerRule(r)));
 const open = ref(false);
 const editingLayer = ref<string | null>(null);

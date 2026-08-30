@@ -15,9 +15,11 @@ import java.util.Date;
 @Component
 public class JwtIssuer {
   private final DwaiProperties props;
+  private final JwtSessionEpoch epoch;
 
-  public JwtIssuer(DwaiProperties props) {
+  public JwtIssuer(DwaiProperties props, JwtSessionEpoch epoch) {
     this.props = props;
+    this.epoch = epoch;
   }
 
   /** JWT 只认人，不把当前租户当 token 真源。 */
@@ -28,6 +30,7 @@ public class JwtIssuer {
         .claim("username", username)
         .claim("name", displayName)
         .claim("platform_admin", platformAdmin)
+        .claim(JwtSessionEpoch.CLAIM, epoch.id())
         .issueTime(Date.from(now))
         .expirationTime(Date.from(now.plusSeconds(props.getSecurity().getJwtTtlSeconds())))
         .build();

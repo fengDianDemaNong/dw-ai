@@ -3,7 +3,9 @@
     <PageHeader title="主题域" subtitle="按业务过程划分，不按部门划分。域之间通过标准维度关联。">
       <template #actions>
         <a-button @click="router.push('/w/spec/io')">导入导出</a-button>
-        <a-button @click="router.push('/w/spec/copilot')">AI 设计</a-button>
+        <a-tooltip :title="hasSpecAi ? '' : '本组织未开通此项'">
+          <a-button :disabled="!hasSpecAi" @click="router.push('/w/spec/copilot')">AI 设计</a-button>
+        </a-tooltip>
         <a-button v-if="canWrite" type="primary" @click="openCreate">新建主题域</a-button>
       </template>
     </PageHeader>
@@ -73,12 +75,13 @@ import { message } from 'ant-design-vue';
 import { useRouter } from 'vue-router';
 import PageHeader from '../../components/PageHeader.vue';
 import SpecReadonlyTip from '../../components/SpecReadonlyTip.vue';
-import { addDomain, can, projectDomains, removeDomain, updateDomain } from '../../stores/app';
+import { addDomain, can, hasAiCap, projectDomains, removeDomain, updateDomain } from '../../stores/app';
 import type { Domain } from '../../types';
 
 const router = useRouter();
 const domains = projectDomains;
 const canWrite = computed(() => can('spec:write'));
+const hasSpecAi = computed(() => hasAiCap('spec_design') || hasAiCap('spec_ask'));
 const open = ref(false);
 const editingId = ref<string | null>(null);
 const form = reactive({

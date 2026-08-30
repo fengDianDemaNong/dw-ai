@@ -27,6 +27,10 @@
           </a-space>
         </div>
         <p>{{ p.description || '暂无描述' }}</p>
+        <div class="engines">
+          <a-tag v-for="e in p.engines ?? []" :key="e">{{ engineLabel(e) }}</a-tag>
+          <span v-if="!(p.engines ?? []).length" class="muted inline">未开通知识库</span>
+        </div>
         <div class="meta">项目管理员 {{ ownerName(p.owner) }} · {{ p.createdAt }}</div>
         <div class="ops">
           <a-button v-if="!isDisabled(p)" type="primary" @click="go(p.id)">进入项目</a-button>
@@ -47,6 +51,10 @@
         <template v-if="column.key === 'owner'">{{ ownerName(record.owner) }}</template>
         <template v-else-if="column.key === 'status'">
           <a-tag :color="isDisabled(record) ? 'default' : 'green'">{{ isDisabled(record) ? '已停用' : '使用中' }}</a-tag>
+        </template>
+        <template v-else-if="column.key === 'engines'">
+          <a-tag v-for="e in record.engines ?? []" :key="e">{{ engineLabel(e) }}</a-tag>
+          <span v-if="!(record.engines ?? []).length" class="muted">—</span>
         </template>
         <template v-else-if="column.key === 'act'">
           <a-space>
@@ -86,6 +94,10 @@
               <a-radio value="active">启用</a-radio>
               <a-radio value="disabled">停用</a-radio>
             </a-radio-group>
+          </a-form-item>
+          <a-form-item label="知识库引擎">
+            <p class="lead">与工作台知识库页同一套勾选。</p>
+            <a-checkbox-group v-model:value="editForm.engines" :options="engineOpts" />
           </a-form-item>
         </div>
         <div class="drawer-sec">
@@ -135,6 +147,9 @@
           </a-checkbox>
           <div class="hint">空项目建议勾选，之后可在规范中心再改。不勾选则只有技术/时间词根。</div>
         </a-form-item>
+        <a-form-item label="知识库引擎">
+          <a-checkbox-group v-model:value="form.engines" :options="engineOpts" />
+        </a-form-item>
       </a-form>
     </a-modal>
   </div>
@@ -146,8 +161,9 @@ import { useRouter } from 'vue-router';
 import { message } from 'ant-design-vue';
 import { api, type OrgUser } from '../api/client';
 import PageHeader from '../components/PageHeader.vue';
+import { ENGINE_OPTIONS, engineLabel } from '../config/knowledge';
 import { isMultiTenant } from '../config/runtime';
-import type { Project } from '../types';
+import type { EngineKind, Project } from '../types';
 import {
   app,
   createProject,
@@ -174,6 +190,7 @@ const form = reactive({
   description: '',
   adminUserId: sessionAccount.value?.id ?? '',
   bootstrapSpec: true,
+  engines: [] as EngineKind[],
 });
 const editForm = reactive({
   name: '',
@@ -181,7 +198,9 @@ const editForm = reactive({
   description: '',
   adminUserId: '',
   status: 'active',
+  engines: [] as EngineKind[],
 });
+const engineOpts = ENGINE_OPTIONS.map((e) => ({ value: e.value, label: e.label }));
 const adminOpts = computed(() =>
   users.value
     .filter((u) => u.status === 'active')
@@ -194,6 +213,7 @@ const rowCols = [
   { title: '描述', dataIndex: 'description' },
   { title: '项目管理员', key: 'owner', width: 140 },
   { title: '状态', key: 'status', width: 90 },
+  { title: '知识库', key: 'engines', width: 200 },
   { title: '创建', dataIndex: 'createdAt', width: 120 },
   { title: '操作', key: 'act', width: 160 },
 ];
@@ -215,6 +235,7 @@ function openEdit(p: Project) {
   editForm.description = p.description || '';
   editForm.adminUserId = p.owner;
   editForm.status = isDisabled(p) ? 'disabled' : 'active';
+  editForm.engines = [...(p.engines ?? [])];
   editOpen.value = true;
 }
 
@@ -235,6 +256,7 @@ async function submitEdit() {
       description: editForm.description,
       owner: editForm.adminUserId,
       status: editForm.status,
+      engines: editForm.engines,
     });
     editOpen.value = false;
     message.success('已保存');
@@ -292,6 +314,7 @@ async function create() {
       owner: form.adminUserId,
       adminUserId: form.adminUserId,
       bootstrapSpec: form.bootstrapSpec,
+      engines: form.engines,
     });
     if (!p) return;
     open.value = false;
@@ -299,6 +322,7 @@ async function create() {
     form.name = '';
     form.description = '';
     form.bootstrapSpec = true;
+    form.engines = [];
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));
   } finally {
@@ -353,6 +377,14 @@ onMounted(async () => {
 
 .off {
   opacity: 0.72;
+}
+
+.engines {
+  margin: 0 0 8px;
+}
+
+.inline {
+  font-size: 12px;
 }
 
 .meta,

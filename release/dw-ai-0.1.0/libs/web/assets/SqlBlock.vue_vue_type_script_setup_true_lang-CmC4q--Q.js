@@ -1,0 +1,1 @@
+import{d as s,c as o,b9 as a,p as r,t as n,l as c}from"./index-Cm9EC4Dg.js";const l={class:"sql"},d=s({__name:"SqlBlock",props:{text:{}},setup(e){return(t,p)=>(c(),o("pre",l,[a(t.$slots,"default"),r(n(e.text),1)]))}});export{d as _};

@@ -15,6 +15,7 @@ import com.dwai.platform.meta.mapper.ProjectMemberMapper;
 import com.dwai.platform.meta.mapper.TenantLicenseMapper;
 import com.dwai.platform.meta.mapper.TenantMapper;
 import com.dwai.platform.meta.mapper.UserMapper;
+import com.dwai.platform.meta.support.AiCaps;
 import com.dwai.platform.meta.support.Jsons;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -115,7 +116,7 @@ public class ProjectService {
         auth.myTenants(),
         list.stream().map(this::toProject).toList(),
         memberDtos,
-        List.of(new ApiModels.LicenseDto(me.tenantId(), modules)));
+        List.of(new ApiModels.LicenseDto(me.tenantId(), modules, access.effectiveAiCaps(me.userId(), me.tenantId()))));
   }
 
   public List<ApiModels.TenantDto> listTenants() {
@@ -146,6 +147,7 @@ public class ProjectService {
     TenantLicenseEntity lic = new TenantLicenseEntity();
     lic.setTenantId(t.getId());
     lic.setModules(Jsons.toJson(List.of("warehouse", "serve", "quality", "materialize", "dev")));
+    lic.setAiCaps(Jsons.toJson(AiCaps.ALL));
     licenses.insert(lic);
     return auth.toTenant(t);
   }
@@ -195,6 +197,7 @@ public class ProjectService {
     p.setOwner(adminId);
     p.setCreatedAt(LocalDate.now());
     p.setStatus("active");
+    p.setEngines(Jsons.toJson(AiCaps.normalizeEngines(req.engines())));
     projects.insert(p);
     upsertMember(p.getId(), adminId, "admin");
     if (Boolean.TRUE.equals(req.bootstrapSpec())) {
@@ -232,6 +235,9 @@ public class ProjectService {
           throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "非法状态");
         }
         p.setStatus(st);
+      }
+      if (req.engines() != null) {
+        p.setEngines(Jsons.toJson(AiCaps.normalizeEngines(req.engines())));
       }
       projects.updateById(p);
     }
@@ -355,7 +361,8 @@ public class ProjectService {
     return new ApiModels.ProjectDto(
         p.getId(), p.getTenantId(), p.getCode(), p.getName(), p.getDescription(), p.getOwner(),
         p.getCreatedAt() == null ? null : p.getCreatedAt().toString(),
-        p.getStatus() == null || p.getStatus().isBlank() ? "active" : p.getStatus());
+        p.getStatus() == null || p.getStatus().isBlank() ? "active" : p.getStatus(),
+        Jsons.strings(p.getEngines()));
   }
 
   private ApiModels.MemberDto toMember(ProjectMemberEntity m) {
@@ -364,6 +371,6 @@ public class ProjectService {
 
   private ApiModels.LicenseDto toLicense(TenantLicenseEntity lic, String tenantId) {
     List<String> modules = lic == null ? List.of("warehouse") : Jsons.strings(lic.getModules());
-    return new ApiModels.LicenseDto(tenantId, modules);
+    return new ApiModels.LicenseDto(tenantId, modules, access.licensedAiCaps(tenantId));
   }
 }

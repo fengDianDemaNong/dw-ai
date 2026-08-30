@@ -25,6 +25,7 @@ import com.dwai.platform.meta.mapper.TenantLlmMapper;
 import com.dwai.platform.meta.mapper.TenantMapper;
 import com.dwai.platform.meta.mapper.UserMapper;
 import com.dwai.platform.meta.mapper.UserTenantMapper;
+import com.dwai.platform.meta.support.AiCaps;
 import com.dwai.platform.meta.support.Jsons;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -287,7 +288,8 @@ public class TenantAdminService {
         req == null ? null : req.description(),
         owner,
         owner,
-        req == null ? null : req.bootstrapSpec()));
+        req == null ? null : req.bootstrapSpec(),
+        req == null ? null : req.engines()));
   }
 
   @Transactional
@@ -411,6 +413,7 @@ public class TenantAdminService {
     g.setCreatedAt(OffsetDateTime.now());
     applyGrantExpiry(g, req);
     g.setModules(Jsons.toJson(normalizeGrantModules(req == null ? null : req.modules())));
+    g.setAiCaps(Jsons.toJson(AiCaps.normalize(req == null ? null : req.aiCaps())));
     applyGrantProjects(g, tenantId, req);
     grants.insert(g);
     return toGrant(g);
@@ -437,6 +440,9 @@ public class TenantAdminService {
     }
     if (req != null && req.modules() != null) {
       g.setModules(Jsons.toJson(normalizeGrantModules(req.modules())));
+    }
+    if (req != null && req.aiCaps() != null) {
+      g.setAiCaps(Jsons.toJson(AiCaps.normalize(req.aiCaps())));
     }
     if (req != null && (req.projectIds() != null || req.projectScopes() != null || req.defaultRole() != null)) {
       applyGrantProjects(g, tenantId, req);
@@ -537,7 +543,8 @@ public class TenantAdminService {
         Jsons.strings(g.getModules()),
         pids,
         scopes,
-        grantRoleOf(roles, "*"));
+        grantRoleOf(roles, "*"),
+        Jsons.strings(g.getAiCaps()));
   }
 
   private static String grantRoleOf(java.util.Map<String, String> roles, String key) {
@@ -692,7 +699,8 @@ public class TenantAdminService {
     return new ApiModels.ProjectDto(
         p.getId(), p.getTenantId(), p.getCode(), p.getName(), p.getDescription(), p.getOwner(),
         p.getCreatedAt() == null ? null : p.getCreatedAt().toString(),
-        nz(p.getStatus(), "active"));
+        nz(p.getStatus(), "active"),
+        Jsons.strings(p.getEngines()));
   }
 
   private static String randomCode() {

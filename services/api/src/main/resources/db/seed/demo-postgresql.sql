@@ -151,5 +151,5 @@ INSERT INTO appearance_prefs (scope, tenant_id, theme, menu_pos) VALUES
   ('tenant', 't-xinghe', 'cyan', 'left'),
   ('tenant', 't-qihang', 'cyan', 'left');
 
-INSERT INTO tenant_grants (id, tenant_id, code, kind, expires_at, created_by, modules, project_ids) VALUES
-  ('g-xinghe-demo', 't-xinghe', 'XINGHE-DEMO', 'permanent', NULL, '张三', '[]', '[]');
+INSERT INTO tenant_grants (id, tenant_id, code, kind, expires_at, created_by, modules, project_ids, project_roles) VALUES
+  ('g-xinghe-demo', 't-xinghe', 'XINGHE-DEMO', 'permanent', NULL, '张三', '[]', '[]', '{}');

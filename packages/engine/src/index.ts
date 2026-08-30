@@ -11,3 +11,6 @@ export * from './specChat';
 export * from './specIo';
 export * from './modelVersion';
 export * from './modelChat';
+export * from './aiPrompts';
+export * from './knowledge';
+export * from './knowledgeIo';

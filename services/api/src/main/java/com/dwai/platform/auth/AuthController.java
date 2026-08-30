@@ -17,10 +17,12 @@ import java.util.Map;
 public class AuthController {
   private final AuthService auth;
   private final DwaiProperties props;
+  private final JwtSessionEpoch epoch;
 
-  public AuthController(AuthService auth, DwaiProperties props) {
+  public AuthController(AuthService auth, DwaiProperties props, JwtSessionEpoch epoch) {
     this.auth = auth;
     this.props = props;
+    this.epoch = epoch;
   }
 
   @GetMapping("/config")
@@ -33,6 +35,7 @@ public class AuthController {
     out.put("allowLogin", true);
     out.put("allowDevLogin", sec.isAllowDevLogin() && !sec.isOidc());
     out.put("casdoorConfigured", cas.configured());
+    out.put("sessionEpoch", epoch.id());
     if (cas.configured()) {
       out.put("casdoor", Map.of(
           "issuer", cas.getIssuer(),

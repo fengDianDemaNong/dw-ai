@@ -10,17 +10,20 @@
     <nav class="groups">
       <div v-for="(group, i) in groups" :key="i" class="group">
         <div v-if="group.title && !collapsed" class="gtitle">{{ group.title }}</div>
-        <router-link
+        <a-tooltip
           v-for="item in group.items"
           :key="item.path"
-          :to="item.path"
-          class="item"
-          :class="{ active: active === item.path }"
-          :title="collapsed ? item.label : undefined"
+          :title="item.disabled ? item.disabledReason : collapsed ? item.label : ''"
         >
-          <component :is="icons[item.icon]" class="ico" />
-          <span v-if="!collapsed">{{ item.label }}</span>
-        </router-link>
+          <span v-if="item.disabled" class="item off">
+            <component :is="icons[item.icon]" class="ico" />
+            <span v-if="!collapsed">{{ item.label }}</span>
+          </span>
+          <router-link v-else :to="item.path" class="item" :class="{ active: active === item.path }">
+            <component :is="icons[item.icon]" class="ico" />
+            <span v-if="!collapsed">{{ item.label }}</span>
+          </router-link>
+        </a-tooltip>
       </div>
     </nav>
     <button type="button" class="fold" :title="collapsed ? '展开菜单' : '收起菜单'" @click="toggle">
@@ -43,16 +46,16 @@
         </span>
         <template #overlay>
           <div class="sub">
-            <router-link
-              v-for="item in group.items"
-              :key="item.path"
-              :to="item.path"
-              class="item"
-              :class="{ active: active === item.path }"
-            >
-              <component :is="icons[item.icon]" class="ico" />
-              <span>{{ item.label }}</span>
-            </router-link>
+            <a-tooltip v-for="item in group.items" :key="item.path" :title="item.disabled ? item.disabledReason : ''">
+              <span v-if="item.disabled" class="item off">
+                <component :is="icons[item.icon]" class="ico" />
+                <span>{{ item.label }}</span>
+              </span>
+              <router-link v-else :to="item.path" class="item" :class="{ active: active === item.path }">
+                <component :is="icons[item.icon]" class="ico" />
+                <span>{{ item.label }}</span>
+              </router-link>
+            </a-tooltip>
           </div>
         </template>
       </a-dropdown>
@@ -228,6 +231,11 @@ function groupActive(group: NavGroup) {
 .item.active {
   background: rgba(34, 211, 238, 0.12);
   color: #67e8f9;
+}
+
+.item.off {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .ico {
