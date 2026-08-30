@@ -1,0 +1,15 @@
+node_modules
+dist
+.DS_Store
+*.local
+.env
+.env.local
+target/
+.idea/
+*.iml
+data/
+services/api/data/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/

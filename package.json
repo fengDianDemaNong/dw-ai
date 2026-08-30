@@ -1,0 +1,17 @@
+{
+  "name": "dw-ai",
+  "private": true,
+  "version": "0.1.2",
+  "type": "module",
+  "workspaces": ["ui", "packages/engine", "services/rules"],
+  "scripts": {
+    "dev": "npm run dev -w @dw-ai/ui",
+    "dev:api": "npm run dev:api -w @dw-ai/ui",
+    "dev:rules": "npm run dev -w @dw-ai/rules",
+    "proto": "node docs/product/run-proto.mjs",
+    "product:new": "bash docs/product/new-version.sh",
+    "build": "npm run build -w @dw-ai/ui",
+    "preview": "npm run preview -w @dw-ai/ui",
+    "package": "bash package.sh"
+  }
+}

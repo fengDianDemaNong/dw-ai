@@ -1,0 +1,84 @@
+<template>
+  <div class="shell" :class="menuPos">
+    <AppNav :groups="groups" home="/w" :menu-pos="menuPos" />
+    <div class="main">
+      <header class="bar">
+        <a v-if="isRealTenantAdmin" class="home" @click="back">{{ tenant?.name }}</a>
+        <span v-else class="tenant-name">{{ tenant?.name }}</span>
+        <ProjectSwitcher />
+      </header>
+      <div class="content">
+        <router-view />
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue';
+import { useRouter } from 'vue-router';
+import AppNav from '../components/AppNav.vue';
+import ProjectSwitcher from '../components/ProjectSwitcher.vue';
+import { buildNavGroups } from '../config/nav';
+import { SYS_HOME } from '../config/paths';
+import { currentTenant, isRealTenantAdmin, leaveProject, projectLayerRules } from '../stores/app';
+import { appearanceOf } from '../stores/prefs';
+
+const router = useRouter();
+const tenant = currentTenant;
+const groups = computed(() => buildNavGroups(projectLayerRules.value));
+const menuPos = computed(() => appearanceOf('tenant', tenant.value?.id).menuPos);
+
+function back() {
+  leaveProject();
+  router.push(SYS_HOME);
+}
+</script>
+
+<style scoped>
+.shell {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.shell.top {
+  flex-direction: column;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.bar {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+}
+
+.home {
+  font-size: 13px;
+  color: var(--primary);
+  cursor: pointer;
+}
+
+.tenant-name {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+</style>
