@@ -16,6 +16,8 @@ public class TableColumnEntity {
   private String grade;
   @TableField(typeHandler = JsonbStringTypeHandler.class)
   private String enumValues;
+  @TableField(typeHandler = JsonbStringTypeHandler.class)
+  private String logic;
   private Integer pos;
 
   public String getTableId() { return tableId; }
@@ -36,6 +38,8 @@ public class TableColumnEntity {
   public void setGrade(String grade) { this.grade = grade; }
   public String getEnumValues() { return enumValues; }
   public void setEnumValues(String enumValues) { this.enumValues = enumValues; }
+  public String getLogic() { return logic; }
+  public void setLogic(String logic) { this.logic = logic; }
   public Integer getPos() { return pos; }
   public void setPos(Integer pos) { this.pos = pos; }
 }

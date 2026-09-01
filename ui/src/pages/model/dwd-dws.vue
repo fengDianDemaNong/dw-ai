@@ -1,15 +1,21 @@
 <template>
   <div class="page">
-    <PageHeader title="DWD → DWS 智能汇总" subtitle="面向维度+度量组合的星型模型。生成时套用本层命名、脱敏与空值规范，规范错误禁止发布。">
+    <PageHeader title="DWD → DWS 智能汇总" subtitle="可选多张 DWD。度量按来源列聚合，逻辑 SQL 由字段加工生成。规范错误禁止发布。">
       <template #actions>
         <a-button @click="router.push(layerHref('DWS'))">查看 DWS 总览</a-button>
-        <a-button v-if="canWrite" type="primary" :disabled="!sourceId" @click="run">AI 设计汇总表</a-button>
+        <a-button v-if="canWrite" type="primary" :disabled="!sourceIds.length" @click="run">生成汇总草案</a-button>
       </template>
     </PageHeader>
 
     <div class="filter-bar">
       <span>源 DWD</span>
-      <a-select v-model:value="sourceId" style="width: 320px" :options="sourceOptions" />
+      <a-select
+        v-model:value="sourceIds"
+        mode="multiple"
+        style="width: 420px"
+        :options="sourceOptions"
+        placeholder="可多选，如订单明细 + 退款明细"
+      />
       <span>维度</span>
       <a-select
         v-model:value="dims"
@@ -27,11 +33,15 @@
 
     <div v-if="draft" class="grid">
       <div class="card">
-        <DdlPreview :spec="ddlSpec" title="生成 DDL" />
+        <DdlPreview :spec="ddlSpec" :dml-sql="draft.etlSql" title="逻辑 SQL" />
       </div>
       <div class="card">
-        <h3>预聚合 SQL</h3>
-        <SqlBlock :text="draft.etlSql" />
+        <h3>字段加工</h3>
+        <ul class="logic">
+          <li v-for="t in draft.fieldTags" :key="t.suggestedName">
+            <b>{{ t.suggestedName }}</b> {{ t.logic?.desc || t.meaning }}
+          </li>
+        </ul>
         <div class="card inner">
           <h3>规范校验</h3>
           <div v-for="(iss, i) in draft.specIssues" :key="i">
@@ -46,6 +56,7 @@
             <div><a-checkbox value="grain">汇总粒度合适，不是一张大宽表</a-checkbox></div>
             <div><a-checkbox value="dims">维度不含需禁止下沉的 PII</a-checkbox></div>
             <div><a-checkbox value="naming">命名与本层规范一致</a-checkbox></div>
+            <div><a-checkbox value="logic">字段口径读得懂，多源关联正确</a-checkbox></div>
           </a-checkbox-group>
         </div>
         <div class="btns" v-if="draft.status === 'pending_review' && (canWrite || canPublishPerm)">
@@ -70,7 +81,6 @@ import { useRouter } from 'vue-router';
 import { specFromModelingDraft } from '@dw-ai/engine';
 import PageHeader from '../../components/PageHeader.vue';
 import DdlPreview from '../../components/DdlPreview.vue';
-import SqlBlock from '../../components/SqlBlock.vue';
 import { hydrateLayerRule, maskingLabel, nullLabel } from '../../config/layerPolicies';
 import { layerHref } from '../../config/layers';
 import { approveDraft, can, projectDrafts, projectLayerRules, projectTables, rejectDraft, runDwdToDws } from '../../stores/app';
@@ -92,18 +102,21 @@ const sourceOptions = computed(() =>
     label: t.status === 'deprecated' ? `${t.name}（已下线）` : t.name,
   }))
 );
-const sourceId = ref(dwd.value.find((t) => t.status !== 'deprecated')?.id);
-const source = computed(() => projectTables.value.find((t) => t.id === sourceId.value));
-const dimOptions = computed(() =>
-  (source.value?.columns ?? [])
-    .filter((c) => !/amt|cnt|qty|gmv/.test(c.name))
-    .map((c) => ({ value: c.name, label: `${c.name} ${c.comment}` }))
-);
-const dims = ref<string[]>(
-  (source.value?.columns ?? [])
-    .filter((c) => ['dt', 'user_type', 'item_category'].includes(c.name))
-    .map((c) => c.name)
-);
+const sourceIds = ref<string[]>(dwd.value.find((t) => t.status !== 'deprecated') ? [dwd.value.find((t) => t.status !== 'deprecated')!.id] : []);
+const sources = computed(() => dwd.value.filter((t) => sourceIds.value.includes(t.id)));
+const dimOptions = computed(() => {
+  const seen = new Set<string>();
+  const opts: { value: string; label: string }[] = [];
+  for (const t of sources.value) {
+    for (const c of t.columns) {
+      if (/amt|cnt|qty|gmv/.test(c.name) || seen.has(c.name)) continue;
+      seen.add(c.name);
+      opts.push({ value: c.name, label: `${c.name} ${c.comment}` });
+    }
+  }
+  return opts;
+});
+const dims = ref<string[]>(['dt', 'user_type', 'item_category']);
 const draftId = ref<string>();
 const checks = ref<string[]>([]);
 const draft = computed(
@@ -114,7 +127,7 @@ const policy = computed(() => {
   return r ? hydrateLayerRule(r) : undefined;
 });
 const canPublish = computed(() => {
-  if (checks.value.length < 3) return false;
+  if (checks.value.length < 4) return false;
   return !(draft.value?.specIssues ?? []).some((i) => i.level === 'error');
 });
 const ddlSpec = computed(() => (draft.value ? specFromModelingDraft(draft.value) : null));
@@ -126,8 +139,8 @@ const qCols = [
 ];
 
 function run() {
-  if (!sourceId.value) return;
-  const d = runDwdToDws(sourceId.value, dims.value);
+  if (!sourceIds.value.length) return;
+  const d = runDwdToDws(sourceIds.value, dims.value);
   draftId.value = d?.id;
   checks.value = [];
 }
@@ -142,4 +155,5 @@ h3 { margin: 0 0 10px; font-size: 14px; }
 .hint { margin: 0 0 8px; }
 .inner { margin-top: 12px; padding: 10px 12px; background: #f8fafc; border: 1px dashed var(--line); }
 .muted { color: #64748b; font-size: 12px; }
+.logic { margin: 0 0 12px; padding-left: 18px; font-size: 13px; }
 </style>

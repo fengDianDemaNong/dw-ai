@@ -85,9 +85,12 @@ public class TableService {
     e.setPeriod(in.period());
     e.setPartitionCol(in.partition());
     e.setStoredAs(in.storedAs());
-    e.setStatus(in.status() == null ? "draft" : in.status());
+    e.setStatus(in.status() == null || in.status().isBlank() ? "draft" : in.status());
     e.setCreatedFrom(in.createdFrom());
     e.setGrade(in.grade());
+    e.setSources(Jsons.toJson(in.sources() == null ? List.of() : in.sources()));
+    e.setJoins(Jsons.toJson(in.joins() == null ? List.of() : in.joins()));
+    e.setFilter(in.filter());
     if (exist == null) tables.insert(e); else tables.updateById(e);
     columns.delete(Wrappers.<TableColumnEntity>lambdaQuery().eq(TableColumnEntity::getTableId, e.getId()));
     List<ApiModels.ColumnDto> cols = in.columns() == null ? List.of() : in.columns();
@@ -103,12 +106,25 @@ public class TableService {
       col.setSensitive(c.sensitive());
       col.setGrade(c.grade());
       col.setEnumValues(c.enumValues() == null ? null : Jsons.toJson(c.enumValues()));
+      col.setLogic(c.logic() == null ? null : Jsons.toJson(c.logic()));
       col.setPos(pos++);
       columns.insert(col);
     }
-    ApiModels.TableDto saved = toTable(e);
-    versions.recordIfChanged(projectId, saved, versionNote);
-    return saved;
+    return toTable(e);
+  }
+
+  @Transactional
+  public ApiModels.TableDto publishTable(String projectId, String tableId, String note) {
+    access.requireMember(projectId, "model:publish");
+    WarehouseTableEntity t = tables.selectById(tableId);
+    if (t == null || !projectId.equals(t.getProjectId())) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "表不存在");
+    }
+    t.setStatus("published");
+    tables.updateById(t);
+    ApiModels.TableDto saved = toTable(t);
+    versions.recordIfChanged(projectId, saved, note == null || note.isBlank() ? "发布" : note);
+    return toTable(t);
   }
 
   @Transactional
@@ -176,12 +192,13 @@ public class TableService {
     for (TableColumnEntity c : cols) {
       out.add(new ApiModels.ColumnDto(
           c.getName(), c.getType(), c.getComment(), c.getNullable(), c.getDefaultValue(),
-          c.getSensitive(), c.getGrade(), Jsons.strings(c.getEnumValues())));
+          c.getSensitive(), c.getGrade(), Jsons.strings(c.getEnumValues()), Jsons.map(c.getLogic())));
     }
     return new ApiModels.TableDto(
         t.getId(), t.getProjectId(), t.getLayer(), t.getName(), t.getComment(), t.getDomain(),
         t.getSourceSystem(), t.getGrain(), t.getPeriod(), out, t.getPartitionCol(), t.getStoredAs(),
-        t.getStatus(), t.getCreatedFrom(), t.getGrade());
+        t.getStatus(), t.getCreatedFrom(), t.getGrade(),
+        Jsons.maps(t.getSources()), Jsons.maps(t.getJoins()), t.getFilter());
   }
 
   @SuppressWarnings("unchecked")

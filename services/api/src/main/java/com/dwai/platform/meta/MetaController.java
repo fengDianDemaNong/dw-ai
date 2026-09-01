@@ -218,7 +218,14 @@ public class MetaController {
     return tables.saveTable(projectId, new ApiModels.TableDto(
         tableId, projectId, body.layer(), body.name(), body.comment(), body.domain(),
         body.sourceSystem(), body.grain(), body.period(), body.columns(), body.partition(),
-        body.storedAs(), body.status(), body.createdFrom(), body.grade()));
+        body.storedAs(), body.status(), body.createdFrom(), body.grade(),
+        body.sources(), body.joins(), body.filter()));
+  }
+
+  @PostMapping("/projects/{projectId}/tables/{tableId}/publish")
+  public ApiModels.TableDto publishTable(
+      @PathVariable String projectId, @PathVariable String tableId, @RequestBody(required = false) ApiModels.PublishReq body) {
+    return tables.publishTable(projectId, tableId, body == null ? null : body.note());
   }
 
   @DeleteMapping("/projects/{projectId}/tables/{tableId}")

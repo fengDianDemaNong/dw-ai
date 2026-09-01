@@ -31,6 +31,7 @@ const projectChildren: RouteRecordRaw[] = [
   { path: 'spec/layers', name: 'layers', component: () => import('../pages/spec/layers.vue'), meta: { title: '分层规范', module: 'warehouse', perm: 'spec:read' } },
   { path: 'spec/grades', name: 'grades', component: () => import('../pages/spec/grades.vue'), meta: { title: '数据等级', module: 'warehouse', perm: 'spec:read' } },
   { path: 'spec/roots', name: 'roots', component: () => import('../pages/spec/roots.vue'), meta: { title: '词根库', module: 'warehouse', perm: 'spec:read' } },
+  { path: 'spec/logic', name: 'spec-logic', component: () => import('../pages/spec/logic.vue'), meta: { title: '加工类型', module: 'warehouse', perm: 'spec:read' } },
   { path: 'spec/io', name: 'spec-io', component: () => import('../pages/spec/io.vue'), meta: { title: '导入导出', module: 'warehouse', perm: 'spec:read' } },
   { path: 'model/validate', name: 'validate', component: () => import('../pages/model/validate.vue'), meta: { title: '规范校验', module: 'warehouse', perm: 'model:read' } },
   { path: 'model/ods-dwd', name: 'ods-dwd', component: () => import('../pages/model/ods-dwd.vue'), meta: { title: '从 ODS 生成', module: 'warehouse', perm: 'model:read' } },

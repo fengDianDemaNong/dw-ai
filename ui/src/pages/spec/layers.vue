@@ -5,6 +5,7 @@
       subtitle="每一层的字段格式、脱敏、空值处理都在这里设定。建模中心按这些规则加工。"
     >
       <template #actions>
+        <a-button @click="router.push('/w/spec/logic')">五种加工类型</a-button>
         <a-button @click="router.push('/w/spec/io')">导入导出</a-button>
         <a-tooltip :title="hasSpecAi ? '' : '本组织未开通此项'">
           <a-button :disabled="!hasSpecAi" @click="router.push('/w/spec/copilot')">AI 设计分层</a-button>

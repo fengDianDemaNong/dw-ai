@@ -116,7 +116,8 @@ public class TableVersionService {
           str(c.get("defaultValue")),
           c.get("sensitive") instanceof Boolean s ? s : null,
           str(c.get("grade")),
-          c.get("enumValues") instanceof List<?> ev ? ev.stream().map(String::valueOf).toList() : List.of()));
+          c.get("enumValues") instanceof List<?> ev ? ev.stream().map(String::valueOf).toList() : List.of(),
+          c.get("logic") instanceof Map<?, ?> lg ? castMap(lg) : null));
     }
     ApiModels.TableDto body = new ApiModels.TableDto(
         tableId,
@@ -131,11 +132,13 @@ public class TableVersionService {
         columns,
         str(snap.get("partition")),
         cur.storedAs(),
-        str(snap.getOrDefault("status", cur.status())),
-        cur.createdFrom(),
-        str(snap.get("grade")));
-    ApiModels.TableDto saved = tableService.saveTable(projectId, body, "从 v" + e.getVersion() + " 恢复");
-    return saved;
+        "draft",
+        str(snap.getOrDefault("createdFrom", cur.createdFrom())),
+        str(snap.get("grade")),
+        mapsOf(snap.get("sources")),
+        mapsOf(snap.get("joins")),
+        str(snap.get("filter")));
+    return tableService.saveTable(projectId, body);
   }
 
   @Transactional
@@ -168,6 +171,7 @@ public class TableVersionService {
     long n = versions.selectCount(Wrappers.<TableVersionEntity>lambdaQuery().eq(TableVersionEntity::getTableId, tableId));
     if (n > 0) return;
     ApiModels.TableDto t = tableService.getTable(projectId, tableId);
+    if (t == null || !"published".equals(t.status())) return;
     recordIfChanged(projectId, t, "初始版本");
   }
 
@@ -193,6 +197,10 @@ public class TableVersionService {
     m.put("partition", t.partition() == null ? "" : t.partition());
     m.put("status", t.status());
     m.put("grade", t.grade() == null ? "" : t.grade());
+    m.put("createdFrom", t.createdFrom() == null ? "" : t.createdFrom());
+    m.put("sources", t.sources() == null ? List.of() : t.sources());
+    m.put("joins", t.joins() == null ? List.of() : t.joins());
+    m.put("filter", t.filter() == null ? "" : t.filter());
     List<Map<String, Object>> cols = new ArrayList<>();
     if (t.columns() != null) {
       for (ApiModels.ColumnDto c : t.columns()) {
@@ -205,6 +213,7 @@ public class TableVersionService {
         col.put("sensitive", Boolean.TRUE.equals(c.sensitive()));
         col.put("grade", c.grade() == null ? "" : c.grade());
         col.put("enumValues", c.enumValues() == null ? List.of() : c.enumValues());
+        col.put("logic", c.logic());
         cols.add(col);
       }
     }
@@ -242,5 +251,18 @@ public class TableVersionService {
 
   private static String str(Object v) {
     return v == null ? null : String.valueOf(v);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static List<Map<String, Object>> mapsOf(Object v) {
+    if (v instanceof List<?> list) {
+      return list.stream().filter(x -> x instanceof Map<?, ?>).map(x -> (Map<String, Object>) x).toList();
+    }
+    return List.of();
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Map<String, Object> castMap(Map<?, ?> raw) {
+    return (Map<String, Object>) raw;
   }
 }

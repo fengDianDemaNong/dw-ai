@@ -55,6 +55,7 @@ export const navGroups: NavGroup[] = [
       { path: '/w/spec/layers', label: '分层规范', icon: 'DatabaseOutlined' },
       { path: '/w/spec/grades', label: '数据等级', icon: 'TagOutlined' },
       { path: '/w/spec/roots', label: '词根库', icon: 'BookOutlined' },
+      { path: '/w/spec/logic', label: '加工类型', icon: 'ClusterOutlined' },
       { path: '/w/spec/io', label: '导入导出', icon: 'SwapOutlined' },
     ],
   },

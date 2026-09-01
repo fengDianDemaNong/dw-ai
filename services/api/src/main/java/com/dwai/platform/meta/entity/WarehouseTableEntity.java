@@ -1,10 +1,12 @@
 package com.dwai.platform.meta.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.dwai.platform.meta.support.JsonbStringTypeHandler;
 
-@TableName("warehouse_tables")
+@TableName(value = "warehouse_tables", autoResultMap = true)
 public class WarehouseTableEntity {
   @TableId(type = IdType.INPUT)
   private String id;
@@ -22,6 +24,12 @@ public class WarehouseTableEntity {
   private String createdFrom;
   private String grade;
   private Integer currentVersion;
+  @TableField(typeHandler = JsonbStringTypeHandler.class)
+  private String sources;
+  @TableField(typeHandler = JsonbStringTypeHandler.class)
+  private String joins;
+  @TableField("filter_expr")
+  private String filter;
 
   public String getId() { return id; }
   public void setId(String id) { this.id = id; }
@@ -53,4 +61,10 @@ public class WarehouseTableEntity {
   public void setGrade(String grade) { this.grade = grade; }
   public Integer getCurrentVersion() { return currentVersion; }
   public void setCurrentVersion(Integer currentVersion) { this.currentVersion = currentVersion; }
+  public String getSources() { return sources; }
+  public void setSources(String sources) { this.sources = sources; }
+  public String getJoins() { return joins; }
+  public void setJoins(String joins) { this.joins = joins; }
+  public String getFilter() { return filter; }
+  public void setFilter(String filter) { this.filter = filter; }
 }

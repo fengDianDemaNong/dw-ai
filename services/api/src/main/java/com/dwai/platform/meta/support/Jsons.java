@@ -12,6 +12,7 @@ public final class Jsons {
   private static final TypeReference<List<String>> STR_LIST = new TypeReference<>() {};
   private static final TypeReference<List<Map<String, Object>>> MAP_LIST = new TypeReference<>() {};
   private static final TypeReference<Map<String, String>> STR_MAP = new TypeReference<>() {};
+  private static final TypeReference<Map<String, Object>> OBJ_MAP = new TypeReference<>() {};
 
   private Jsons() {}
 
@@ -35,6 +36,12 @@ public final class Jsons {
     if (n == null || !n.isObject()) return Map.of();
     Map<String, String> m = M.convertValue(n, STR_MAP);
     return m == null ? Map.of() : m;
+  }
+
+  public static Map<String, Object> map(String raw) {
+    JsonNode n = tree(raw);
+    if (n == null || !n.isObject()) return null;
+    return M.convertValue(n, OBJ_MAP);
   }
 
   public static List<Map<String, Object>> maps(String raw) {

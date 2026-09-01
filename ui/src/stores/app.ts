@@ -18,6 +18,7 @@ import type {
   Tenant,
   TenantKnowledgeArticle,
   TenantLicense,
+  TableSnapshot,
   WarehouseTable,
   WordRoot,
   AiCap,
@@ -44,6 +45,7 @@ import {
 } from '../engine/modeling';
 import { clusterLogs, scoreCluster } from '../engine/materialize';
 import { checkDuplicate } from '../engine/metrics';
+import { assessImpact, tableDependentsOf } from '@dw-ai/engine';
 import { buildSpecPack, type SpecPack } from '../engine/specIo';
 import { api, authToken, setAuthToken, useRemoteApi, type KnowledgeArticleDto, type Session, type Snapshot } from '../api/client';
 import { isMultiTenant } from '../config/runtime';
@@ -474,6 +476,7 @@ export const isRealTenantAdmin = computed(() => state.tenantRole === 'admin');
 export const isTenantAdmin = computed(() => state.tenantRole === 'admin');
 export const canWriteSpec = computed(() => can('spec:write'));
 export const canWriteModel = computed(() => can('model:write'));
+export const canPublishModel = computed(() => can('model:publish'));
 
 export function resolveTenantHome(): string {
   if (state.platformAdmin && !state.currentTenantId) return '/admin';
@@ -1159,7 +1162,7 @@ export async function applyModelProposal(
   let n = 0;
   for (const d of drafts) {
     if (d.mode === 'update' && d.tableId) {
-      if (updateTable(d.tableId, { ...d, status: 'published', columns: d.columns })) n++;
+      if (updateTable(d.tableId, { ...d, status: 'draft', columns: d.columns })) n++;
     } else if (addTable({ ...d, status: 'draft', columns: d.columns })) n++;
   }
   return n;
@@ -1172,7 +1175,7 @@ export async function restoreTableVersion(tableId: string, versionId: string) {
     const i = state.tables.findIndex((x) => x.id === t.id);
     if (i >= 0) state.tables[i] = t;
     else state.tables.push(t);
-    message.success('已恢复并记为新版本');
+    message.success('已写回为草稿，发布后才会生成新版本');
     return;
   }
   message.info('本地演示请连接 API 后使用版本恢复');
@@ -1209,13 +1212,14 @@ export function addTable(input: Omit<WarehouseTable, 'id' | 'projectId'>): Wareh
   }
   const t: WarehouseTable = {
     ...input,
+    status: 'draft',
     id: `tbl-${Date.now()}`,
     projectId: state.currentProjectId,
     columns: input.columns.map((c) => ({ ...c })),
   };
   state.tables.push(t);
   persist('tables');
-  message.success(`${t.name} 已新增`);
+  message.success(`${t.name} 已保存为草稿，发布后才会生成版本`);
   return t;
 }
 
@@ -1230,16 +1234,63 @@ export function updateTable(
     message.error('项目内表名必须唯一');
     return null;
   }
-  Object.assign(t, { ...input, columns: input.columns.map((c) => ({ ...c })) });
+  Object.assign(t, { ...input, status: 'draft', columns: input.columns.map((c) => ({ ...c })) });
   persist('tables');
-  message.success(`${t.name} 已更新`);
+  message.success(`${t.name} 已保存为草稿，发布后才会生成新版本`);
   return t;
 }
 
+export function impactForUpdate(id: string, next: Omit<WarehouseTable, 'id' | 'projectId'>) {
+  const t = state.tables.find((x) => x.id === id && x.projectId === state.currentProjectId);
+  if (!t) return null;
+  return assessImpact(t, { ...t, ...next }, projectTables.value);
+}
+
+/** 当前工作副本相对上一发布版，对下游表字段的影响。 */
+export function impactOfWorkingCopy(id: string, lastSnap?: TableSnapshot | null) {
+  const t = state.tables.find((x) => x.id === id && x.projectId === state.currentProjectId);
+  if (!t) return null;
+  if (!lastSnap) return assessImpact(t, t, projectTables.value);
+  const before: WarehouseTable = {
+    ...t,
+    ...lastSnap,
+    id: t.id,
+    projectId: t.projectId,
+    layer: t.layer,
+    columns: lastSnap.columns ?? t.columns,
+  };
+  return assessImpact(before, t, projectTables.value);
+}
+
+export async function publishTable(id: string, note: string): Promise<boolean> {
+  if (deny('model:publish')) return false;
+  const t = state.tables.find((x) => x.id === id && x.projectId === state.currentProjectId);
+  if (!t) return false;
+  if (useRemoteApi() && state.currentProjectId) {
+    try {
+      const saved = await api.tables.publish(state.currentProjectId, id, { note });
+      const i = state.tables.findIndex((x) => x.id === saved.id);
+      if (i >= 0) state.tables[i] = saved;
+      else state.tables.push(saved);
+      message.success(`${saved.name} 已发布为 v${saved.currentVersion ?? ''}`);
+      return true;
+    } catch (e) {
+      remoteErr(e);
+      return false;
+    }
+  }
+  t.status = 'published';
+  persist('tables');
+  message.success(`${t.name} 已发布`);
+  return true;
+}
+
 export function tableDependents(id: string): { kind: 'table' | 'draft'; id: string; name: string }[] {
-  const tables = projectTables.value
-    .filter((t) => t.createdFrom === id)
-    .map((t) => ({ kind: 'table' as const, id: t.id, name: t.name }));
+  const tables = tableDependentsOf(id, projectTables.value).map((t) => ({
+    kind: 'table' as const,
+    id: t.id,
+    name: t.name,
+  }));
   const drafts = projectDrafts.value
     .filter((d) => d.sourceTableId === id)
     .map((d) => ({
@@ -1660,18 +1711,22 @@ export function runOdsToDwd(sourceId: string) {
   return draft;
 }
 
-export function runDwdToDws(sourceId: string, dims?: string[]) {
+export function runDwdToDws(sourceId: string | string[], dims?: string[]) {
   if (deny('model:write')) return null;
   if (!state.currentProjectId) return null;
-  const source = state.tables.find((t) => t.id === sourceId);
+  const ids = Array.isArray(sourceId) ? sourceId : [sourceId];
+  const sources = ids
+    .map((id) => state.tables.find((t) => t.id === id))
+    .filter((t): t is WarehouseTable => Boolean(t));
+  const source = sources[0];
   if (!source) return null;
-  if (source.status === 'deprecated') {
-    message.warning(`源表「${source.name}」已下线，仍将生成草案`);
+  if (sources.some((t) => t.status === 'deprecated')) {
+    message.warning('部分源表已下线，仍将生成草案');
   }
   const dwsRule = projectLayerRules.value.find((r) => r.layer === 'DWS');
   const draft = buildDwsDraft({
     projectId: state.currentProjectId,
-    sources: [source],
+    sources,
     domains: projectDomains.value,
     preferredDims: dims,
     layerRule: hydrateLayerRule(dwsRule ?? { layer: 'DWS', naming: '', retention: '', serve: 'approval', note: '' }),
@@ -1684,7 +1739,7 @@ export function runDwdToDws(sourceId: string, dims?: string[]) {
   return draft;
 }
 
-export function approveDraft(draftId: string) {
+export async function approveDraft(draftId: string) {
   if (deny('model:publish')) return;
   const draft = state.drafts.find((d) => d.id === draftId);
   if (!draft || !state.currentProjectId) return;
@@ -1701,6 +1756,7 @@ export function approveDraft(draftId: string) {
   } else {
     table = tableFromDwsDraft(draft);
   }
+  table.status = 'draft';
   if (!state.tables.some((t) => t.name === table.name)) state.tables.push(table);
   for (const q of draft.qualityRules) {
     if (!state.qualityRules.some((x) => x.id === q.id)) state.qualityRules.push({ ...q, status: 'ok' });
@@ -1721,8 +1777,21 @@ export function approveDraft(draftId: string) {
       table: table.name,
     });
   }
-  persist('tables');
   persist('drafts');
+  if (useRemoteApi()) {
+    try {
+      const saved = await api.tables.save(state.currentProjectId, { ...table, projectId: state.currentProjectId });
+      const published = await api.tables.publish(state.currentProjectId, saved.id, { note: '审核通过并发布' });
+      const i = state.tables.findIndex((x) => x.id === published.id || x.name === published.name);
+      if (i >= 0) state.tables[i] = published;
+      else state.tables.push(published);
+      message.success(`${published.name} 已发布为 v${published.currentVersion ?? ''}`);
+    } catch (e) {
+      remoteErr(e);
+    }
+    return;
+  }
+  persist('tables');
   message.success(`${table.name} 已发布，ETL 任务已挂入调度`);
 }
 

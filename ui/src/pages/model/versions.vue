@@ -1,6 +1,6 @@
 <template>
   <div class="page" v-if="table">
-    <PageHeader :title="`${table.name} · 版本`" :subtitle="`当前 v${current}。对比两版，或把历史结构切换为当前（会再记一版）。`">
+    <PageHeader :title="`${table.name} · 版本`" :subtitle="`已发布 v${current}。对比两版可看结构变化语句。把历史写回当前表会变成草稿，需再发布。`">
       <template #actions>
         <a-button @click="back">返回表明细</a-button>
       </template>
@@ -23,13 +23,11 @@
         </template>
         <template v-else-if="column.key === 'act'">
           <a @click="view = record">查看</a>
-          <a-popconfirm
+          <a
             v-if="canWriteModel && record.version !== current"
-            title="把该版结构写回当前表，并生成新版本？"
-            @confirm="onRestore(record.id)"
-          >
-            <a class="ml">切换为当前</a>
-          </a-popconfirm>
+            class="ml"
+            @click="askRestore(record)"
+          >切换为当前</a>
         </template>
       </template>
     </a-table>
@@ -42,11 +40,11 @@
         <span>到</span>
         <a-select v-model:value="rightId" style="width: 220px" :options="verOpts" />
       </div>
-      <div v-if="!diff" class="muted">请选择两个版本。</div>
+      <div v-if="!left || !right" class="muted">请选择两个版本。</div>
       <template v-else>
         <p v-if="emptyDiff" class="muted">这两版结构相同。</p>
         <a-table
-          v-if="diff.meta.length"
+          v-if="diff?.meta.length"
           :data-source="diff.meta"
           :columns="metaCols"
           size="small"
@@ -54,10 +52,10 @@
           row-key="field"
           class="mb"
         />
-        <p v-if="diff.added.length"><b>新增字段</b> {{ colNames(diff.added) }}</p>
-        <p v-if="diff.removed.length"><b>删除字段</b> {{ colNames(diff.removed) }}</p>
+        <p v-if="diff?.added.length"><b>新增字段</b> {{ colNames(diff.added) }}</p>
+        <p v-if="diff?.removed.length"><b>删除字段</b> {{ colNames(diff.removed) }}</p>
         <a-table
-          v-if="diff.changed.length"
+          v-if="diff?.changed.length"
           :data-source="diff.changed"
           :columns="chgCols"
           size="small"
@@ -66,17 +64,26 @@
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'chg'">
-              <div>字段有变化</div>
+              <div v-for="c in record.changes" :key="c.field">{{ c.field }}：{{ c.from }} → {{ c.to }}</div>
             </template>
           </template>
         </a-table>
+        <div class="sql-h">
+          <h3>结构变化语句</h3>
+        </div>
+        <p class="muted">从 v{{ left.version }} → v{{ right.version }}，由两版快照生成的逻辑 DDL（添加 / 修改 / 删除字段）。不按引擎拆方言，不执行。</p>
+        <SqlBlock :text="alterSql" />
       </template>
     </div>
 
     <a-modal v-model:open="showView" :title="view ? `v${view.version} 快照` : '快照'" :footer="null" width="720px">
       <template v-if="view">
         <p class="muted">{{ snapComment(view.snapshot) }} · {{ view.createdAt }}</p>
-        <a-table :data-source="snapColsOf(view.snapshot)" :columns="snapCols" size="small" :pagination="false" row-key="name" />
+        <a-table :data-source="snapColsOf(view.snapshot)" :columns="snapCols" size="small" :pagination="false" row-key="name">
+          <template #bodyCell="{ column, record }">
+            <template v-if="column.key === 'logic'">{{ record.logic?.desc || record.logic?.kind || '—' }}</template>
+          </template>
+        </a-table>
       </template>
     </a-modal>
   </div>
@@ -88,8 +95,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { assessImpact, diffSnapshots, renderAlterSql, type TableSnapshot } from '@dw-ai/engine';
 import { api, type TableVersion } from '../../api/client';
 import PageHeader from '../../components/PageHeader.vue';
+import SqlBlock from '../../components/SqlBlock.vue';
+import { confirmImpact } from '../../components/confirmImpact';
 import { layerHref, parseLayerParam } from '../../config/layers';
 import { app, canWriteModel, projectTables, restoreTableVersion } from '../../stores/app';
 
@@ -109,16 +119,23 @@ const showView = computed({
 });
 const leftId = ref('');
 const rightId = ref('');
-const diff = ref<{
-  meta: { field: string; from: string; to: string }[];
-  added: Record<string, unknown>[];
-  removed: Record<string, unknown>[];
-  changed: { name: string; from: Record<string, unknown>; to: Record<string, unknown> }[];
-} | null>(null);
 
 const verOpts = computed(() =>
   rows.value.map((v) => ({ value: v.id, label: `v${v.version} · ${v.note} · ${v.createdAt}` }))
 );
+
+function asSnap(raw: Record<string, unknown> | undefined): TableSnapshot | null {
+  if (!raw) return null;
+  return raw as unknown as TableSnapshot;
+}
+
+const left = computed(() => rows.value.find((v) => v.id === leftId.value));
+const right = computed(() => rows.value.find((v) => v.id === rightId.value));
+const diff = computed(() => {
+  const a = asSnap(left.value?.snapshot);
+  const b = asSnap(right.value?.snapshot);
+  return a && b ? diffSnapshots(a, b) : null;
+});
 const emptyDiff = computed(
   () =>
     diff.value &&
@@ -127,6 +144,12 @@ const emptyDiff = computed(
     !diff.value.removed.length &&
     !diff.value.changed.length
 );
+const alterSql = computed(() => {
+  const a = asSnap(left.value?.snapshot);
+  const b = asSnap(right.value?.snapshot);
+  if (!a || !b || !left.value || !right.value) return '';
+  return `-- v${left.value.version} → v${right.value.version}\n${renderAlterSql(a, b)}`;
+});
 
 const cols = [
   { title: '版本', key: 'ver', width: 120 },
@@ -148,10 +171,11 @@ const snapCols = [
   { title: '字段', dataIndex: 'name', width: 160 },
   { title: '类型', dataIndex: 'type', width: 140 },
   { title: '注释', dataIndex: 'comment' },
+  { title: '口径', key: 'logic' },
 ];
 
-function colNames(list: Record<string, unknown>[]) {
-  return list.map((c) => String(c.name ?? '')).filter(Boolean).join('、');
+function colNames(list: { name: string }[]) {
+  return list.map((c) => c.name).filter(Boolean).join('、');
 }
 
 function snapComment(snap: Record<string, unknown>) {
@@ -159,20 +183,27 @@ function snapComment(snap: Record<string, unknown>) {
 }
 
 function snapColsOf(snap: Record<string, unknown>) {
-  return Array.isArray(snap.columns) ? (snap.columns as Record<string, unknown>[]) : [];
+  return Array.isArray(snap.columns) ? (snap.columns as { name: string; type?: string; comment?: string; logic?: { desc?: string; kind?: string } }[]) : [];
+}
+
+function askRestore(record: TableVersion) {
+  if (!table.value) return;
+  const snap = asSnap(record.snapshot);
+  const next = snap ? { ...table.value, ...snap } : table.value;
+  const report = assessImpact(table.value, next, projectTables.value);
+  confirmImpact(
+    report.needConfirm
+      ? report
+      : { ...report, needConfirm: true, title: '写回为草稿？发布后才会生成新版本', lines: report.lines },
+    () => {
+      void onRestore(record.id);
+    }
+  );
 }
 
 async function reload() {
   if (!app.currentProjectId || !table.value) return;
   rows.value = await api.versions.list(app.currentProjectId, table.value.id);
-}
-
-async function loadDiff() {
-  if (!app.currentProjectId || !table.value || !leftId.value || !rightId.value) {
-    diff.value = null;
-    return;
-  }
-  diff.value = await api.versions.diff(app.currentProjectId, table.value.id, leftId.value, rightId.value);
 }
 
 async function onRestore(versionId: string) {
@@ -194,10 +225,6 @@ watch(
   { immediate: true }
 );
 
-watch([leftId, rightId], () => {
-  void loadDiff();
-});
-
 onMounted(() => {
   void reload();
 });
@@ -213,6 +240,10 @@ h3 {
 }
 .ml {
   margin-left: 10px;
+}
+.sql-h h3 {
+  margin: 16px 0 6px;
+  font-size: 14px;
 }
 p {
   margin: 0 0 8px;

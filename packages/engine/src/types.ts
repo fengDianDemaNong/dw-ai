@@ -143,6 +143,36 @@ export interface WordRoot {
   format?: string;
 }
 
+export type FieldLogicKind = 'passthrough' | 'transform' | 'aggregate' | 'derive' | 'constant';
+
+export interface FieldSourceRef {
+  alias: string;
+  column: string;
+}
+
+export interface FieldLogic {
+  kind: FieldLogicKind;
+  /** 人读口径；空 = 尚未定义 */
+  desc?: string;
+  sources?: FieldSourceRef[];
+  op?: string;
+  expr?: string;
+  filter?: string;
+}
+
+export interface TableSourceRef {
+  tableId: string;
+  alias: string;
+}
+
+export interface TableJoin {
+  leftAlias: string;
+  leftColumn: string;
+  rightAlias: string;
+  rightColumn: string;
+  type?: 'inner' | 'left';
+}
+
 export interface Column {
   name: string;
   type: string;
@@ -154,6 +184,7 @@ export interface Column {
   /** 字段等级编码，空则继承表等级 */
   grade?: string;
   enumValues?: string[];
+  logic?: FieldLogic;
 }
 
 export interface WarehouseTable {
@@ -171,6 +202,9 @@ export interface WarehouseTable {
   storedAs?: string;
   status: 'draft' | 'published' | 'deprecated';
   createdFrom?: string;
+  sources?: TableSourceRef[];
+  joins?: TableJoin[];
+  filter?: string;
   /** 表等级编码，对应规范中心数据等级 */
   grade?: string;
   currentVersion?: number;
@@ -185,6 +219,10 @@ export interface TableSnapshot {
   partition?: string;
   status: WarehouseTable['status'];
   grade?: string;
+  createdFrom?: string;
+  sources?: TableSourceRef[];
+  joins?: TableJoin[];
+  filter?: string;
   columns: Column[];
 }
 
@@ -212,6 +250,8 @@ export interface ModelTableDraft {
   partition?: string;
   grade?: string;
   columns: Column[];
+  sources?: TableSourceRef[];
+  joins?: TableJoin[];
   summary: string;
 }
 
@@ -233,6 +273,7 @@ export interface FieldTag {
   /** 本层脱敏/时间/空值处理后的表达式说明 */
   transform?: MaskingPolicy | 'time' | 'fill';
   dropped?: boolean;
+  logic?: FieldLogic;
 }
 
 export interface QualityRule {
@@ -250,6 +291,8 @@ export interface ModelingDraft {
   id: string;
   projectId: string;
   sourceTableId: string;
+  sources?: TableSourceRef[];
+  joins?: TableJoin[];
   targetLayer: Layer;
   domainCode: string;
   domainConfidence: number;

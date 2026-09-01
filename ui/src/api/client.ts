@@ -413,6 +413,11 @@ export const api = {
       ),
     remove: (projectId: string, id: string) =>
       req<void>(`/api/projects/${projectId}/tables/${id}`, { method: 'DELETE' }),
+    publish: (projectId: string, id: string, body?: { note?: string }) =>
+      req<WarehouseTable>(`/api/projects/${projectId}/tables/${id}/publish`, {
+        method: 'POST',
+        body: JSON.stringify(body ?? {}),
+      }),
     sync: (projectId: string, body: WarehouseTable[]) =>
       req<void>(`/api/projects/${projectId}/tables-bundle`, { method: 'PUT', body: JSON.stringify(body) }),
   },

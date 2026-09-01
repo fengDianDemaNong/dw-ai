@@ -1,9 +1,11 @@
 import { columnsFromDraft, renderCreateTable } from './ddl';
+import { renderEtlSql } from './fieldLogic';
 import { hydrateLayerRule, maskingLabel, nullLabel } from './config/layerPolicies';
 import type {
   Column,
   DataGrade,
   Domain,
+  FieldLogic,
   FieldTag,
   LayerRule,
   MaskingPolicy,
@@ -11,6 +13,8 @@ import type {
   NullPolicy,
   QualityRule,
   SpecIssue,
+  TableJoin,
+  TableSourceRef,
   WarehouseTable,
   WordRoot,
 } from './types';
@@ -347,6 +351,7 @@ export function buildDwdDraft(opts: {
     id: `draft-${Date.now()}`,
     projectId,
     sourceTableId: source.id,
+    sources: [{ tableId: source.id, alias: 's' }],
     targetLayer: 'DWD',
     domainCode: domain.code,
     domainConfidence: domain.confidence,
@@ -373,6 +378,18 @@ export function parseDdlColumns(ddl: string): Column[] {
   return cols;
 }
 
+function logicFromDwdTag(tag: FieldTag | undefined): FieldLogic | undefined {
+  if (!tag || tag.dropped || tag.field === '*') return undefined;
+  const op =
+    tag.transform === 'hash' ? 'HASH' : tag.transform === 'mask' ? 'MASK' : tag.transform === 'encrypt' ? 'ENCRYPT' : undefined;
+  return {
+    kind: tag.transform && tag.transform !== 'keep' ? 'transform' : 'passthrough',
+    desc: tag.meaning || tag.comment,
+    sources: [{ alias: 's', column: tag.field }],
+    op,
+  };
+}
+
 export function tableFromDwdDraft(draft: ModelingDraft, source: WarehouseTable): WarehouseTable {
   const columns = columnsFromDraft(draft).map((col) => {
     const tag = draft.fieldTags.find((t) => t.suggestedName === col.name);
@@ -381,9 +398,11 @@ export function tableFromDwdDraft(draft: ModelingDraft, source: WarehouseTable):
       ...col,
       sensitive: Boolean(tag?.sensitive && !tag.dropped),
       grade: src?.grade,
+      logic: tag?.logic ?? logicFromDwdTag(tag),
     };
   });
   const remainingSensitive = columns.some((c) => c.sensitive || c.grade === 'L3' || c.grade === 'L4');
+  const sources: TableSourceRef[] = draft.sources ?? [{ tableId: source.id, alias: 's' }];
   return {
     id: `tbl-${draft.id}`,
     projectId: draft.projectId,
@@ -397,8 +416,101 @@ export function tableFromDwdDraft(draft: ModelingDraft, source: WarehouseTable):
     partition: 'dt',
     status: 'published',
     createdFrom: source.id,
+    sources,
+    joins: draft.joins,
     grade: remainingSensitive ? source.grade || 'L3' : source.grade === 'L4' ? 'L3' : source.grade || 'L2',
   };
+}
+
+export type DwsMeasureInput = {
+  alias: string;
+  column: string;
+  op: string;
+  name: string;
+  comment: string;
+  filter?: string;
+  type?: string;
+};
+
+const ALIASES = ['o', 'r', 'p', 'q', 'u', 's'];
+
+function defaultSourceRefs(tables: WarehouseTable[]): TableSourceRef[] {
+  return tables.map((t, i) => ({ tableId: t.id, alias: ALIASES[i] || `t${i}` }));
+}
+
+function inferJoins(tables: WarehouseTable[], refs: TableSourceRef[]): TableJoin[] {
+  const joins: TableJoin[] = [];
+  for (let i = 1; i < tables.length; i++) {
+    const left = tables[0];
+    const right = tables[i];
+    const keys = ['dt', 'user_type', 'item_category', 'shop_id', 'user_id', 'order_id'].filter(
+      (k) => left.columns.some((c) => c.name === k) && right.columns.some((c) => c.name === k)
+    );
+    const key = keys[0] ?? 'dt';
+    joins.push({
+      leftAlias: refs[0].alias,
+      leftColumn: key,
+      rightAlias: refs[i].alias,
+      rightColumn: key,
+      type: 'left',
+    });
+  }
+  return joins;
+}
+
+function autoMeasures(tables: WarehouseTable[], refs: TableSourceRef[]): DwsMeasureInput[] {
+  const out: DwsMeasureInput[] = [];
+  for (let i = 0; i < tables.length; i++) {
+    const t = tables[i];
+    const alias = refs[i].alias;
+    const orderId = t.columns.find((c) => c.name === 'order_id');
+    if (orderId && !out.some((m) => m.name === 'order_cnt')) {
+      out.push({
+        alias,
+        column: 'order_id',
+        op: 'COUNT_DISTINCT',
+        name: 'order_cnt',
+        comment: '订单数',
+        type: 'BIGINT',
+      });
+    }
+    const amt = t.columns.find((c) => /refund_amt/.test(c.name));
+    if (amt) {
+      out.push({
+        alias,
+        column: amt.name,
+        op: 'SUM',
+        name: 'refund_amt',
+        comment: amt.comment || '退款金额',
+        type: amt.type,
+      });
+      continue;
+    }
+    const gmv = t.columns.find((c) => /pay_amt|gmv|amount/.test(c.name));
+    if (gmv && !out.some((m) => m.name === 'gmv')) {
+      out.push({
+        alias,
+        column: gmv.name,
+        op: 'SUM',
+        name: 'gmv',
+        comment: '成交金额',
+        filter: t.columns.some((c) => c.name === 'order_status') ? `${alias}.order_status = 'paid'` : undefined,
+        type: gmv.type,
+      });
+    }
+    const uid = t.columns.find((c) => c.name === 'user_id');
+    if (uid && !out.some((m) => m.name === 'pay_user_cnt')) {
+      out.push({
+        alias,
+        column: 'user_id',
+        op: 'COUNT_DISTINCT',
+        name: 'pay_user_cnt',
+        comment: '支付用户数',
+        type: 'BIGINT',
+      });
+    }
+  }
+  return out;
 }
 
 export function buildDwsDraft(opts: {
@@ -406,101 +518,129 @@ export function buildDwsDraft(opts: {
   sources: WarehouseTable[];
   domains: Domain[];
   preferredDims?: string[];
+  measures?: DwsMeasureInput[];
   layerRule?: LayerRule;
   grades?: DataGrade[];
   roots?: WordRoot[];
 }): ModelingDraft {
-  const { projectId, sources, preferredDims } = opts;
+  const tables = opts.sources.filter(Boolean);
+  const source = tables[0];
+  const refs = defaultSourceRefs(tables);
+  const joins = inferJoins(tables, refs);
   const policy = hydrateLayerRule(opts.layerRule ?? { layer: 'DWS', naming: '', retention: '', serve: 'approval', note: '' });
   const grades = opts.grades ?? [];
-  const source = sources[0];
   const domain = source.domain || opts.domains[0]?.code || 'TRD';
   const process = inferProcess(source);
-  const dimCandidates = source.columns
-    .filter((c) => /id$|type|category|region|status|dt/.test(c.name) && !/amt|cnt|qty|amount/.test(c.name))
-    .map((c) => c.name);
-  const requested = (preferredDims?.length ? preferredDims : dimCandidates).slice(0, 6);
-  const piiRequested = requested.filter((d) => isPiiColumn(source.columns.find((c) => c.name === d), grades));
+  const dimPool = tables.flatMap((t) =>
+    t.columns.filter((c) => /id$|type|category|region|status|dt/.test(c.name) && !/amt|cnt|qty|amount/.test(c.name))
+  );
+  const dimCandidates = [...new Set(dimPool.map((c) => c.name))];
+  const requested = (opts.preferredDims?.length ? opts.preferredDims : dimCandidates).slice(0, 6);
+  const piiRequested = requested.filter((d) =>
+    tables.some((t) => isPiiColumn(t.columns.find((c) => c.name === d), grades))
+  );
   const dropPii = (policy.masking ?? 'drop') === 'drop';
-  const dims = (dropPii ? requested.filter((d) => !piiRequested.includes(d)) : requested).slice(0, 4);
-  if (!dims.includes('dt') && source.columns.some((c) => c.name === 'dt')) dims.unshift('dt');
-  const measures = source.columns.filter((c) => isMeasureType(c.type) && /amt|gmv|qty|cnt|amount|num/.test(c.name));
-  const fieldTags: FieldTag[] = [
-    ...dims.map((d) => {
-      const col = source.columns.find((c) => c.name === d)!;
-      return {
-        field: d,
-        type: col.type,
-        comment: col.comment,
-        suggestedName: d,
-        roots: [],
-        meaning: col.comment,
-        confidence: 0.9,
-        sensitive: false,
-      };
-    }),
-    {
-      field: '*',
-      type: 'BIGINT',
-      comment: '订单数',
-      suggestedName: 'order_cnt',
-      roots: ['cnt'],
-      meaning: 'COUNT(DISTINCT order_id)',
-      confidence: 0.86,
+  const dims = (dropPii ? requested.filter((d) => !piiRequested.includes(d)) : requested).slice(0, 5);
+  if (!dims.includes('dt') && tables.some((t) => t.columns.some((c) => c.name === 'dt'))) dims.unshift('dt');
+
+  const measures = opts.measures?.length ? opts.measures : autoMeasures(tables, refs);
+  const dimTags: FieldTag[] = dims.map((d) => {
+    const host = tables.find((t) => t.columns.some((c) => c.name === d)) ?? source;
+    const col = host.columns.find((c) => c.name === d)!;
+    const alias = refs[tables.indexOf(host)]?.alias ?? refs[0].alias;
+    return {
+      field: d,
+      type: col.type,
+      comment: col.comment,
+      suggestedName: d,
+      roots: [],
+      meaning: `透传 ${alias}.${d}`,
+      confidence: 0.9,
       sensitive: false,
+      logic: {
+        kind: 'passthrough',
+        desc: col.comment || d,
+        sources: [{ alias, column: d }],
+      },
+    };
+  });
+  const measureTags: FieldTag[] = measures.map((m) => ({
+    field: m.column,
+    type: m.type || (m.op.includes('COUNT') ? 'BIGINT' : 'DECIMAL(18,2)'),
+    comment: m.comment,
+    suggestedName: m.name,
+    roots: m.name.includes('cnt') ? ['cnt'] : m.name.includes('gmv') ? ['gmv'] : [],
+    meaning: `${m.op}(${m.alias}.${m.column})`,
+    confidence: 0.88,
+    sensitive: false,
+    logic: {
+      kind: 'aggregate',
+      desc: m.comment,
+      sources: [{ alias: m.alias, column: m.column }],
+      op: m.op,
+      filter: m.filter,
     },
-    {
-      field: measures.find((m) => /amt|gmv|amount/.test(m.name))?.name ?? 'order_pay_amt',
+  }));
+  const fieldTags: FieldTag[] = [...dimTags, ...measureTags];
+  if (fieldTags.some((t) => t.suggestedName === 'gmv') && fieldTags.some((t) => t.suggestedName === 'refund_amt')) {
+    fieldTags.push({
+      field: 'gmv',
       type: 'DECIMAL(18,2)',
-      comment: '成交金额',
-      suggestedName: 'gmv',
+      comment: '净成交额',
+      suggestedName: 'net_gmv',
       roots: ['gmv'],
-      meaning: 'SUM(order_pay_amt)',
-      confidence: 0.88,
+      meaning: 'gmv - refund_amt',
+      confidence: 0.9,
       sensitive: false,
-      transform: policy.nullHandling === 'fill' ? 'fill' : undefined,
-    },
-    {
-      field: 'user_id',
-      type: 'BIGINT',
-      comment: '支付用户数',
-      suggestedName: 'pay_user_cnt',
-      roots: ['cnt'],
-      meaning: 'COUNT(DISTINCT user_id)',
-      confidence: 0.86,
-      sensitive: false,
-    },
-  ];
+      logic: {
+        kind: 'derive',
+        desc: '成交金额减去退款金额',
+        expr: 'gmv - refund_amt',
+      },
+    });
+  }
+
   const tableName = suggestDwsName(domain, `${process}_sum`);
-  const gmvExpr = policy.nullHandling === 'fill' ? 'COALESCE(SUM(order_pay_amt), 0)' : 'SUM(order_pay_amt)';
+  const columns: Column[] = fieldTags.map((t) => ({
+    name: t.suggestedName,
+    type: t.type,
+    comment: t.comment,
+    nullable: false,
+    logic: t.logic,
+  }));
   const ddl = renderCreateTable(
     {
       name: tableName,
       comment: `${domain}域-${process}日汇总`,
-      columns: [
-        ...dims.map((d) => {
-          const col = source.columns.find((c) => c.name === d);
-          return { name: d, type: col?.type || 'STRING', comment: col?.comment ?? d, nullable: false };
-        }),
-        { name: 'order_cnt', type: 'BIGINT', comment: '订单数', nullable: false },
-        { name: 'gmv', type: 'DECIMAL(18,2)', comment: '成交金额', nullable: false },
-        { name: 'pay_user_cnt', type: 'BIGINT', comment: '支付用户数', nullable: false },
-      ],
+      columns,
       partition: 'dt',
       primaryKeys: dims,
     },
     'hive'
   );
-
-  const group = dims.filter((d) => d !== 'dt').join(', ');
-  const dimSelect = dims.filter((d) => d !== 'dt').join(',\n    ');
-  const etlSql = `INSERT OVERWRITE TABLE ${tableName} PARTITION (dt = '\${bizdate}')\nSELECT\n    ${dimSelect}${dimSelect ? ',\n    ' : ''}\n    COUNT(DISTINCT order_id) AS order_cnt,\n    ${gmvExpr} AS gmv,\n    COUNT(DISTINCT user_id) AS pay_user_cnt\nFROM ${source.name}\nWHERE dt = '\${bizdate}'\nGROUP BY ${group || 'dt'};`;
+  const etlSql = renderEtlSql(
+    {
+      name: tableName,
+      sources: refs,
+      joins,
+      columns,
+      partition: 'dt',
+    },
+    tables
+  );
 
   const knownRoots = (opts.roots ?? []).map((r) => r.code);
   const specIssues: SpecIssue[] = [
     ...validateTableName(tableName, 'DWS'),
     ...(knownRoots.length ? fieldTags.flatMap((t) => validateFieldName(t.suggestedName, knownRoots)) : []),
   ];
+  if (tables.length > 1) {
+    specIssues.push({
+      level: 'info',
+      rule: 'source',
+      message: `来源 ${tables.map((t, i) => `${refs[i].alias}=${t.name}`).join('、')}`,
+    });
+  }
   if (dropPii && piiRequested.length) {
     specIssues.push({
       level: 'error',
@@ -522,8 +662,10 @@ export function buildDwsDraft(opts: {
 
   return {
     id: `draft-${Date.now()}`,
-    projectId,
+    projectId: opts.projectId,
     sourceTableId: source.id,
+    sources: refs,
+    joins,
     targetLayer: 'DWS',
     domainCode: domain,
     domainConfidence: 0.91,
@@ -537,7 +679,7 @@ export function buildDwsDraft(opts: {
         id: `qr-${tableName}-vol`,
         table: tableName,
         type: 'volatility',
-        logic: 'gmv 日同比',
+        logic: fieldTags.some((t) => t.suggestedName === 'gmv') ? 'gmv 日同比' : '行数日同比',
         threshold: '波动 ≤ 30%',
         status: 'idle',
       },
@@ -550,6 +692,10 @@ export function buildDwsDraft(opts: {
 
 export function tableFromDwsDraft(draft: ModelingDraft): WarehouseTable {
   const pii = draft.fieldTags.some((t) => t.sensitive);
+  const columns = columnsFromDraft(draft).map((col) => {
+    const tag = draft.fieldTags.find((t) => t.suggestedName === col.name);
+    return { ...col, logic: tag?.logic };
+  });
   return {
     id: `tbl-${draft.id}`,
     projectId: draft.projectId,
@@ -559,10 +705,12 @@ export function tableFromDwsDraft(draft: ModelingDraft): WarehouseTable {
     domain: draft.domainCode,
     grain: draft.grain,
     period: 'di',
-    columns: columnsFromDraft(draft),
+    columns,
     partition: 'dt',
     status: 'published',
     createdFrom: draft.sourceTableId,
+    sources: draft.sources,
+    joins: draft.joins,
     grade: pii ? 'L3' : 'L1',
   };
 }

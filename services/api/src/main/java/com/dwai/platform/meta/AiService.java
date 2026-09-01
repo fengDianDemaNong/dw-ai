@@ -99,18 +99,22 @@ public class AiService {
           d.columns(),
           d.partition(),
           null,
-          update ? null : "draft",
+          "draft",
           null,
-          d.grade());
+          d.grade(),
+          null,
+          null,
+          null);
       if (update) {
         ApiModels.TableDto cur = tables.getTable(projectId, d.tableId());
         body = new ApiModels.TableDto(
             d.tableId(), projectId, cur.layer(), d.name(), d.comment(), d.domain(),
             cur.sourceSystem(), d.grain(), d.period(), d.columns(), d.partition(),
-            cur.storedAs(), cur.status(), cur.createdFrom(), d.grade());
-        out.add(tables.saveTable(projectId, body, "AI 采纳"));
+            cur.storedAs(), "draft", cur.createdFrom(), d.grade(),
+            cur.sources(), cur.joins(), cur.filter());
+        out.add(tables.saveTable(projectId, body));
       } else {
-        out.add(tables.saveTable(projectId, body, "AI 新建"));
+        out.add(tables.saveTable(projectId, body));
       }
     }
     return out;

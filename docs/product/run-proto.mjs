@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ver = process.argv[2] || '0.1.3';
+const ver = process.argv[2] || '0.1.4';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const proto = path.join(here, 'versions', ver, 'prototype');
 const vite = path.resolve(here, '../../node_modules/.bin/vite');

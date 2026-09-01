@@ -18,6 +18,9 @@ export default defineConfig({
       '@dw-ai/engine': fileURLToPath(new URL('../packages/engine/src/index.ts', import.meta.url)),
     },
   },
+  optimizeDeps: {
+    exclude: ['@dw-ai/engine'],
+  },
   server: {
     port: 5173,
     host: true,

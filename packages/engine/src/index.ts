@@ -10,6 +10,8 @@ export * from './ddl';
 export * from './specChat';
 export * from './specIo';
 export * from './modelVersion';
+export * from './fieldLogic';
+export * from './impact';
 export * from './modelChat';
 export * from './aiPrompts';
 export * from './knowledge';

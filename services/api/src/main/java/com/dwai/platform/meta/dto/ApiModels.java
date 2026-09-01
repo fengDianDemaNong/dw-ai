@@ -155,12 +155,15 @@ public final class ApiModels {
 
   public record ColumnDto(
       String name, String type, String comment, Boolean nullable, String defaultValue,
-      Boolean sensitive, String grade, List<String> enumValues) {}
+      Boolean sensitive, String grade, List<String> enumValues, Map<String, Object> logic) {}
 
   public record TableDto(
       String id, String projectId, String layer, String name, String comment, String domain,
       String sourceSystem, String grain, String period, List<ColumnDto> columns,
-      String partition, String storedAs, String status, String createdFrom, String grade) {}
+      String partition, String storedAs, String status, String createdFrom, String grade,
+      List<Map<String, Object>> sources, List<Map<String, Object>> joins, String filter) {}
+
+  public record PublishReq(String note) {}
 
   public record DraftDto(
       String id, String projectId, String sourceTableId, String targetLayer, String domainCode,
