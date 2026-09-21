@@ -1,7 +1,5 @@
 package com.dwai.platform;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -9,17 +7,19 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * dw-model 的最小回归网之二：鉴权链路（登录 → 拿 token → 访问受保护接口）。
+ * dw-model 的最小回归网之二：鉴权边界。
  *
- * <p>dw-model 的组织数据与 dw-org 同源，鉴权链路是同一条最敏感的路径 ——
- * token 签发、鉴权过滤器、租户上下文解析任一环断了整站都用不了。
- * 这里用 dev 模式与内置管理员登录，不依赖外部 IdP。
+ * <p>这里<b>不</b>断言「登录成功」——因为 dw-model 在 multi 模式下本就不提供登录口：
+ * 组织身份由 dw-org 统一负责，dw-model 通过 {@code OrgClient} 与它交互
+ * （见 {@code AuthController.login} 的 {@code isWarehouseOnly() && isMulti()} 判断）。
+ *
+ * <p>这个约束此前没有任何测试守着。一旦有人误删那个判断，登录口会在生产上悄悄打开 ——
+ * 本测试就是为它上的锁。
  */
 @SpringBootTest(classes = DwaiApplication.class, properties = {
         "spring.datasource.url=jdbc:h2:mem:dwmodel_auth;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_DELAY=-1",
@@ -36,23 +36,18 @@ class AuthSmokeTest {
     @Autowired
     private MockMvc mvc;
 
-    private final ObjectMapper json = new ObjectMapper();
-
+    /**
+     * 设计如此：warehouse 进程 + multi 模式下，登录必须被拒绝。
+     *
+     * <p>如果这条测试失败（变成 200），说明登录口被打开了 —— 那是安全边界的破坏，
+     * 不是「功能增强」。
+     */
     @Test
-    void adminCanLoginAndReadOwnProfile() throws Exception {
-        String body = mvc.perform(post("/api/auth/login")
+    void loginIsRefusedInWarehouseMultiMode() throws Exception {
+        mvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"username\":\"admin\",\"password\":\"admin123\"}"))
-                .andExpect(status().isOk())
-                .andReturn().getResponse().getContentAsString();
-
-        JsonNode res = json.readTree(body);
-        String token = res.path("token").asText();
-        assertTrue(token != null && !token.isBlank(),
-                "登录应返回 token，实际响应: " + body);
-
-        mvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token))
-                .andExpect(status().isOk());
+                .andExpect(status().isForbidden());
     }
 
     @Test

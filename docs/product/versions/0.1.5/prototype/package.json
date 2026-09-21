@@ -1,0 +1,10 @@
+{
+  "name": "@dw-ai/warehouse-proto",
+  "private": true,
+  "version": "0.1.5",
+  "description": "仓建设原型：规范中心 + 建模中心。独立启动，组织上下文来自组织平台。",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --config vite.config.ts"
+  }
+}

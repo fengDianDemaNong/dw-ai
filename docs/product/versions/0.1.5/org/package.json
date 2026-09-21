@@ -1,0 +1,10 @@
+{
+  "name": "@dw-ai/org-proto",
+  "private": true,
+  "version": "0.1.5",
+  "description": "组织平台原型：租户 / 用户 / 项目 / 模块 / 计算资源。独立启动，供仓建设等模块复用。",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --config vite.config.ts"
+  }
+}
