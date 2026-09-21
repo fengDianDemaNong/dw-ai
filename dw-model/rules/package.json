@@ -1,0 +1,19 @@
+{
+  "name": "@dw-ai/rules",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DW-AI rules service",
+  "type": "module",
+  "scripts": {
+    "dev": "node --import tsx src/server.ts",
+    "start": "node --import tsx src/server.ts"
+  },
+  "dependencies": {
+    "@dw-ai/engine": "0.1.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "@types/node": "^22.10.2"
+  }
+}
+

@@ -1,0 +1,15 @@
+{
+  "name": "dw-org",
+  "private": true,
+  "version": "0.1.3",
+  "type": "module",
+  "description": "租户管理 / 组织平台",
+  "scripts": {
+    "dev": "npm run dev --prefix ui",
+    "dev:org": "npm run dev --prefix ui",
+    "dev:api": "mvn -f api/pom.xml spring-boot:run",
+    "dev:api:org": "mvn -f api/pom.xml spring-boot:run",
+    "build": "npm run build --prefix ui",
+    "package": "bash package.sh"
+  }
+}

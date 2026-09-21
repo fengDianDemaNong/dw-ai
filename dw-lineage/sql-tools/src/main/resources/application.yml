@@ -1,0 +1,106 @@
+spring:
+  profiles:
+    active: dev
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      # 表结构由 Flyway 管理（db/migration/），禁止 Hibernate 自动建表
+      ddl-auto: none
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 500
+        order_inserts: true
+
+  # 表结构由 Flyway 托管，与 dw-org / dw-model 一致：
+  #   - 空库启动时自动执行 V1__schema.sql + V2__init_data.sql；
+  #   - 已用安装包脚本建好的老库没有 flyway_schema_history，baseline 接管后
+  #     从 V3 起继续应用新迁移（V1/V2 的内容与 release/sql/<方言>/ 完全一致）；
+  #   - 之后改表结构：在 db/migration/<方言>/ 新增 V3__xxx.sql，同步 release/sql。
+  # 脚本目录由 FlywayLocationEnvironmentPostProcessor 按 database.type 覆盖，
+  # 这里只写默认（h2）。
+  flyway:
+    enabled: true
+    locations: classpath:db/migration/h2
+    baseline-on-migrate: true
+    baseline-version: 2
+
+# ---------------------------------------------------------------
+# 数据库：改这里即可切换后端，URL / 驱动 / 建表脚本会自动匹配
+# ---------------------------------------------------------------
+database:
+  # h2 | mysql | postgresql
+  type: ${DB_TYPE:h2}
+  host: ${DB_HOST:localhost}
+  port: ${DB_PORT:}
+  name: ${DB_NAME:dw_lineage}
+  username: ${DB_USERNAME:}
+  password: ${DB_PASSWORD:}
+  # 仅 type=h2 时有效
+  h2-path: ${DB_H2_PATH:./data/dw_lineage}
+  # 附加连接参数，形如 useSSL=false&serverTimezone=Asia/Shanghai
+  params: ${DB_PARAMS:}
+  # 完整 JDBC URL。填了会忽略上面的 host/port/name，用于需要特殊连接串的场景
+  url: ${DB_URL:}
+
+server:
+  port: ${SERVER_PORT:8080}
+
+# 跨域白名单。生产环境前后端应通过 nginx 反向代理同源访问，无需跨域；
+# 此处默认只放开本地开发端口。
+cors:
+  allowed-origins: http://localhost:5171,http://127.0.0.1:5171,http://localhost:5172,http://127.0.0.1:5172,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:5175,http://127.0.0.1:5175,http://localhost:3000
+
+lineage:
+  run-mode: ${LINEAGE_RUN_MODE:standalone}
+  org-base-url: ${ORG_BASE_URL:}
+  service-base-url: ${SERVICE_BASE_URL:}
+  public-base-url: ${PUBLIC_BASE_URL:}
+  module-token: ${MODULE_TOKEN:}
+
+sql:
+  parse:
+    # 单次解析超时（秒）
+    timeout-seconds: 60
+    # 解析线程栈大小（MB），用于容纳较深的 SQL 嵌套
+    stack-size-mb: 16
+    # 并发解析上限，超出直接拒绝并提示稍后重试
+    max-concurrent: 16
+
+metadata:
+  # 元数据服务凭据的加密主密钥。不落配置文件，只从环境变量注入。
+  # 未配置时服务仍能启动，但保存/使用带凭据的元数据服务（dbx）会明确报错，
+  # 以免凭据明文落库。
+  secret-key: ${METADATA_SECRET_KEY:}
+  gravitino:
+    # 逐表加载的并发度，避免一条 SQL 涉及几十张表时串行往返
+    concurrency: 8
+    # 单张表的加载超时（秒），超时按「结构未知」降级处理
+    per-table-timeout-seconds: 10
+
+# 租户上下文由 TenantInterceptor 从 X-Tenant-Id / X-Project-Id 请求头解析，
+# 不带头时落到这里配置的默认租户（对应 V2 迁移写入的那条记录）。
+tenant:
+  default-tenant-id: 1
+  default-project-id: 1
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    com.dwai.lineage: INFO
+    # ⚠️ 安全：dbx 的 GET /api/connection/list 会「明文返回数据库密码」。
+    # HTTP 层的报文日志会把整个响应体写进日志文件，所以这几个 logger 显式钉在 INFO，
+    # 避免有人为了排查问题把 root 调成 DEBUG 时连带把密码写进磁盘。
+    # 排查 dbx 对接问题请看 com.dwai.lineage.service.metadata.dbx 的日志，它已做过脱敏。
+    org.apache.hc.client5.http.wire: INFO
+    org.apache.hc.client5.http.headers: INFO
+    org.springframework.web.client: INFO

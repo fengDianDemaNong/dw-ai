@@ -3,15 +3,30 @@
   "private": true,
   "version": "0.1.3",
   "type": "module",
-  "workspaces": ["ui", "packages/engine", "services/rules"],
+  "workspaces": ["dw-org/ui", "packages/engine", "dw-model/ui", "dw-model/rules"],
   "scripts": {
     "dev": "npm run dev -w @dw-ai/ui",
+    "dev:org": "npm run dev -w @dw-org/ui",
+    "dev:model": "npm run dev -w @dw-ai/ui",
+    "dev:warehouse": "npm run dev -w @dw-ai/ui",
     "dev:api": "npm run dev:api -w @dw-ai/ui",
+    "dev:api:org": "mvn -f dw-org/api/pom.xml spring-boot:run",
+    "dev:api:model": "mvn -f dw-model/api/pom.xml spring-boot:run",
+    "dev:api:warehouse": "mvn -f dw-model/api/pom.xml spring-boot:run",
+    "dev:lineage": "npm --prefix dw-lineage/sql-tools-vue run dev:multi",
+    "dev:api:lineage": "mvn -f dw-lineage/sql-tools/pom.xml spring-boot:run -Dspring-boot.run.profiles=multi",
     "dev:rules": "npm run dev -w @dw-ai/rules",
     "proto": "node docs/product/run-proto.mjs",
     "product:new": "bash docs/product/new-version.sh",
     "build": "npm run build -w @dw-ai/ui",
     "preview": "npm run preview -w @dw-ai/ui",
-    "package": "bash package.sh"
+    "package": "bash package.sh",
+    "package:org": "bash dw-org/package.sh",
+    "package:org:api": "bash dw-org/package.sh api",
+    "package:org:ui": "bash dw-org/package.sh ui",
+    "package:model": "bash dw-model/package.sh",
+    "package:model:api": "bash dw-model/package.sh api",
+    "package:model:ui": "bash dw-model/package.sh ui",
+    "package:warehouse": "bash dw-model/package.sh"
   }
 }

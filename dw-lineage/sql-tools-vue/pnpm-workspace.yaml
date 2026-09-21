@@ -1,0 +1,17 @@
+# 仅本目录为一个 workspace，避免 pnpm 向上扫到仓库根 package.json 的 npm workspaces。
+packages:
+  - '.'
+
+# pnpm 10 起默认不执行依赖的 install 脚本，需在此显式声明。
+# pnpm 11 把该设置从 package.json 的 "pnpm" 字段挪到了这里，并改名为 allowBuilds。
+allowBuilds:
+  # 必须允许：其 install 脚本负责就位平台相关的二进制，否则 vite 构建失败
+  esbuild: true
+  # 无需执行：postinstall 只是打印赞助信息
+  core-js: false
+
+overrides:
+  # @antv/algorithm 等包使用 tslib 2.x 才有的 __spreadArray，
+  # 但依赖图中被解析到 tslib 1.x，构建报 "__spreadArray is not exported"。
+  # tslib 2.x 向后兼容 1.x 的辅助函数，统一到 2.x。
+  tslib: ^2.6.0

@@ -1,0 +1,30 @@
+# 开发环境。IDEA 直接运行 com.dwai.lineage.Main 即可，不必在 Run Configuration 里填环境变量。
+# 地址可用环境变量 GRAVITINO_URL 覆盖，避免把机器地址写死在代码里。
+
+database:
+  # 默认沿用 application.yml：type=h2，数据文件 ./data/dw_lineage（相对模块工作目录）。
+  # 空库由 Flyway 自动执行 V1__schema.sql + V2__init_data.sql；已有库不自动升级，
+  # 升级走 db/migration/ 下新增的版本脚本。
+  #
+  # 改连 MySQL 时取消下面注释（库要先存在；空库会自动建表）：
+  # type: mysql
+  # host: localhost
+  # port: 3306
+  # name: dw_lineage
+  # username: root
+  # password: root
+  #
+  # 改连 PostgreSQL：
+  # type: postgresql
+  # host: localhost
+  # port: 5432
+  # name: dw_lineage
+  # username: postgres
+  # password: postgres
+
+gravitino:
+  url: ${GRAVITINO_URL:http://localhost:8090}
+
+logging:
+  level:
+    com.dwai.lineage: DEBUG

@@ -1,0 +1,20 @@
+# 覆盖 jar 内默认配置。敏感项优先走 env.sh。
+server:
+  port: ${SERVER_PORT:18080}
+
+spring:
+  web:
+    resources:
+      static-locations: file:${WEB_STATIC_DIR:web}/
+  datasource:
+    url: ${DB_URL:}
+    username: ${DB_USER:}
+    password: ${DB_PASSWORD:}
+
+dwai:
+  product: org
+  db-file: dw_org
+  public-base-url: ${PUBLIC_BASE_URL:http://127.0.0.1:18080}
+  web:
+    static-dir: ${WEB_STATIC_DIR:}
+    cors-origins: ${CORS_ORIGINS:*}

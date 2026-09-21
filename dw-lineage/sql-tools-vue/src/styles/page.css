@@ -1,0 +1,188 @@
+/**
+ * 页面公共样式。
+ *
+ * 之前每个页面都在自己的 scoped style 里重写一遍 .toolbar / .filter-bar /
+ * .page-title / .muted / .mono，同一个东西在七个文件里有七种间距和字号。
+ * 这里收成一份全局的。
+ *
+ * scoped 样式带属性选择器，特异性高于这里的类选择器，所以页面想覆盖某一条
+ * 直接在自己的 scoped 里写同名类即可，不用 !important。
+ */
+
+/* ------------------------------------------------------------------ */
+/* 内容区                                                              */
+/* ------------------------------------------------------------------ */
+
+.page {
+  padding: 16px 20px;
+  /* 内容自己滚，滚动条不要出现在 body 上 —— body 是 overflow:hidden 的 */
+  height: 100%;
+  overflow: auto;
+}
+
+/* 画布类页面（SQL 解析、血缘图）自己铺满，不要这层留白 */
+.page-full {
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ */
+/* 筛选条 / 工具条                                                     */
+/* ------------------------------------------------------------------ */
+
+.filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+}
+
+.filter-label {
+  color: #4b5563;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ */
+/* 卡片                                                                */
+/* ------------------------------------------------------------------ */
+
+.card {
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.card:last-child {
+  margin-bottom: 0;
+}
+
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.card-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: #1f2937;
+}
+
+/* 表格直接铺在卡片里时不要双重内边距 */
+.card-flush {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* card-flush 里表格上方那一条：左边标题，右边计数 */
+.card-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.card-bar .muted {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------------------ */
+/* 指标方块                                                            */
+/* ------------------------------------------------------------------ */
+
+/* 方块本身的样式在 components/StatTile 里，这里只管一行摆几个 */
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+/* 口径说明的那个小圆点。指标方块、卡片标题、比率条三处都要用 */
+.stat-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  border-radius: 50%;
+  border: 1px solid #d1d5db;
+  color: #9ca3af;
+  font-size: 10px;
+  cursor: help;
+}
+
+@media (max-width: 1200px) {
+  .stat-row {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* 文本                                                                */
+/* ------------------------------------------------------------------ */
+
+.muted {
+  color: #9ca3af;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.hint {
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+/* 说明抽屉里的代码块 */
+.hint-code {
+  background: #f6f7f9;
+  border-radius: 4px;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  margin: 8px 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* 空态                                                                */
+/* ------------------------------------------------------------------ */
+
+.page-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 80px 20px;
+  color: #6b7280;
+}
+
+.page-empty-text {
+  font-size: 14px;
+}
+
+/* 卡片<b>内部</b>某一块没内容时的一行说明。与整页空态的 .page-empty 不是一回事：
+   那个占 80px 上下留白居中，放进卡片里会把卡片撑成一个空框 */
+.list-empty {
+  padding: 20px 16px;
+  color: #9ca3af;
+  font-size: 13px;
+}

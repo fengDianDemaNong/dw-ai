@@ -1,0 +1,68 @@
+server:
+  port: ${SERVER_PORT:18081}
+
+spring:
+  application:
+    name: dw-warehouse-api
+  datasource:
+    url: ${DB_URL:}
+    username: ${DB_USER:}
+    password: ${DB_PASSWORD:}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration/mysql
+  jackson:
+    default-property-inclusion: non_null
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: input
+      table-underline: true
+
+dwai:
+  product: warehouse
+  db-file: dw_mode
+  deploy-mode: ${DW_AI_MODE:multi}
+  run-mode: ${DW_AI_RUN_MODE:}
+  org-base-url: ${ORG_BASE_URL:http://127.0.0.1:18080}
+  service-base-url: ${SERVICE_BASE_URL:http://127.0.0.1:18081}
+  public-base-url: ${PUBLIC_BASE_URL:http://127.0.0.1:5172}
+  llm-secret: ${DW_AI_LLM_SECRET:dw-ai-llm-dev-secret-change-me-32b}
+  bootstrap:
+    admin-username: ${BOOTSTRAP_ADMIN_USER:admin}
+    admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:admin123}
+    admin-display-name: ${BOOTSTRAP_ADMIN_NAME:平台管理员}
+  security:
+    # dev = HS256 开发令牌；oidc = 校验 Casdoor JWT。接口形态相同。
+    mode: ${SECURITY_MODE:dev}
+    jwt-secret: ${JWT_SECRET:dw-ai-dev-secret-change-me-please-32b}
+    jwt-ttl-seconds: ${JWT_TTL_SECONDS:900}
+    refresh-ttl-seconds: ${REFRESH_TTL_SECONDS:900}
+    idle-ttl-seconds: ${IDLE_TTL_SECONDS:900}
+    allow-dev-login: ${ALLOW_DEV_LOGIN:true}
+    module-token: ${MODULE_TOKEN:}
+    casdoor:
+      issuer: ${CASDOOR_ISSUER:}
+      jwk-set-uri: ${CASDOOR_JWK:}
+      audience: ${CASDOOR_CLIENT_ID:}
+      # Casdoor 组织名 → 智仓租户 id，如 built-in:t-xinghe,casbin:t-xinghe
+      org-tenant-map: ${CASDOOR_ORG_MAP:built-in:t-xinghe,casbin:t-xinghe}
+  rules:
+    base-url: ${RULES_BASE:http://127.0.0.1:7080}
+  starrocks:
+    enabled: ${SR_ENABLED:false}
+    url: ${SR_URL:jdbc:mysql://127.0.0.1:9030/dwai}
+    username: ${SR_USER:root}
+    password: ${SR_PASSWORD:}
+    max-rows: 100
+  dolphinscheduler:
+    enabled: ${DS_ENABLED:false}
+    base-url: ${DS_URL:http://127.0.0.1:12345/dolphinscheduler}
+    token: ${DS_TOKEN:}
+    project-code: ${DS_PROJECT_CODE:0}
+  web:
+    static-dir: ${WEB_STATIC_DIR:}
+    cors-origins: ${CORS_ORIGINS:http://127.0.0.1:5171,http://localhost:5171,http://127.0.0.1:5172,http://localhost:5172,http://127.0.0.1:5173,http://localhost:5173,http://localhost,http://127.0.0.1}

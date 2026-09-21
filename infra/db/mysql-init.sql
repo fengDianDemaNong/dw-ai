@@ -1,0 +1,6 @@
+CREATE DATABASE IF NOT EXISTS dw_org;
+CREATE DATABASE IF NOT EXISTS dw_mode;
+CREATE DATABASE IF NOT EXISTS dw_lineage;
+GRANT ALL PRIVILEGES ON dw_org.* TO 'dwai'@'%';
+GRANT ALL PRIVILEGES ON dw_mode.* TO 'dwai'@'%';
+GRANT ALL PRIVILEGES ON dw_lineage.* TO 'dwai'@'%';

@@ -1,0 +1,362 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.11</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.dwai</groupId>
+    <artifactId>sql-tools</artifactId>
+    <version>1.0-SNAPSHOT</version>
+
+    <properties>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <spring-boot.version>3.3.11</spring-boot.version>
+        <mybatis-spring-boot-starter.version>3.0.4</mybatis-spring-boot-starter.version>
+        <junit.version>4.13.2</junit.version>
+        <antlr4.version>4.9.3</antlr4.version>
+        <antlr4test.version>1.22</antlr4test.version>
+        <jackson.verion>2.16.2</jackson.verion>
+        <sql-parser.version>4.1.0-SNAPSHOT</sql-parser.version>
+        <sqlflow.version>1.0.7-SNAPSHOT</sqlflow.version>
+        <kotlin.version>2.1.0</kotlin.version>
+        <guava.version>31.0-jre</guava.version>
+        <gravitino.version>0.9.0-incubating</gravitino.version>
+        <springdoc.version>2.6.0</springdoc.version>
+
+        <!-- 默认排除依赖外部服务的测试，用 -Pexternal-tests 打开 -->
+        <external.tests.exclude>**/gravitino/**</external.tests.exclude>
+    </properties>
+
+    <dependencies>
+        <!-- Spring Boot Dependencies -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <!-- @Valid / @NotBlank 等请求参数校验 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <!-- 接口文档：/swagger-ui.html，随代码自动同步，避免手写文档过期 -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>${springdoc.version}</version>
+        </dependency>
+        <!-- 持久化：实体 CRUD 用 JPA，图遍历的递归 CTE 用 JdbcTemplate 写原生 SQL -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <!-- 三种数据库后端 -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- 数据库迁移（与 dw-org / dw-model 一致）：H2 由 flyway-core 直接支持 -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
+        </dependency>
+        <!-- 健康检查与运行指标 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            spring-boot-starter-test 引入 JUnit 5，会使 surefire 切换到 JUnit Platform provider。
+            本项目既有测试全部是 JUnit 4，缺少 vintage 引擎会导致它们被静默跳过（Tests run: 0）。
+        -->
+        <dependency>
+            <groupId>org.junit.vintage</groupId>
+            <artifactId>junit-vintage-engine</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+        </dependency>
+        <!--
+            jakarta.persistence-api 由 spring-boot-starter-data-jpa 传递引入，
+            版本交给 Spring Boot BOM 管理。此处曾显式锁定 3.2.0，
+            与 Boot 3.3 自带的 Hibernate 6.5（实现 JPA 3.1）冲突，
+            启动时报 getSchemaManager() 返回类型不兼容。
+        -->
+        <dependency>
+            <groupId>org.jetbrains.kotlin</groupId>
+            <artifactId>kotlin-stdlib</artifactId>
+            <version>${kotlin.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jetbrains.kotlin</groupId>
+            <artifactId>kotlin-test</artifactId>
+            <version>${kotlin.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.github.melin.sqlflow</groupId>
+            <artifactId>sqlflow</artifactId>
+            <version>${sqlflow.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.melin.superior</groupId>
+            <artifactId>superior-spark-parser</artifactId>
+            <version>${sql-parser.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.melin.superior</groupId>
+            <artifactId>superior-appjar-parser</artifactId>
+            <version>${sql-parser.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.melin.superior</groupId>
+            <artifactId>superior-flink-parser</artifactId>
+            <version>${sql-parser.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.melin.superior</groupId>
+            <artifactId>superior-starrocks-parser</artifactId>
+            <version>${sql-parser.version}</version>
+        </dependency>
+        <!-- Doris 有独立语法，此前一直借用 StarRocksHelper，SET/UNSET 等语句支持不到 -->
+        <dependency>
+            <groupId>io.github.melin.superior</groupId>
+            <artifactId>superior-doris-parser</artifactId>
+            <version>${sql-parser.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.melin.superior</groupId>
+            <artifactId>superior-trino-parser</artifactId>
+            <version>${sql-parser.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.melin.superior</groupId>
+            <artifactId>superior-presto-parser</artifactId>
+            <version>${sql-parser.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.melin.superior</groupId>
+            <artifactId>superior-redshift-parser</artifactId>
+            <version>${sql-parser.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.melin.superior</groupId>
+            <artifactId>superior-mysql-parser</artifactId>
+            <version>${sql-parser.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.melin.superior</groupId>
+            <artifactId>superior-oracle-parser</artifactId>
+            <version>${sql-parser.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.melin.superior</groupId>
+            <artifactId>superior-postgres-parser</artifactId>
+            <version>${sql-parser.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.melin.superior</groupId>
+            <artifactId>superior-sqlserver-parser</artifactId>
+            <version>${sql-parser.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.melin.superior</groupId>
+            <artifactId>superior-clickhouse-parser</artifactId>
+            <version>${sql-parser.version}</version>
+        </dependency>
+        <!-- https://mvnrepository.com/artifact/org.apache.gravitino/gravitino-client-java-runtime -->
+        <dependency>
+            <groupId>org.apache.gravitino</groupId>
+            <artifactId>gravitino-client-java-runtime</artifactId>
+            <version>${gravitino.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.13.2</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <version>3.24.2</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>${guava.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jetbrains.kotlin</groupId>
+            <artifactId>kotlin-stdlib-jdk8</artifactId>
+            <version>${kotlin.version}</version>
+        </dependency>
+
+    </dependencies>
+
+
+    <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <!-- Flyway 迁移脚本在 src/main/resources/db/migration/<方言>/，
+                 随上面的默认 resource 一起打包，无需额外配置 -->
+        </resources>
+        <plugins>
+
+            <!-- 打成可执行 fat jar；此前缺失，mvn package 产出的 jar 无法直接运行 -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <mainClass>com.dwai.lineage.Main</mainClass>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <excludes>
+                        <!--
+                            gravitino 包下的测试依赖外部 Gravitino 服务，
+                            服务不可达时每个用例都要等到网络超时（实测整包耗时 8 分钟以上）。
+                            默认跳过，需要时用 -Dexternal.tests.skip=false 打开。
+                        -->
+                        <exclude>${external.tests.exclude}</exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-maven-plugin</artifactId>
+                <version>${kotlin.version}</version>
+                <extensions>true</extensions>
+                <executions>
+                    <execution>
+                        <id>compile</id>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <phase>process-sources</phase>
+                        <configuration>
+                            <sourceDirs>
+                                <sourceDir>${project.basedir}/src/main/kotlin</sourceDir>
+                                <sourceDir>${project.basedir}/src/main/java</sourceDir>
+                                <sourceDir>${project.build.directory}/generated-sources/antlr4</sourceDir>
+                            </sourceDirs>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>test-compile</id>
+                        <goals>
+                            <goal>test-compile</goal>
+                        </goals>
+                        <configuration>
+                            <sourceDirs>
+                                <sourceDir>${project.basedir}/src/test/kotlin</sourceDir>
+                                <sourceDir>${project.basedir}/src/test/java</sourceDir>
+                            </sourceDirs>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <release>${maven.compiler.target}</release>
+                    <encoding>${project.build.sourceEncoding}</encoding>
+                </configuration>
+                <executions>
+                    <!-- Replacing default-compile as it is treated specially by maven -->
+                    <execution>
+                        <id>default-compile</id>
+                        <phase>none</phase>
+                    </execution>
+                    <!-- Replacing default-testCompile as it is treated specially by maven -->
+                    <execution>
+                        <id>default-testCompile</id>
+                        <phase>none</phase>
+                    </execution>
+                    <execution>
+                        <id>java-compile</id>
+                        <goals>
+                            <goal>compile</goal>
+                        </goals>
+                        <phase>compile</phase>
+                    </execution>
+                    <execution>
+                        <id>java-test-compile</id>
+                        <goals>
+                            <goal>testCompile</goal>
+                        </goals>
+                        <phase>test-compile</phase>
+                    </execution>
+                </executions>
+            </plugin>
+
+        </plugins>
+    </build>
+    <profiles>
+        <!-- mvn test -Pexternal-tests：连同依赖外部 Gravitino 服务的测试一起跑 -->
+        <profile>
+            <id>external-tests</id>
+            <properties>
+                <external.tests.exclude>**/nothing-excluded-by-this-pattern</external.tests.exclude>
+            </properties>
+        </profile>
+
+    </profiles>
+</project>

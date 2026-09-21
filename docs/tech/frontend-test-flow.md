@@ -1,14 +1,14 @@
 # 前端完整测试流程
 
 覆盖工作台与相关壳（登录、租户、用户/项目抽屉、授权码、角色、设置、进项目、规范/建模、平台后台）。  
-自动化：`ui/e2e/workbench.spec.ts`（Playwright）。本文件是人工走查清单，自动化覆盖其中标注「自动」的用例。
+自动化：`dw-model/ui/e2e/workbench.spec.ts`（Playwright）。本文件是人工走查清单，自动化覆盖其中标注「自动」的用例。
 
 ## 环境
 
 | 项 | 值 |
 |---|---|
-| UI | http://127.0.0.1:5173 （`cd ui && VITE_DEPLOY_MODE=multi npm run dev`） |
-| API | http://127.0.0.1:8080 （`DW_AI_MODE=multi`，见仓库启动说明） |
+| UI | 租户管理 http://127.0.0.1:5174 （`npm run dev:org`）；智仓 http://127.0.0.1:5173 （`npm run dev:model`） |
+| API | 租户管理 18080；智仓 18081 |
 | 库 | Postgres `127.0.0.1:5432` / `dwai` / `dwai` / `dwai` |
 | 代理 | Vite `/api` → `8080`；Java 须关掉系统 SOCKS |
 
@@ -23,13 +23,13 @@
 ## 重跑自动化
 
 ```bash
-cd ui
+cd dw-model/ui
 # 本机已装 Chrome 即可；配置走 channel: 'chrome'
 # 若要用 Playwright 自带浏览器：npx playwright install chromium
 npm run test:e2e
 ```
 
-服务须已在 5173 / 8080。报告：`ui/playwright-report/`。
+服务须已在 5174 / 5173 / 18080 / 18081。报告：`dw-model/ui/playwright-report/`。
 
 ---
 

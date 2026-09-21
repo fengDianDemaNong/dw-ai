@@ -1,0 +1,51 @@
+# 只起智仓。仓库根：docker compose -f dw-model/docker-compose.yml up -d --build
+# 多租户须另起租户管理，并设 ORG_BASE_URL。
+services:
+  model-api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    image: dw-model:0.1.3
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      SERVER_PORT: 8080
+      DW_AI_HOME: /app
+      DB_URL: ${MODEL_DB_URL:-}
+      DB_USER: ${MODEL_DB_USER:-${DB_USER:-}}
+      DB_PASSWORD: ${MODEL_DB_PASSWORD:-${DB_PASSWORD:-}}
+      DB_TYPE: ${MODEL_DB_TYPE:-${DB_TYPE:-}}
+      DW_AI_MODE: ${DW_AI_MODE:-multi}
+      DW_AI_LLM_SECRET: ${DW_AI_LLM_SECRET:-dw-ai-llm-dev-secret-change-me-32b}
+      SECURITY_MODE: ${SECURITY_MODE:-dev}
+      JWT_SECRET: ${JWT_SECRET:-dw-ai-dev-secret-change-me-please-32b}
+      ALLOW_DEV_LOGIN: ${ALLOW_DEV_LOGIN:-true}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      ORG_BASE_URL: ${ORG_BASE_URL:-http://host.docker.internal:18080}
+      RULES_BASE: ${RULES_BASE:-}
+    ports:
+      - "${API_PORT:-18081}:8080"
+    volumes:
+      - dw-mode-h2:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 10
+
+  model-ui:
+    build:
+      context: ..
+      dockerfile: dw-model/ui/Dockerfile
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-.}
+        VITE_DEPLOY_MODE: ${DW_AI_MODE:-multi}
+    image: dw-model-ui:0.1.3
+    ports:
+      - "${MODEL_UI_PORT:-8081}:80"
+    depends_on:
+      model-api:
+        condition: service_healthy
+
+volumes:
+  dw-mode-h2:

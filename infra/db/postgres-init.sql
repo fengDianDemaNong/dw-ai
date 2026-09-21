@@ -1,0 +1,3 @@
+CREATE DATABASE dw_org;
+CREATE DATABASE dw_mode;
+CREATE DATABASE dw_lineage;

@@ -1,0 +1,48 @@
+# 只起租户管理。仓库根：docker compose -f dw-org/docker-compose.yml up -d --build
+# 前端 Nginx 把 /api 反代到 org-api。
+services:
+  org-api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    image: dw-org:0.1.3
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      SERVER_PORT: 8080
+      DW_AI_HOME: /app
+      DB_URL: ${ORG_DB_URL:-}
+      DB_USER: ${ORG_DB_USER:-${DB_USER:-}}
+      DB_PASSWORD: ${ORG_DB_PASSWORD:-${DB_PASSWORD:-}}
+      DB_TYPE: ${ORG_DB_TYPE:-${DB_TYPE:-}}
+      DW_AI_MODE: ${DW_AI_MODE:-multi}
+      JWT_SECRET: ${JWT_SECRET:-dw-ai-dev-secret-change-me-please-32b}
+      ALLOW_DEV_LOGIN: ${ALLOW_DEV_LOGIN:-true}
+      CORS_ORIGINS: ${CORS_ORIGINS:-*}
+      PUBLIC_BASE_URL: ${ORG_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
+    ports:
+      - "${ORG_API_PORT:-18080}:8080"
+    volumes:
+      - dw-org-h2:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 10
+
+  org-ui:
+    build:
+      context: ..
+      dockerfile: dw-org/ui/Dockerfile
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-.}
+        VITE_DEPLOY_MODE: ${DW_AI_MODE:-multi}
+    image: dw-org-ui:0.1.3
+    ports:
+      - "${ORG_UI_PORT:-8080}:80"
+    depends_on:
+      org-api:
+        condition: service_healthy
+
+volumes:
+  dw-org-h2:

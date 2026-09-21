@@ -1,4 +1,5 @@
 node_modules
+.pnpm-store/
 dist
 .DS_Store
 *.local
@@ -8,8 +9,12 @@ target/
 .idea/
 *.iml
 data/
-services/api/data/
+dw-org/api/data/
+dw-model/api/data/
 test-results/
 playwright-report/
 blob-report/
 playwright/.cache/
+release/
+dw-org/release/
+dw-model/release/
