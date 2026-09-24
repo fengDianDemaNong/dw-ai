@@ -1,0 +1,114 @@
+# ================================================================
+#  SQL 血缘分析平台  配置文件
+#
+#  常规部署只需修改「数据库」一节。
+#  改完执行 bin/restart.sh 生效。
+# ================================================================
+
+# ---------------- 数据库 ----------------
+# 选好 type 后，JDBC URL、驱动、建表脚本会自动匹配，无需手工拼接。
+database:
+  # 可选值：h2 | mysql | postgresql
+  #   h2         内嵌数据库，数据存放在 data 目录，免安装，适合单机与试用
+  #   mysql      需 MySQL 8.0 及以上（血缘图遍历依赖递归 CTE，5.7 不支持）
+  #   postgresql 需 PostgreSQL 12 及以上
+  type: h2
+
+  # ---- type=h2 时只需下面这一项 ----
+  h2-path: ./data/dw_lineage
+
+  # ---- type=mysql / postgresql 时填写以下各项 ----
+  host: localhost
+  # 端口留空则使用默认值：mysql 3306，postgresql 5432
+  port:
+  name: dw_lineage
+  # 本段的各项都不必写在这个文件里，可在同目录的 env.sh 中 export
+  # （DB_TYPE / DB_HOST / DB_PORT / DB_NAME / DB_URL / DB_USER / DB_PASSWORD，
+  # 与 dw-org / dw-model 同口径）—— 密码不落配置文件，且优先级更高：
+  # 两处都填时以 env.sh 为准。
+  username:
+  password:
+  # 附加连接参数，一般不用改，例如：useSSL=false
+  params:
+
+  # 需要完全自定义连接串时填这里，填了则忽略上面的 host/port/name
+  # url: jdbc:mysql://10.0.0.1:3306/dw_lineage?useSSL=false
+
+
+# ---------------- 服务端口 ----------------
+server:
+  port: 8080
+
+
+# ---------------- 元数据服务 ----------------
+# 字段级血缘需要表结构。除了用 SQL 里的 CREATE TABLE，
+# 还可以对接外部元数据服务；trino / presto / sqlserver 必须依赖外部元数据。
+#
+# 【推荐】在控制台的「元数据服务」页面配置（http://<地址>/settings/metadata），
+# 可以配多个、随时改、带测试连接，支持 Gravitino 与 dbx 两种类型。
+# 下面这一项只是「页面上还没配任何服务时」的兜底 Gravitino 地址。
+gravitino:
+  url: http://localhost:8090
+
+metadata:
+  # dbx 的登录密码等凭据会加密后存进数据库，加密主密钥从这里读。
+  #
+  # ⚠️ 强烈建议改用环境变量注入（export METADATA_SECRET_KEY=...），不要写在本文件里。
+  # 留空时服务照常启动，但保存带凭据的元数据服务会报错——这是刻意的，
+  # 宁可保存失败也不能把凭据明文写进数据库。
+  #
+  # ⚠️ 密钥一旦更换，已保存的凭据将无法解密，需要在页面上重新录入。
+  secret-key: ${METADATA_SECRET_KEY:}
+
+
+# ---------------- 解析保护 ----------------
+sql:
+  parse:
+    # 单条 SQL 解析超时（秒）
+    timeout-seconds: 60
+    # 解析线程栈大小（MB），SQL 嵌套很深时可调大
+    stack-size-mb: 16
+    # 并发解析上限，超出返回「请稍后重试」
+    max-concurrent: 16
+
+
+# ---------------- 跨域 ----------------
+# 前端由本服务一并托管，属同源访问，通常无需配置。
+# 仅当前端独立部署在其它域名时，在此填写白名单（逗号分隔）。
+cors:
+  allowed-origins:
+
+
+# ---------------- 日志 ----------------
+logging:
+  level:
+    com.dwai.lineage: INFO
+    # ⚠️ 安全：dbx 的 /api/connection/list 会明文返回数据库密码，
+    # HTTP 报文日志会把整个响应体写进日志文件。这几项请保持 INFO，不要调成 DEBUG。
+    # 排查 dbx 对接问题请把 com.dwai.lineage.service.metadata.dbx 调到 DEBUG，它已做过脱敏。
+    org.apache.hc.client5.http.wire: INFO
+    org.apache.hc.client5.http.headers: INFO
+    org.springframework.web.client: INFO
+  file:
+    path: ./logs
+
+
+# ---------------- 以下为内部配置，一般不需要改动 ----------------
+spring:
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none
+  flyway:
+    # 表结构由 Flyway 托管（与 dw-org / dw-model 一致）：
+    # 空库启动自动建表；已用 bin/init-db.sh 建好的库 baseline 接管，之后自动应用新迁移。
+    # 脚本目录按 database.type 自动选择。
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 2
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
