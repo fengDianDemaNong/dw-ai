@@ -1,0 +1,16 @@
+{
+  "name": "dw-lineage",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "数据地图 / 血缘分析",
+  "scripts": {
+    "//ui": "ui 已并入仓库根的 npm workspaces（见 docs/tech/adr/0014），依赖装在仓库根，所以要用 --prefix .. 指到根再 -w 选工作区（包名 sql-tools，不是目录名）。",
+    "dev": "npm --prefix .. run dev:standard -w sql-tools",
+    "dev:lineage": "npm --prefix .. run dev:standard -w sql-tools",
+    "dev:api": "mvn -f api/pom.xml spring-boot:run",
+    "dev:api:lineage": "mvn -f api/pom.xml spring-boot:run -Dspring-boot.run.profiles=multi",
+    "build": "npm --prefix .. run build -w sql-tools",
+    "package": "bash package.sh"
+  }
+}

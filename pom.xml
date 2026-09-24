@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+      聚合（aggregation），不是继承。
+
+      三个后端此前各自 `mvn -f <path>/pom.xml` 独立构建，没有任何一个地方能回答
+      「整个仓库编译得过吗」。加这个文件只是为了给出一条统一入口：
+
+          mvn test          # 三个后端 + 依赖顺序
+          mvn -pl dw-org/api test
+
+      刻意**不**做父 pom：三个模块的 spring-boot-starter-parent 是它们的真实父，
+      版本要各自看得见（一处升级就应当是一处改动）。把父关系挂到这里会多一层间接，
+      而唯一的好处只是少写一行 <version>。
+
+      注意 Maven 的聚合 ≠ 构建顺序保证：模块间目前没有 Maven 依赖（互不引用），
+      真正的共享模块（dw-common）落地后再在这里按依赖顺序排列。
+    -->
+    <groupId>com.dwai</groupId>
+    <artifactId>dw-ai-parent</artifactId>
+    <version>0.2.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    <name>dw-ai</name>
+    <description>数据仓库智能建设平台：组织平台 / 仓建设 / 数据地图</description>
+
+    <modules>
+        <!-- dw-common 必须排在前面：两个服务依赖它，Maven 按声明顺序构建 -->
+        <module>dw-common</module>
+        <module>dw-org/api</module>
+        <module>dw-model/api</module>
+        <module>dw-lineage/api</module>
+    </modules>
+</project>

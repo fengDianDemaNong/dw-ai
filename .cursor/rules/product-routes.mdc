@@ -1,0 +1,41 @@
+---
+description: 三产品页面归属与路由前缀；独立/普通/多租户不得串页面
+alwaysApply: true
+---
+
+# 前端页面按产品隔离
+
+本仓库三个已交付服务各自拥有页面，**路由前缀不得混用**。改导航、登录、跳转、SPA fallback 前先看对应 `ui/src/config/pages.ts`（lineage 在 `ui/src/config/pages.ts`）。
+
+| 服务 | 前缀 | 模式 | 本进程页面 |
+|---|---|---|---|
+| `dw-org` | `/org…` | **只有 multi** | 登录、选租户、工作台、平台后台 |
+| `dw-model` | `/model…` | standalone / standard / multi | 规范中心、建模中心 |
+| `dw-lineage` | `/lineage…` | standalone / standard / multi | 数据地图（检索、血缘、目录、元数据） |
+
+旧路径 `/app`、`/login`、`/select-tenant`、`/workbench`、`/platform` 只做重定向，不要再挂新页面。
+
+## 模式裁剪
+
+- **独立 standalone**（model / lineage）：无登录、无租户切换。不要跳到 org `/org/login` 或 `/org/select-tenant`。默认 `getRunMode()` 在未设 `VITE_RUN_MODE` 时是 `standalone`，不要改回 `multi`。
+- **普通 standard**：本进程本地登录（model `/model/login`）；lineage 可有本地租户/项目设置。不显示其他服务菜单。
+- **多租户 multi**：登录和选租户只在 org。仓建设未带 `#boot=` 才外链 org。数据地图仅 multi 下可由 model iframe 嵌 `/lineage…`，org 工作台外链 lineage 源站，不要在 org 里渲染建模/地图菜单。
+- **独立/普通不显示其他服务**。`otherProductsVisible()` 仅 `multi === true`。
+
+## 反例
+
+```ts
+// ❌ 仓建设独立模式默认 multi → 无 token 被送到 5171 选租户
+return readEnv() ?? 'multi';
+router.push('/select-tenant');
+openOrgLogin(); // standalone / standard 禁止
+
+// ❌ org 侧栏再挂规范中心 / 数据地图
+{ path: '/app/spec/domains' }
+{ path: '/app/map/search' }
+
+// ✅ 各产品只注册自己的前缀
+{ path: '/org/login' }
+{ path: '/model/spec/domains' }
+{ path: '/lineage/search' }
+```
