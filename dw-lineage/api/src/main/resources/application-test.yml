@@ -1,0 +1,3 @@
+# 测试环境
+gravitino:
+  url: ${GRAVITINO_URL:http://localhost:8090}

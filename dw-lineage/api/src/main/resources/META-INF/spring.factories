@@ -1,0 +1,4 @@
+# 按 database.type 切换 Flyway 脚本目录。
+# EnvironmentPostProcessor 必须在这里注册：它要赶在 Spring 容器创建之前运行，组件扫描轮不到它。
+org.springframework.boot.env.EnvironmentPostProcessor=\
+com.dwai.lineage.conf.FlywayLocationEnvironmentPostProcessor

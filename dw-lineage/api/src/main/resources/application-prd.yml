@@ -1,0 +1,7 @@
+# 生产环境。务必通过环境变量注入真实地址，不要在此硬编码。
+gravitino:
+  url: ${GRAVITINO_URL:http://gravitino:8090}
+
+cors:
+  # 生产走 nginx 反向代理同源访问，默认不放开跨域
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:}

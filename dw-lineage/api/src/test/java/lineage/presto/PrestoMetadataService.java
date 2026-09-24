@@ -1,0 +1,58 @@
+package lineage.presto;
+
+import com.google.common.collect.Lists;
+import io.github.melin.sqlflow.metadata.MetadataService;
+import io.github.melin.sqlflow.metadata.QualifiedObjectName;
+import io.github.melin.sqlflow.metadata.SchemaTable;
+import io.github.melin.sqlflow.metadata.ViewDefinition;
+import io.github.melin.sqlflow.tree.QualifiedName;
+
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * huaixin 2021/12/25 6:13 PM
+ */
+public class PrestoMetadataService implements MetadataService {
+
+    @Override
+    public Optional<String> getSchema() {
+        return Optional.of("default");
+    }
+
+    @Override
+    public Optional<String> getCatalog() {
+        return Optional.empty();
+    }
+
+    @Override
+    public boolean isAggregationFunction(QualifiedName name) {
+        return false;
+    }
+
+    @Override
+    public Optional<SchemaTable> getTableSchema(QualifiedObjectName table) {
+        if (table.getObjectName().equals("test")) {
+            List<String> columns = Lists.newArrayList();
+            columns.add("COL1");
+            columns.add("COL2");
+            columns.add("type");
+            columns.add("row_num");
+            columns.add("ds");
+
+            return Optional.of(new SchemaTable("default", "test", columns));
+        } else if (table.getObjectName().equals("Demo")) {
+            List<String> columns = Lists.newArrayList();
+            columns.add("NAME");
+            columns.add("row_num");
+
+            return Optional.of(new SchemaTable("default", "Demo", columns));
+        }
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<ViewDefinition> getView(QualifiedObjectName viewName) {
+        return Optional.empty();
+    }
+}
