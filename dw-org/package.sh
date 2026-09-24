@@ -44,6 +44,16 @@ patch_env() {
   fi
 }
 
+# 安装包的 sql/ 只是给人看的参考副本，运行时并不从这里读 —— SeedMain 走 classpath，
+# 真正生效的是 libs/ 里的 dw-common jar。身份层（identity*.sql）住在 dw-common，
+# 本模块只剩一个 members.sql，所以要跨模块拷一次，否则现场打开 sql/ 只看得到一个文件、
+# 看不出这套演示数据由哪几段拼成。
+copy_seed_sql() {
+  local dest="$1"
+  cp "$HERE/api/src/main/resources/db/seed/"*.sql "$dest/"
+  cp "$REPO/dw-common/src/main/resources/db/seed/"*.sql "$dest/"
+}
+
 build_ui() {
   need node
   need npm
@@ -60,11 +70,16 @@ build_ui() {
 build_api() {
   need mvn
   echo "==> 构建租户管理 API"
+  # dw-common 是独立模块，先 install 到本地仓库；之后本服务仍按自己的 pom 独立构建。
+  # 仓库根的聚合 pom 是「一次构建全部」用的，这里刻意不用它 —— 单服务打包
+  # 不应把其它服务也拉进来编译。
+  mvn -B -DskipTests -q -f "$REPO/dw-common/pom.xml" install
   (cd "$HERE/api" && mvn -B -DskipTests clean package)
   [[ -f "$JAR" ]] || { echo "未找到 $JAR" >&2; exit 1; }
   [[ -d "$LIBDIR" ]] || { echo "未找到 $LIBDIR" >&2; exit 1; }
   local deps_hash
-  deps_hash="$(shasum -a 256 "$HERE/api/pom.xml" | awk '{print $1}')"
+  # 依赖缓存要跟着两个 pom 一起失效：dw-common 加一个依赖，本服务的 libs/ 也会变
+  deps_hash="$(cat "$REPO/dw-common/pom.xml" "$HERE/api/pom.xml" | shasum -a 256 | awk '{print $1}')"
   if [[ -f "$LIBS_CACHE/.deps-hash" && "$(cat "$LIBS_CACHE/.deps-hash")" == "$deps_hash" ]]; then
     echo "==> 依赖未变，复用 dw-org/release/.libs-cache"
   else
@@ -111,7 +126,7 @@ pack_api() {
   cp "$JAR" "$api_stage/app/${APP_JAR_NAME}"
   cp "$LIBS_CACHE/"*.jar "$api_stage/libs/"
   cp "$LIBS_CACHE/.deps-hash" "$api_stage/libs/.deps-hash"
-  cp "$HERE/api/src/main/resources/db/seed/"*.sql "$api_stage/sql/"
+  copy_seed_sql "$api_stage/sql"
   printf '%s\n' "$VERSION" >"$api_stage/VERSION"
   cat >"$api_stage/README.txt" <<EOF
 租户管理 ${VERSION} 后端安装包（不含控制台）
@@ -135,7 +150,7 @@ pack_all() {
   cp "$LIBS_CACHE/"*.jar "$STAGE/libs/"
   cp "$LIBS_CACHE/.deps-hash" "$STAGE/libs/.deps-hash"
   cp -R "$DIST/." "$STAGE/web/"
-  cp "$HERE/api/src/main/resources/db/seed/"*.sql "$STAGE/sql/"
+  copy_seed_sql "$STAGE/sql"
   printf '%s\n' "$VERSION" >"$STAGE/VERSION"
   cat >"$STAGE/README.txt" <<EOF
 租户管理 ${VERSION} 安装包（前后端一体，Java 出页面）
@@ -153,7 +168,7 @@ EOF
   cp -R "$DIST/." "$app_stage/web/"
   cp -R "$HERE/packaging/bin/." "$app_stage/bin/"
   chmod +x "$app_stage/bin/"*.sh
-  cp "$HERE/api/src/main/resources/db/seed/"*.sql "$app_stage/sql/"
+  copy_seed_sql "$app_stage/sql"
   printf '%s\n' "$VERSION" >"$app_stage/VERSION"
   tar -C "$HERE/release" -czf "$HERE/release/${NAME}-app.tar.gz" "${NAME}-app"
   echo "==> 增量包 $HERE/release/${NAME}-app.tar.gz"

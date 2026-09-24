@@ -1,6 +1,5 @@
 # 依赖
 node_modules/
-.pnpm-store/
 
 # 编译产物
 target/

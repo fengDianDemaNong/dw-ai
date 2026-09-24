@@ -42,11 +42,9 @@ npm run dev:org
 | 张三 | 123456 | 星河电商租户管理员 |
 | 李四 | 123456 | 建模 / 启航 |
 | 王五 | 123456 | 只读对比 |
-| admin | admin123 | 平台用户 |
+| admin | 123456 | 平台用户 |
 
-空库首次启动会写入演示数据（`DemoSeedRunner`）。健康检查：`GET http://127.0.0.1:18080/api/health`
-
-空库首次启动会写入演示数据（`DemoSeedRunner`）。健康检查：`GET http://127.0.0.1:18080/api/health`
+空库首次启动只建默认 admin 账户，无演示数据；张三 / 李四 / 王五等演示账号需执行 `dw-org/packaging/bin/seed-demo.sh`（**手工触发**，启动不自动灌）。组织平台恒按 `multi` 跑（`DwaiProperties.runMode()` 首行），所以它灌的总是全套身份：星河电商 + 启航科技两个租户、四个账号、两个项目与授权码 —— 对组织平台而言这是**权威身份数据**，不是可选的演示数据。健康检查：`GET http://127.0.0.1:18080/api/health`
 
 若本地曾用旧 schema 或旧文件名 `org.mv.db`，删掉 `dw-org/api/data/` 下的 H2 文件再启动（当前文件名 `dw_org`）。
 
@@ -69,4 +67,6 @@ docker compose -f dw-org/docker-compose.yml up -d --build
 # 控制台 http://127.0.0.1:8080/   API http://127.0.0.1:18080/
 ```
 
-安装包改模式：`conf/env.sh` 里 `DW_AI_MODE=multi`。`JWT_SECRET` 须与智仓包相同。
+安装包改模式：`conf/env.sh` 里 `DW_AI_MODE=multi`。`JWT_SECRET`、`MODULE_TOKEN` 须与智仓包、数据地图包相同
+—— 两个都是**三个包同一个值**；漏配 `MODULE_TOKEN` 会让模块间的租户/项目同步一律 401，
+且表现静默（组织里一切正常，模块里什么都没有）。见 [ADR-0012](../docs/tech/adr/0012-module-token-gate.md)。

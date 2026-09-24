@@ -1,4 +1,5 @@
 export * from './types';
+export * from './iam';
 export * from './config/grades';
 export * from './config/layerPolicies';
 export * from './naming';

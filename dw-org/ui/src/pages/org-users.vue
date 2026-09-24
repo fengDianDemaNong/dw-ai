@@ -113,7 +113,22 @@
           <div v-if="!editForm.memberships.length" class="hint">未派进项目</div>
           <div v-for="(m, i) in editForm.memberships" :key="m.projectId" class="mem-row">
             <span class="mem-name">{{ projectName(m.projectId) }}</span>
-            <a-select v-model:value="m.role" :options="projectRoleOpts" style="width: 140px" />
+            <span class="mem-product">仓建设</span>
+            <a-select
+              v-model:value="m.warehouse"
+              :options="projectRoleOpts"
+              placeholder="不参与"
+              allow-clear
+              style="width: 116px"
+            />
+            <span class="mem-product">数据地图</span>
+            <a-select
+              v-model:value="m.metadata"
+              :options="projectRoleOpts"
+              placeholder="不参与"
+              allow-clear
+              style="width: 116px"
+            />
             <a-button size="small" @click="removeMembership(i)">移出</a-button>
           </div>
           <div class="mem-add">
@@ -124,7 +139,6 @@
               allow-clear
               style="flex: 1"
             />
-            <a-select v-model:value="editForm.addRole" :options="projectRoleOpts" style="width: 140px" />
             <a-button size="small" @click="addMembership">加入</a-button>
           </div>
         </div>
@@ -275,6 +289,7 @@ import {
   TENANT_ROLE_LABEL,
   aiCapLabel,
   type AiCap,
+  type Product,
   type ProjectRole,
 } from '../config/iam';
 import { isMultiTenant } from '../config/runtime';
@@ -307,9 +322,19 @@ const editForm = reactive({
   username: '',
   tenantRole: 'member',
   status: 'active',
-  memberships: [] as { projectId: string; role: ProjectRole }[],
+  /**
+   * 一个项目一行，行内按产品各存一个角色。
+   *
+   * <p>`project_members` 的主键是 (project_id, user_id, product)：同一个人在同一项目下
+   * 可以既是仓建设的建模人员、又是数据地图的只读访客，所以「一个项目一个角色」已经不够用了。
+   * 字段为 undefined = 那个产品没派，提交时整行不带。
+   */
+  memberships: [] as {
+    projectId: string;
+    warehouse?: ProjectRole;
+    metadata?: ProjectRole;
+  }[],
   addProjectId: undefined as string | undefined,
-  addRole: 'modeler' as ProjectRole,
   assignProjectId: undefined as string | undefined,
   newPassword: '123456',
 });
@@ -443,11 +468,23 @@ function projectName(projectId: string) {
   return tenantProjectList.value.find((p) => p.id === projectId)?.name ?? projectId;
 }
 
+/**
+ * 用户表格「项目」列的文案。
+ *
+ * <p>产品维进来后，同一个人在同一项目下会有多行（仓建设一行、数据地图一行）。
+ * 这里原本按 (项目, 用户) 取一行，会随机显示成另一个产品的角色。现在明确取仓建设那行 ——
+ * `PROJECT_ROLE_LABEL` 整张表都是仓建设的词（项目管理员 / 建模工程师 / 只读访客），
+ * 数据地图的角色是另一套词（目录管理员 / 血缘分析 / 只读访客），要在这列展示
+ * 得先有一套按产品分的标签映射，本列暂时不显示数据地图的角色。
+ */
 function projectLine(userId: string) {
   const parts = tenantProjectList.value
     .filter((p) => app.members.some((m) => m.projectId === p.id && m.userId === userId))
     .map((p) => {
-      const role = app.members.find((m) => m.projectId === p.id && m.userId === userId)?.role;
+      const role = app.members.find(
+        (m) =>
+          m.projectId === p.id && m.userId === userId && (m.product ?? 'warehouse') === 'warehouse'
+      )?.role;
       return `${p.name}（${role ? PROJECT_ROLE_LABEL[role] : ''}）`;
     });
   return parts.join('、') || '未派进项目';
@@ -487,6 +524,18 @@ async function submitCreate() {
   }
 }
 
+/**
+ * 取某人在某项目某产品下的角色。
+ *
+ * <p>没派返回 undefined 而不是兜底成 viewer ——「没派」和「派了只读」是两回事：
+ * 前者提交时不该产生这一行，后者要。
+ */
+function roleIn(projectId: string, userId: string, product: Product): ProjectRole | undefined {
+  return app.members.find(
+    (m) => m.projectId === projectId && m.userId === userId && m.product === product
+  )?.role as ProjectRole | undefined;
+}
+
 function openEdit(u: OrgUser) {
   editing.value = u;
   editForm.displayName = u.displayName;
@@ -497,10 +546,10 @@ function openEdit(u: OrgUser) {
     .filter((p) => app.members.some((m) => m.projectId === p.id && m.userId === u.id))
     .map((p) => ({
       projectId: p.id,
-      role: (app.members.find((m) => m.projectId === p.id && m.userId === u.id)?.role ?? 'viewer') as ProjectRole,
+      warehouse: roleIn(p.id, u.id, 'warehouse'),
+      metadata: roleIn(p.id, u.id, 'metadata'),
     }));
   editForm.addProjectId = undefined;
-  editForm.addRole = 'modeler';
   editForm.assignProjectId = allProjectOpts.value[0]?.value;
   editForm.newPassword = '123456';
   openEditUser.value = true;
@@ -512,7 +561,9 @@ function addMembership() {
     return;
   }
   if (editForm.memberships.some((m) => m.projectId === editForm.addProjectId)) return;
-  editForm.memberships.push({ projectId: editForm.addProjectId, role: editForm.addRole });
+  // 加入后两个产品都默认「不参与」，在行内分别选。产品维进来之后，
+  // 「加入时顺手选一个角色」这个交互本身就不成立了 —— 一个项目要选两次。
+  editForm.memberships.push({ projectId: editForm.addProjectId });
   editForm.addProjectId = undefined;
 }
 
@@ -539,7 +590,15 @@ async function submitEdit() {
       username,
       tenantRole: editForm.tenantRole,
       status: editForm.status,
-      memberships: editForm.memberships.map((m) => ({ projectId: m.projectId, role: m.role })),
+      // 一个项目最多展开成两行（仓建设 / 数据地图）。提交时按产品拆平：
+      // 后端 project_members 的主键是 (project_id, user_id, product)，
+      // 同一个人在同一个项目下有两条产品行是正常的；没派的产品不提交。
+      memberships: editForm.memberships.flatMap((m) => {
+        const rows: { projectId: string; product: Product; role: ProjectRole }[] = [];
+        if (m.warehouse) rows.push({ projectId: m.projectId, product: 'warehouse', role: m.warehouse });
+        if (m.metadata) rows.push({ projectId: m.projectId, product: 'metadata', role: m.metadata });
+        return rows;
+      }),
     });
     openEditUser.value = false;
     await refreshSession();
@@ -557,9 +616,11 @@ async function submitAssignInDrawer() {
   busy.value = true;
   try {
     await api.org.patchUser(tid.value, editing.value.id, { projectId: editForm.assignProjectId });
+    // 「指定项目管理员」这个接口只收 projectId，两个产品分别是哪个由服务端决定
+    // （当前落仓建设）。所以这里本地也只动 warehouse 一格，不替服务端猜数据地图那边。
     const exist = editForm.memberships.find((m) => m.projectId === editForm.assignProjectId);
-    if (exist) exist.role = 'admin';
-    else editForm.memberships.push({ projectId: editForm.assignProjectId, role: 'admin' });
+    if (exist) exist.warehouse = 'admin';
+    else editForm.memberships.push({ projectId: editForm.assignProjectId, warehouse: 'admin' });
     await refreshSession();
     await reload();
     message.success('已指定项目管理员');
@@ -813,6 +874,13 @@ onMounted(() => {
 .user-edit-drawer .mem-name {
   flex: 1;
   min-width: 0;
+}
+
+/* 一行里并排两个下拉，没有标签分不清哪个是哪个产品 */
+.user-edit-drawer .mem-product {
+  color: #94a3b8;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .user-edit-drawer .drawer-foot {

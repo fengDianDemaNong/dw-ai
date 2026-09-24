@@ -80,9 +80,10 @@ public class ProjectService {
         list = list.stream().filter((p) -> scoped.contains(p.getId())).toList();
       }
     } else if (!access.isRealTenantAdmin()) {
+      // 加产品维后同一个人在同一项目会有多行（每个产品一行），去重才是「参与的项目」。
       List<String> mine = members.selectList(Wrappers.<ProjectMemberEntity>lambdaQuery()
               .eq(ProjectMemberEntity::getUserId, me.userId()))
-          .stream().map(ProjectMemberEntity::getProjectId).toList();
+          .stream().map(ProjectMemberEntity::getProjectId).distinct().toList();
       list = list.stream().filter((p) -> mine.contains(p.getId())).toList();
     }
     if (!access.isRealTenantAdmin()) {
@@ -97,8 +98,10 @@ public class ProjectService {
       for (ProjectEntity p : list) {
         boolean has = memberDtos.stream().anyMatch((m) -> m.projectId().equals(p.getId()) && m.userId().equals(me.userId()));
         if (!has) {
+          // 与 membersForClient 同理：授权码不带产品维，合成行挂 warehouse。
           memberDtos.add(new ApiModels.MemberDto(
-              p.getId(), me.userId(), access.grantProjectRole(me.userId(), me.tenantId(), p.getId())));
+              p.getId(), me.userId(), "warehouse",
+              access.grantProjectRole(me.userId(), me.tenantId(), p.getId())));
         }
       }
     }
@@ -163,9 +166,10 @@ public class ProjectService {
     if (access.isRealTenantAdmin()) {
       return list.stream().map(this::toProject).toList();
     }
+    // 同 session()：一个人在同一项目会有多行（每产品一行），去重。
     List<String> mine = members.selectList(Wrappers.<ProjectMemberEntity>lambdaQuery()
             .eq(ProjectMemberEntity::getUserId, user))
-        .stream().map(ProjectMemberEntity::getProjectId).toList();
+        .stream().map(ProjectMemberEntity::getProjectId).distinct().toList();
     return list.stream()
         .filter((p) -> mine.contains(p.getId()) && isActive(p))
         .map(this::toProject)
@@ -271,7 +275,7 @@ public class ProjectService {
     p.setStatus("active");
     p.setEngines(Jsons.toJson(AiCaps.normalizeEngines(req.engines())));
     projects.insert(p);
-    upsertMember(p.getId(), adminId, "admin");
+    grantProjectAdmin(p.getId(), tid, adminId);
     moduleSync.syncProject(p);
     return toProject(p);
   }
@@ -297,7 +301,7 @@ public class ProjectService {
       if (req.owner() != null && !req.owner().isBlank()) {
         access.requireTenantUser(req.owner());
         p.setOwner(req.owner().trim());
-        upsertMember(p.getId(), p.getOwner(), "admin");
+        grantProjectAdmin(p.getId(), p.getTenantId(), p.getOwner());
       }
       if (req.status() != null && !req.status().isBlank()) {
         String st = req.status().trim().toLowerCase();
@@ -345,7 +349,11 @@ public class ProjectService {
     if (tid == null || tid.isBlank() || !access.grantCoversProject(me.userId(), tid, projectId)) return list;
     boolean has = list.stream().anyMatch((m) -> m.userId().equals(me.userId()) && m.projectId().equals(projectId));
     if (!has) {
-      list.add(new ApiModels.MemberDto(projectId, me.userId(), access.grantProjectRole(me.userId(), tid, projectId)));
+      // 授权码的 project_roles 只有「项目 → 角色」，没有产品维，所以这条合成行
+      // 挂在 warehouse 下。平台持码访客因此在数据地图里没有角色 —— 已知限制，
+      // 要修得先让 tenant_grants 也带产品维。
+      list.add(new ApiModels.MemberDto(
+          projectId, me.userId(), "warehouse", access.grantProjectRole(me.userId(), tid, projectId)));
     }
     return list;
   }
@@ -365,15 +373,24 @@ public class ProjectService {
     if (req.userId() == null || req.userId().isBlank()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "userId required");
     }
+    // 缺产品按仓建设处理：让还没跟上产品维的旧调用点先照原样工作。
+    String product = req.product() == null || req.product().isBlank()
+        ? "warehouse" : req.product().trim();
     String role = req.role() == null ? "viewer" : req.role();
     if (!List.of("admin", "modeler", "viewer").contains(role)) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "非法角色");
     }
     access.requireTenantUser(req.userId());
-    upsertMember(projectId, req.userId(), role);
-    return new ApiModels.MemberDto(projectId, req.userId(), role);
+    upsertMember(projectId, req.userId(), product, role);
+    return new ApiModels.MemberDto(projectId, req.userId(), product, role);
   }
 
+  /**
+   * 把一个人移出项目 —— <b>所有产品</b>，不是某一个。
+   *
+   * <p>只想摘掉某人在某个产品下的角色，用 {@link #putMember} 把那行删掉或改成 viewer；
+   * 这个接口的语义是「这个人不再属于本项目」。
+   */
   @Transactional
   public void deleteMember(String projectId, String userId) {
     access.requireProject(projectId);
@@ -402,21 +419,38 @@ public class ProjectService {
     users.insert(u);
   }
 
-  private void upsertMember(String projectId, String userId, String role) {
+  /**
+   * 把某人设为项目在<b>每个已开通产品</b>下的管理角色。
+   *
+   * <p>PRD §3：项目管理员各已启用产品自动映射为该产品管理角色。建项目、换 owner、
+   * 组织后台「指定项目管理员」都走这里 —— 只给仓建设建行的结果是这个人进不去数据地图，
+   * 而成员列表上还看不出缺了什么。
+   */
+  @Transactional
+  public void grantProjectAdmin(String projectId, String tenantId, String userId) {
+    for (String product : access.licensedProducts(tenantId)) {
+      upsertMember(projectId, userId, product, "admin");
+    }
+  }
+
+  private void upsertMember(String projectId, String userId, String product, String role) {
     ProjectMemberEntity exist = members.selectOne(Wrappers.<ProjectMemberEntity>lambdaQuery()
         .eq(ProjectMemberEntity::getProjectId, projectId)
-        .eq(ProjectMemberEntity::getUserId, userId));
+        .eq(ProjectMemberEntity::getUserId, userId)
+        .eq(ProjectMemberEntity::getProduct, product));
     if (exist == null) {
       ProjectMemberEntity m = new ProjectMemberEntity();
       m.setProjectId(projectId);
       m.setUserId(userId);
+      m.setProduct(product);
       m.setRole(role);
       members.insert(m);
     } else {
       exist.setRole(role);
       members.update(exist, Wrappers.<ProjectMemberEntity>lambdaQuery()
           .eq(ProjectMemberEntity::getProjectId, projectId)
-          .eq(ProjectMemberEntity::getUserId, userId));
+          .eq(ProjectMemberEntity::getUserId, userId)
+          .eq(ProjectMemberEntity::getProduct, product));
     }
   }
 
@@ -437,7 +471,42 @@ public class ProjectService {
   }
 
   private ApiModels.MemberDto toMember(ProjectMemberEntity m) {
-    return new ApiModels.MemberDto(m.getProjectId(), m.getUserId(), m.getRole());
+    return new ApiModels.MemberDto(m.getProjectId(), m.getUserId(), m.getProduct(), m.getRole());
+  }
+
+  /**
+   * 某租户全部项目的成员，带显示名。服务间接口 {@code GET /internal/v1/members} 用它。
+   *
+   * <p><b>为什么要有这个</b>：模块侧只有项目镜像、没有成员表，所以 multi 下仓建设的
+   * 「项目成员」页此前只能给每个项目合成一条「我自己」（见 dw-model 的
+   * {@code ProjectService.session} 的 {@code warehouseRemote} 分支），且那条成员只有
+   * userId —— 前端因此只能把「显示名」列退化成 {@code u-1790068559315} 这样的内部 id。
+   * 成员和显示名的权威都在组织，这里一次性给全，模块调一次就够。
+   *
+   * <p>入参用 {@code tenantCode} 而不是 id：模块侧手上只有 code（项目镜像里带的就是它），
+   * 与 fan-out、authz/check 两个既有通道保持一致。
+   */
+  public List<ApiModels.MemberDto> membersOfTenant(String tenantCode) {
+    if (tenantCode == null || tenantCode.isBlank()) return List.of();
+    TenantEntity t = tenants.selectByCode(tenantCode.trim());
+    if (t == null) t = tenants.selectById(tenantCode.trim());
+    if (t == null) return List.of();
+    List<String> pids = projects.selectList(
+            Wrappers.<ProjectEntity>lambdaQuery().eq(ProjectEntity::getTenantId, t.getId()))
+        .stream().map(ProjectEntity::getId).toList();
+    if (pids.isEmpty()) return List.of();
+    return members.selectList(
+            Wrappers.<ProjectMemberEntity>lambdaQuery().in(ProjectMemberEntity::getProjectId, pids))
+        .stream().map(this::toMemberWithName).toList();
+  }
+
+  /** 成员 + 显示名/登录名。成员表只存 userId，名字与账号要回 users 表取。 */
+  private ApiModels.MemberDto toMemberWithName(ProjectMemberEntity m) {
+    UserEntity u = m.getUserId() == null ? null : users.selectById(m.getUserId());
+    return new ApiModels.MemberDto(
+        m.getProjectId(), m.getUserId(), m.getProduct(), m.getRole(),
+        u == null ? null : u.getDisplayName(),
+        u == null ? null : u.getUsername());
   }
 
   private ApiModels.LicenseDto toLicense(TenantLicenseEntity lic, String tenantId) {

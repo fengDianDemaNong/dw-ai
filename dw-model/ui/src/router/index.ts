@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import type { RouteRecordRaw } from 'vue-router';
 import type { Perm, ProductModule } from '../config/iam';
-import { guestAccess, localLoginRequired, otherProductsVisible } from '../config/pages';
+import { guestAccess, hasWorkbench, localLoginRequired, otherProductsVisible } from '../config/pages';
 import { LINEAGE_HOME, LOGIN_PATH, MODEL_HOME, NO_PROJECT, SYS_HOME } from '../config/paths';
 import { isMultiTenant } from '../config/runtime';
 import { consumeBootHash, openOrgLogin } from '../config/product';
@@ -19,7 +19,8 @@ declare module 'vue-router' {
     member?: boolean;
     perm?: Perm;
     module?: ProductModule;
-    shell?: 'sys';
+    /** 与 dw-org/ui 保持同一套声明：布局组件里仍按 admin/sys 分流（本 UI 目前只有 sys 路由）。 */
+    shell?: 'admin' | 'sys';
     lineagePath?: string;
     owner?: 'model' | 'lineage' | 'org';
   }
@@ -47,15 +48,17 @@ const projectChildren: RouteRecordRaw[] = [
   { path: ':layer', name: 'layer-overview', component: () => import('../pages/model/dwd-overview.vue'), meta: { title: '建模', module: 'warehouse', perm: 'model:read', owner: 'model' } },
 ];
 
+// 每条都挂 module: 'metadata'，让下面的守卫把「租户没开通数据地图」挡在路由层。
+// 只有菜单过滤是不够的：菜单只决定看不看得见，地址栏照样能直达。
 const lineageChildren: RouteRecordRaw[] = [
-  { path: 'search', name: 'map-search', component: () => import('../pages/map/embed.vue'), meta: { title: '全文检索', lineagePath: '/lineage/search', owner: 'lineage' } },
-  { path: 'tables', name: 'map-tables', component: () => import('../pages/map/embed.vue'), meta: { title: '血缘', lineagePath: '/lineage/tables', owner: 'lineage' } },
-  { path: 'catalogs', name: 'map-catalogs', component: () => import('../pages/map/embed.vue'), meta: { title: '数据目录', lineagePath: '/lineage/catalogs', owner: 'lineage' } },
-  { path: 'temp-rules', name: 'map-temp-rules', component: () => import('../pages/map/embed.vue'), meta: { title: '临时表规则', lineagePath: '/lineage/temp-rules', owner: 'lineage' } },
-  { path: 'analyze', name: 'map-analyze', component: () => import('../pages/map/embed.vue'), meta: { title: 'SQL 解析', lineagePath: '/lineage/analyze', owner: 'lineage' } },
-  { path: 'meta', name: 'map-meta', component: () => import('../pages/map/embed.vue'), meta: { title: '元数据', lineagePath: '/lineage/meta', owner: 'lineage' } },
-  { path: 'settings/metadata', name: 'settings-metadata', component: () => import('../pages/map/embed.vue'), meta: { title: '元数据服务', lineagePath: '/lineage/settings/metadata', owner: 'lineage' } },
-  { path: 'settings/map', name: 'settings-map', component: () => import('../pages/map/embed.vue'), meta: { title: '数据地图设置', lineagePath: '/lineage/settings/map', owner: 'lineage' } },
+  { path: 'search', name: 'map-search', component: () => import('../pages/map/embed.vue'), meta: { title: '全文检索', lineagePath: '/lineage/search', module: 'metadata', owner: 'lineage' } },
+  { path: 'tables', name: 'map-tables', component: () => import('../pages/map/embed.vue'), meta: { title: '血缘', lineagePath: '/lineage/tables', module: 'metadata', owner: 'lineage' } },
+  { path: 'catalogs', name: 'map-catalogs', component: () => import('../pages/map/embed.vue'), meta: { title: '数据目录', lineagePath: '/lineage/catalogs', module: 'metadata', owner: 'lineage' } },
+  { path: 'temp-rules', name: 'map-temp-rules', component: () => import('../pages/map/embed.vue'), meta: { title: '临时表规则', lineagePath: '/lineage/temp-rules', module: 'metadata', owner: 'lineage' } },
+  { path: 'analyze', name: 'map-analyze', component: () => import('../pages/map/embed.vue'), meta: { title: 'SQL 解析', lineagePath: '/lineage/analyze', module: 'metadata', owner: 'lineage' } },
+  { path: 'meta', name: 'map-meta', component: () => import('../pages/map/embed.vue'), meta: { title: '元数据', lineagePath: '/lineage/meta', module: 'metadata', owner: 'lineage' } },
+  { path: 'settings/metadata', name: 'settings-metadata', component: () => import('../pages/map/embed.vue'), meta: { title: '元数据服务', lineagePath: '/lineage/settings/metadata', module: 'metadata', owner: 'lineage' } },
+  { path: 'settings/map', name: 'settings-map', component: () => import('../pages/map/embed.vue'), meta: { title: '数据地图设置', lineagePath: '/lineage/settings/map', module: 'metadata', owner: 'lineage' } },
 ];
 
 const routes: RouteRecordRaw[] = [
@@ -85,7 +88,13 @@ const routes: RouteRecordRaw[] = [
     path: SYS_HOME,
     component: () => import('../layouts/SystemLayout.vue'),
     meta: { tenant: true, shell: 'sys', owner: 'model' },
-    children: [{ path: '', name: 'sys-projects', component: () => import('../pages/projects.vue'), meta: { title: '项目管理' } }],
+    children: [
+      { path: '', name: 'sys-projects', component: () => import('../pages/projects.vue'), meta: { title: '项目管理' } },
+      { path: 'users', name: 'sys-users', component: () => import('../pages/admin/users.vue'), meta: { title: '用户管理' } },
+      { path: 'roles', name: 'sys-roles', component: () => import('../pages/sys/roles.vue'), meta: { title: '角色管理' } },
+      { path: 'knowledge', name: 'sys-knowledge', component: () => import('../pages/sys/knowledge.vue'), meta: { title: '知识库' } },
+      { path: 'settings', name: 'sys-settings', component: () => import('../pages/sys/settings.vue'), meta: { title: '设置' } },
+    ],
   },
   {
     path: MODEL_HOME,
@@ -146,13 +155,18 @@ router.beforeEach((to) => {
     return home();
   }
   if ((to.meta.tenant || to.meta.project || to.meta.member) && !app.currentTenantId && !standalone) {
+    // platformAdmin 进 SYS_HOME（工作台）不需要 tenantId —— 工作台本身就是"没选租户"的管理员入口。
+    if (app.platformAdmin && to.path.startsWith(SYS_HOME)) return true;
     if (multi) {
       openOrgLogin();
       return false;
     }
     return { path: LOGIN_PATH };
   }
-  if (to.path.startsWith(SYS_HOME) && !standard) return home();
+  // 工作台只有 multi 没有（见 `config/pages.ts` 的 `hasWorkbench`）。原先这里写的是
+  // `!standard`，把 standalone 也一起挡在外面 —— 但 standalone 的口径是
+  // 「standard 去掉用户/登录」，工作台那一级它照样有。
+  if (to.path.startsWith(SYS_HOME) && !hasWorkbench()) return home();
   if (to.name === 'no-project') {
     const next = resolveTenantHome();
     if (next !== NO_PROJECT) return { path: next };

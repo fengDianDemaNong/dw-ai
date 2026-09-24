@@ -12,6 +12,8 @@ public class TableColumnEntity {
   private String comment;
   private Boolean nullable;
   private String defaultValue;
+  /** sensitive 是 MySQL 8 保留字，反引号是必须的：MyBatis-Plus 会把它原样拼进 SQL。 */
+  @TableField("`sensitive`")
   private Boolean sensitive;
   private String grade;
   @TableField(typeHandler = JsonbStringTypeHandler.class)

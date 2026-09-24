@@ -24,6 +24,9 @@ mybatis-plus:
 
 dwai:
   product: org
+  # 判权用的产品码，权限表 Perms 的第一维。组织平台自己不做业务，默认仍是 warehouse ——
+  # snapshot / members 那几个接口是给仓建设控制台用的，判的是仓建设的权限词。
+  product-code: ${DWAI_PRODUCT_CODE:warehouse}
   db-file: dw_org
   deploy-mode: ${DW_AI_MODE:multi}
   run-mode: ${DW_AI_RUN_MODE:}
@@ -31,7 +34,7 @@ dwai:
   llm-secret: ${DW_AI_LLM_SECRET:dw-ai-llm-dev-secret-change-me-32b}
   bootstrap:
     admin-username: ${BOOTSTRAP_ADMIN_USER:admin}
-    admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:admin123}
+    admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:123456}
     admin-display-name: ${BOOTSTRAP_ADMIN_NAME:平台管理员}
   security:
     # dev = HS256 开发令牌；oidc = 校验 Casdoor JWT。接口形态相同。
@@ -41,6 +44,9 @@ dwai:
     refresh-ttl-seconds: ${REFRESH_TTL_SECONDS:900}
     idle-ttl-seconds: ${IDLE_TTL_SECONDS:900}
     allow-dev-login: ${ALLOW_DEV_LOGIN:true}
+    # 服务间令牌，保护 /internal/v1/**（模块调组织、组织 fan-out 模块都走它）。
+    # 留空 = 这些接口一律 401，不再回落成开放 —— 「忘了配」要立刻报错，不能默认打开。
+    # org / model / lineage 三处必须配同一个值（环境变量 MODULE_TOKEN）。
     module-token: ${MODULE_TOKEN:}
     casdoor:
       issuer: ${CASDOOR_ISSUER:}
@@ -63,4 +69,4 @@ dwai:
     project-code: ${DS_PROJECT_CODE:0}
   web:
     static-dir: ${WEB_STATIC_DIR:}
-    cors-origins: ${CORS_ORIGINS:http://127.0.0.1:5171,http://localhost:5171,http://127.0.0.1:5172,http://localhost:5172,http://127.0.0.1:5173,http://localhost:5173,http://localhost,http://127.0.0.1}
+    cors-origins: ${CORS_ORIGINS:*}

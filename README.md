@@ -6,7 +6,7 @@
 ```
 dw-org/              租户管理     UI 5171 / Compose 8080 · API 18080 · 库 dw_org
 dw-model/            智仓         UI 5172 / Compose 8081 · API 18081 · 规则 7080 · 库 dw_mode
-dw-lineage/          数据地图     UI 5175（独立/普通 5173）· API 18082（独立默认 8080）· 库 dw_lineage
+dw-lineage/          数据地图     UI 5173 · API 18082（独立默认 8080）· 库 dw_lineage
 packages/engine/     共享规则库（不单独启动）
 docs/product/        可点击原型（不是实现）
 ```
@@ -25,8 +25,18 @@ docs/product/        可点击原型（不是实现）
 
 组织平台**只有多租户**（它的业务就是管租户）。仓建设、血缘三种都能跑。独立 / 普通下各产品只显示自己的页面：仓建设 `/model…`，数据地图 `/lineage…`，组织 `/org…`。
 
-后端开关：`DW_AI_MODE`（组织 / 仓建设），血缘用 `LINEAGE_RUN_MODE` 或 Spring profile。  
+后端开关：三个模块统一用 `DW_AI_MODE`（组织平台恒为 multi，设了也不变）；血缘另有更具体的 `LINEAGE_RUN_MODE`，两个都设时以它为准，也可用 Spring profile（如 `application-multi.yml`）。  
 前端会调 `/api/auth/config` 跟上；为避免第一屏闪错模式，可同时设 `VITE_RUN_MODE`。
+
+**`multi` 还必须配 `MODULE_TOKEN`（三个模块同一个值）**，`standalone` / `standard` 不需要。
+组织平台创建租户 / 项目时把数据 fan-out 给仓建设与血缘，模块启动后也靠心跳让组织**全量补发**
+（`PUT /internal/v1/projects/{code}`）——这条链路唯一的门禁就是这枚令牌，未配置时
+`/internal/v1/**` 一律 401（见 [ADR-0012](docs/tech/adr/0012-module-token-gate.md)）。
+
+不配的表现**是静默的**，值得记住：组织里项目建得好好的，仓建设打开却是「还没有可进入的项目」，
+数据地图报「租户编码未同步」，日志里才有一行 401。更要紧的是——仓建设的租户和项目
+**全部靠这条链路灌进来**（multi 下它不建任何本地数据），所以库一旦为空（首次部署、换库、删库）
+就**再也补不回来**，除非把令牌配上让心跳触发全量补发。改完必须**重启进程**才生效。
 
 本地开发需要 **Node 22**、**Java 21**、**Maven**。先在仓库根：
 
@@ -43,6 +53,11 @@ npm install
 先组织，再仓建设。浏览器只从组织进。
 
 ```bash
+# ⚠️ multi 必配：三个 API 终端都要设 MODULE_TOKEN，且必须是同一个值。
+# 下面这行只在终端 1 执行一次，再把生成的值复制给终端 3、终端 5 ——
+# 三个终端各自跑一次 openssl rand 会得到不同的值，照样不通。
+export MODULE_TOKEN=$(openssl rand -hex 32)
+
 # 终端 1  组织 API   18080
 npm run dev:api:org
 
@@ -58,17 +73,26 @@ npm run dev:model
 
 打开 http://127.0.0.1:5171/org/login ，张三 / 123456，再点「进入仓建设」。不要直接打开 5172 登录（multi 下仓建设没有登录页）。
 
-账号：`张三` / `李四` / `王五` + `123456`；平台用户 `admin` / `admin123`。
+账号：`张三` / `李四` / `王五` + `123456`；平台用户 `admin` / `123456`。
 
 数据地图（可选）：
 
 ```bash
-# 终端 5  血缘 API  18082  profile=multi
+# 终端 5  血缘 API  18082  profile=multi（同样要设 MODULE_TOKEN，值与终端 1 相同）
 npm run dev:api:lineage
 
-# 终端 6  血缘前端  5175
+# 终端 6  血缘前端  5173
 npm run dev:lineage
 ```
+
+这两个脚本是**按 multi 配好的**：`dev:api:lineage` 带 `-Dspring-boot.run.profiles=multi`，
+所以端口落在 `application-multi.yml` 的 **18082**；`dev:lineage` 跑 `dev:multi`，
+5173 的代理也指向 18082，两边对得上。
+
+**数据地图的默认模式是 `standard`（不是 `multi`）**，与仓建设相反。上面这两个脚本
+是套件（multi）专用入口；单跑血缘见下方「普通 / 独立」两节，用的是显式 `mvn` 命令。
+混用会得到一个很迷惑的现象：后端在 8080、前端代理指向 18082，页面里每个请求都是
+**500**（vite 代理连不上时给的就是 500，不是 502/504），但后端日志干干净净。
 
 ---
 
@@ -88,8 +112,8 @@ VITE_RUN_MODE=standard npm run dev:model
 **只跑血缘**（自带租户/项目壳）：
 
 ```bash
-LINEAGE_RUN_MODE=standard mvn -f dw-lineage/sql-tools/pom.xml spring-boot:run
-(cd dw-lineage/sql-tools-vue && pnpm install && pnpm run dev:standard)
+LINEAGE_RUN_MODE=standard mvn -f dw-lineage/api/pom.xml spring-boot:run
+npm run dev:standard -w sql-tools
 ```
 
 前端默认 http://127.0.0.1:5173 ，后端默认 8080。
@@ -109,16 +133,26 @@ VITE_RUN_MODE=standalone npm run dev:model
 
 打开 http://127.0.0.1:5172/model 。
 
-**只跑血缘**（默认就是独立）：
+**只跑血缘**（默认是普通模式 standard，带本模块账号）：
 
 ```bash
-# API 默认 LINEAGE_RUN_MODE=standalone，端口 8080
-mvn -f dw-lineage/sql-tools/pom.xml spring-boot:run
+# API 默认 LINEAGE_RUN_MODE=standard（本地账号 admin / 123456），端口 8080
+mvn -f dw-lineage/api/pom.xml spring-boot:run
 
-(cd dw-lineage/sql-tools-vue && pnpm install && pnpm run dev:standalone)
+npm run dev:standard -w sql-tools
 ```
 
 打开 http://127.0.0.1:5173/lineage 。
+
+要**独立模式**（无登录，起来就能用）就把两边都换成 standalone —— 只改前端是不够的，
+后端不设模式变量时仍是 standard（血缘认两个变量：`LINEAGE_RUN_MODE` 优先，跟仓建设统一设
+`DW_AI_MODE` 也行）：
+
+```bash
+LINEAGE_RUN_MODE=standalone mvn -f dw-lineage/api/pom.xml spring-boot:run
+
+npm run dev:standalone -w sql-tools
+```
 
 ---
 
@@ -132,7 +166,19 @@ mvn -f dw-lineage/sql-tools/pom.xml spring-boot:run
 | Compose（本服务） | `docker compose -f dw-org/docker-compose.yml up -d --build` | `org-api` + `org-ui` |
 | Compose（全套） | `docker compose up -d --build` | 两套 API + 两套 Nginx |
 
-安装包改模式：`conf/env.sh` 里的 `DW_AI_MODE`（血缘 `LINEAGE_RUN_MODE`）。
+安装包改模式：`conf/env.sh` 里的 `DW_AI_MODE`（三个模块统一）；血缘另有 `LINEAGE_RUN_MODE`，两个都设时以它为准。
+
+**服务间令牌 `MODULE_TOKEN` 配在哪**（只有 `multi` 需要，三个模块的值必须一致）：
+
+| 部署方式 | 配置位置 |
+|---|---|
+| 本地开发 | 每个 API 终端 `export MODULE_TOKEN=...`（见上方各模式命令） |
+| Compose | 仓库根 `.env`（`.env.example` 里有这一项），由 compose 透传给三个 API |
+| 安装包 | 三个包各自的 `conf/env.sh` 里加 `export MODULE_TOKEN='...'` |
+
+安装包这一行要**写三遍**：`dw-org/`、`dw-model/`、`dw-lineage/` 是三个独立产物，
+各自的 `packaging/conf/env.sh` 互不相干，没有共享的配置来源（对照 `METADATA_SECRET_KEY`
+等既有项）。真要一处配全，得靠外部的统一环境变量（systemd `EnvironmentFile=`）。
 
 ## 文档
 
@@ -144,9 +190,11 @@ mvn -f dw-lineage/sql-tools/pom.xml spring-boot:run
 | [packages/engine](packages/engine/README.md) | 引擎库 |
 | [docs/product/](docs/product/) | 产品 0.2.0 |
 | [docs/user/产品手册.md](docs/user/产品手册.md) | 功能手册 |
+| [docs/index/](docs/index/README.md) | 代码索引：按模块列出每个类/组件的路径与职责，找文件用 |
 
 ```bash
 npm run proto          # 0.2.0 原型：组织 4234 / 仓建设 4233
+bin/gen-index.sh       # 重新生成 docs/index/（改完代码跑一次，几秒钟）
 ```
 
 Casdoor 为可选项。未验证前不要设 `SECURITY_MODE=oidc`。

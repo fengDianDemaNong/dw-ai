@@ -3,7 +3,22 @@
   "private": true,
   "version": "0.1.3",
   "type": "module",
-  "workspaces": ["dw-org/ui", "packages/engine", "dw-model/ui", "dw-model/rules"],
+  "workspaces": [
+    "dw-org/ui",
+    "packages/engine",
+    "dw-model/ui",
+    "dw-model/rules",
+    "dw-lineage/ui"
+  ],
+  "comments": {
+    "workspaces": "五个工作区统一用 npm。dw-lineage/ui 原先用 pnpm（独立 workspace + 独立 node_modules + packageManager 字段），2026-09 迁入这里 —— 一套安装/构建/加锁路径，依赖提升到根 node_modules。这是 ADR-0007 预留的那次「独立、单独验证的改造」，决策记录见 docs/tech/adr/0014-frontend-package-manager-unification.md。",
+    "overrides": "npm 只在 workspaces 根应用 overrides，放子包会被静默忽略。tslib 这条从 dw-lineage/ui/pnpm-workspace.yaml 的 overrides 搬来（@antv/algorithm 等要 tslib 2.x 的 __spreadArray）。代价：仓库级生效、影响全部三个 ui —— npm 没有 pnpm 的 per-importer 粒度，将来要给某一个 ui 单独钉版本只能换写法。",
+    "allowScripts": "它是 pnpm 的 allowBuilds 的对应物，但**语义不同，别当等价物**：pnpm 10+ 默认不执行依赖的 install 脚本、漏配就 ERR_PNPM_IGNORED_BUILDS 中断安装；npm 11 当前是 advisory —— 脚本仍默认执行，这里只当审查清单，未列的包在 install 时打印警告、不中断。npm 文档明说未来版本会改为阻止未审查的脚本，所以现在就按 pnpm 时代的口径显式批准 esbuild（core-js / fsevents 当时就没放行，保持不放行）。用 npm approve-scripts 维护，不要手改。",
+    "api": "三个后端的统一构建入口是仓库根的聚合 pom（见 pom.xml）。"
+  },
+  "overrides": {
+    "tslib": "^2.6.0"
+  },
   "scripts": {
     "dev": "npm run dev -w @dw-ai/ui",
     "dev:org": "npm run dev -w @dw-org/ui",
@@ -13,13 +28,18 @@
     "dev:api:org": "mvn -f dw-org/api/pom.xml spring-boot:run",
     "dev:api:model": "mvn -f dw-model/api/pom.xml spring-boot:run",
     "dev:api:warehouse": "mvn -f dw-model/api/pom.xml spring-boot:run",
-    "dev:lineage": "npm --prefix dw-lineage/sql-tools-vue run dev:multi",
-    "dev:api:lineage": "mvn -f dw-lineage/sql-tools/pom.xml spring-boot:run -Dspring-boot.run.profiles=multi",
+    "dev:lineage": "npm run dev:multi -w sql-tools",
+    "dev:api:lineage": "mvn -f dw-lineage/api/pom.xml spring-boot:run -Dspring-boot.run.profiles=multi",
     "dev:rules": "npm run dev -w @dw-ai/rules",
     "proto": "node docs/product/run-proto.mjs",
     "product:new": "bash docs/product/new-version.sh",
     "build": "npm run build -w @dw-ai/ui",
     "preview": "npm run preview -w @dw-ai/ui",
+    "test:api": "mvn -f pom.xml test",
+    "test:api:org": "mvn -f dw-org/api/pom.xml test",
+    "test:api:model": "mvn -f dw-model/api/pom.xml test",
+    "test:api:lineage": "mvn -f dw-lineage/api/pom.xml test",
+    "build:api": "mvn -f pom.xml -DskipTests package",
     "package": "bash package.sh",
     "package:org": "bash dw-org/package.sh",
     "package:org:api": "bash dw-org/package.sh api",
@@ -27,6 +47,12 @@
     "package:model": "bash dw-model/package.sh",
     "package:model:api": "bash dw-model/package.sh api",
     "package:model:ui": "bash dw-model/package.sh ui",
-    "package:warehouse": "bash dw-model/package.sh"
+    "package:warehouse": "bash dw-model/package.sh",
+    "package:lineage": "bash dw-lineage/package.sh",
+    "package:lineage:api": "bash dw-lineage/package.sh api",
+    "package:lineage:ui": "bash dw-lineage/package.sh ui"
+  },
+  "allowScripts": {
+    "esbuild": true
   }
 }

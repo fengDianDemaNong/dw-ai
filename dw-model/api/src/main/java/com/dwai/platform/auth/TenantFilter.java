@@ -69,8 +69,12 @@ public class TenantFilter extends OncePerRequestFilter {
           headerTenant);
       if (props.isStandalone()) {
         String tenant = headerTenant != null ? headerTenant : props.implicitTenantId();
-        String display = firstNonBlank(request.getHeader("X-User-Name"), "访客");
-        TenantContext.set(tenant, project, "standalone", display, false, "admin");
+        // 默认显示名不是「访客」：独立模式是一个完整的本地部署，只是没有登录这一层，
+        // 访问者拿到的是完整管理员能力（`WarehouseLocalSeedRunner` 会种下同 id 的本地用户）。
+        // 叫「访客」会让人以为进了只读模式 —— 而前端确实按角色渲染，角色一旦给不到位
+        // （见 `AuthService.currentMe`），页面就真的只剩查看。
+        String display = firstNonBlank(request.getHeader("X-User-Name"), "独立模式");
+        TenantContext.set(tenant, project, TenantContext.STANDALONE_USER_ID, display, false, "admin");
         TenantContext.setCodes(rawTenantCode, rawProjectCode);
         chain.doFilter(request, response);
         return;
@@ -163,7 +167,11 @@ public class TenantFilter extends OncePerRequestFilter {
       TenantEntity byCode = tenants.selectByCode(tenantCode);
       if (byCode != null) return byCode.getId();
     }
-    return headerTenant;
+    // 解析不到时把原始值往下带，让下游的存在性校验拒绝它（403）。
+    // 不要 return null：只给了 X-Tenant-Code 且解析不到时会变成「没有租户」的请求，
+    // 与只给 X-Tenant-Id 对不上时的行为不一致，也让后续的租户归属校验失去依据
+    // （TenantContext.tenantId() 为空时 requireProject 会跳过租户比对）。
+    return headerTenant != null ? headerTenant : tenantCode;
   }
 
   private String resolveProjectId(String headerProject, String projectCode, String tenantId) {

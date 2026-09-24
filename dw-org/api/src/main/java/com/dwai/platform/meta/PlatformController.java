@@ -49,6 +49,18 @@ public class PlatformController {
     return platform.patchTenant(id, req);
   }
 
+  /**
+   * 重置该租户管理员的密码，并作废其已签发的 refresh token。
+   *
+   * <p>单独开一个端点而不是塞进 {@code PATCH /tenants/{id}}：那个是「改租户属性」，
+   * 这个是「改某个账号的凭据」—— 两者的授权对象不同（前者动租户，后者动用户），
+   * 混在一起以后要单独收紧或单独记审计时会很别扭。
+   */
+  @PostMapping("/tenants/{id}/reset-admin-password")
+  public void resetAdminPassword(@PathVariable String id, @RequestBody(required = false) ApiModels.ResetAdminPasswordReq req) {
+    platform.resetTenantAdminPassword(id, req == null ? null : req.password());
+  }
+
   @GetMapping("/accounts")
   public List<ApiModels.OrgUserDto> accounts() {
     return platform.listAccounts();

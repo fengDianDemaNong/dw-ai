@@ -8,11 +8,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
 /** 没有平台用户时创建初始 admin。不灌演示租户 / 张三。 */
 @Component
+@Order(1)
 public class BootstrapAdminRunner implements ApplicationRunner {
   private static final Logger log = LoggerFactory.getLogger(BootstrapAdminRunner.class);
 
@@ -28,7 +30,9 @@ public class BootstrapAdminRunner implements ApplicationRunner {
 
   @Override
   public void run(ApplicationArguments args) {
-    if (props.isWarehouseOnly()) {
+    // standard 模式首次启动只建 admin，无任何业务数据。
+    // standalone 免登录、multi 由组织平台 fan-out，均跳过。
+    if (props.isStandalone() || props.isMulti()) {
       return;
     }
     long admins = users.selectCount(Wrappers.<UserEntity>lambdaQuery().eq(UserEntity::getPlatformAdmin, true));
@@ -55,7 +59,7 @@ public class BootstrapAdminRunner implements ApplicationRunner {
     u.setStatus("active");
     u.setPlatformAdmin(true);
     users.insert(u);
-    log.info("已创建初始平台用户 {}，登录后请尽快改密。演示租户仍须执行 seed.sh。", username);
+    log.info("已创建初始平台用户 {}，登录后请尽快改密。演示数据请执行 bin/seed-demo.sh。", username);
   }
 
   private static boolean blank(String s) {

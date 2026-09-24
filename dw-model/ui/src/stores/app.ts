@@ -48,7 +48,8 @@ import { checkDuplicate } from '../engine/metrics';
 import { assessImpact, tableDependentsOf } from '@dw-ai/engine';
 import { buildSpecPack, type SpecPack } from '../engine/specIo';
 import { api, authToken, setAuthToken, refreshAccess, setIdleTtlSeconds, useRemoteApi, type KnowledgeArticleDto, type Session, type Snapshot } from '../api/client';
-import { isMultiTenant, isStandalone, isStandardMode } from '../config/runtime';
+import { clearDeployMode, isMultiTenant, isStandalone, isStandardMode } from '../config/runtime';
+import { hasWorkbench } from '../config/pages';
 import { isWarehouseUi } from '../config/product';
 import { MODEL_HOME, NO_PROJECT, SYS_HOME } from '../config/paths';
 import { loadPlatformAppearance, loadTenantAppearance, loadTenantLlm } from './prefs';
@@ -277,6 +278,9 @@ export async function bootstrapRemote() {
     const mode = cfg.runMode || cfg.deployMode;
     if (mode === 'multi' || mode === 'standard' || mode === 'standalone') {
       sessionStorage.setItem('dw-ai.deployMode', mode);
+    } else {
+      // 后端答了，但没答出模式（老后端不带 runMode）—— 同样不能留上一次的值
+      clearDeployMode();
     }
     const standalone = mode === 'standalone' || cfg.allowLogin === false;
     if (cfg.allowLogin !== false && cfg.sessionEpoch) {
@@ -307,6 +311,10 @@ export async function bootstrapRemote() {
       applySnapshot(state.currentProjectId, await api.snapshot(state.currentProjectId));
     }
   } catch (e) {
+    // 后端没答上来（没起来 / 网络不通）—— 把上次问到的模式作废。
+    // 留着它最典型的翻车：上次后端跑 standard，这次只起了独立模式的前端，
+    // 前端照着残留的 standard 出登录页，而这次根本没有后端可以登录。
+    clearDeployMode();
     const msg = e instanceof Error ? e.message : String(e);
     if (/401|unauthorized|session expired|登录已过期|未登录|没有登录/i.test(msg)) {
       setAuthToken(null);
@@ -331,12 +339,17 @@ export async function loginDev(username: string, password = '') {
     await loadTenantAppearance(out.tenants[0].id);
     await loadTenantLlm(out.tenants[0].id);
   } else if (out.platformAdmin) {
-    sessionStorage.removeItem('dw-ai.tenantId');
-    state.currentTenantId = '';
+    // 后端 api.session() 会根据模式返回正确的 tenantId：
+    // - multi ：platformAdmin 还没选租户 → tenantId=null
+    // - standard：TenantFilter 自动用 implicitTenantId() → tenantId 有值
+    // 这里先不硬清空，让 applyMe 从 session 响应里决定。
     try {
       applySession(await api.session());
     } catch {
       /* 平台用户未选租户时 session 仍可用 */
+      sessionStorage.removeItem('dw-ai.tenantId');
+      state.currentTenantId = '';
+      state.tenantRole = null;
     }
     await loadPlatformAppearance();
   }
@@ -469,7 +482,15 @@ export const currentProjectRole = computed<ProjectRole | undefined>(() => {
   if (isStandalone()) return 'admin';
   if (!state.currentProjectId) return undefined;
   const uid = state.currentUserId || state.currentUser;
-  const found = state.members.find((m) => m.projectId === state.currentProjectId && m.userId === uid)?.role;
+  // 必须带产品过滤：加产品维之后同一个人在同一项目下有多行（仓建设一行、数据地图一行），
+  // 只按 (projectId, userId) 找会拿到随机一行的角色。本进程只认仓建设那行。
+  // `?? 'warehouse'` 兼容不带 product 的行（授权码访客的合成行、旧接口）。
+  const found = state.members.find(
+    (m) =>
+      m.projectId === state.currentProjectId &&
+      m.userId === uid &&
+      (m.product ?? 'warehouse') === 'warehouse'
+  )?.role;
   if (found) return found;
   // 平台持码进入：会话里合成 viewer，拉快照时可能被冲掉，只读权限仍按访客算
   if (state.platformAdmin && state.currentTenantId && state.tenantRole !== 'admin') return 'viewer';
@@ -508,6 +529,10 @@ export const canPublishModel = computed(() => can('model:publish'));
 export function resolveTenantHome(): string {
   const list = tenantProjects.value;
   if (!list.length) return isStandalone() ? MODEL_HOME : NO_PROJECT;
+  // tenant admin 优先进入系统管理工作台（尚未选项目时）。原先只判 standard，
+  // 但工作台 standalone 也有（见 `config/pages.ts` 的 `hasWorkbench`）——
+  // 后端 `TenantFilter` 对 standalone 直接给 `tenantRole=admin`，这个条件本来就成立。
+  if (hasWorkbench() && state.tenantRole === 'admin' && !state.currentProjectId) return SYS_HOME;
   const keep = list.find((p) => p.id === state.currentProjectId);
   const id = keep?.id ?? list[0].id;
   if (state.currentProjectId !== id) {
@@ -516,7 +541,6 @@ export function resolveTenantHome(): string {
   }
   const p = list.find((x) => x.id === id);
   if (p?.code) sessionStorage.setItem('dw-ai.projectCode', p.code);
-  if (isStandardMode() && state.tenantRole === 'admin' && !state.currentProjectId) return SYS_HOME;
   return MODEL_HOME;
 }
 
@@ -524,8 +548,9 @@ export const currentRoleLabel = computed(() =>
   currentProjectRole.value ? ROLE_LABEL[currentProjectRole.value] : '未加入项目'
 );
 
+/** 本进程（仓建设）的判权。产品码是常量 —— 这个前端只会画仓建设的菜单。 */
 export function can(perm: Perm): boolean {
-  return roleHas(currentProjectRole.value, perm);
+  return roleHas('warehouse', currentProjectRole.value, perm);
 }
 
 export function hasModule(mod: ProductModule): boolean {

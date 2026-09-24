@@ -46,14 +46,14 @@
 | POST | `/internal/v1/registry/heartbeat` | 模块启动上报 `product` + `baseUrl` + 健康 |
 | GET | `/internal/v1/authz/check` | `userId + tenantId + projectId + product + action` → 允许/拒绝 + 角色 |
 | GET | `/internal/v1/context` | 校验模块令牌，返回当前租户/项目/用户摘要 |
-| GET | `/internal/v1/projects/{id}/bindings` | 组织侧查询某项目已同步到哪些模块 |
+| GET | `/internal/v1/projects/{code}/bindings` | 组织侧查询某项目已同步到哪些模块 |
 
 **组织平台调模块（创建/停用项目时）**
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| PUT | `/internal/v1/projects/{id}` | **同一 projectId** 在该模块落一份空项目 |
-| DELETE | `/internal/v1/projects/{id}` | 模块侧停用或删除镜像 |
+| PUT | `/internal/v1/projects/{code}` | **同一 project code** 在该模块落一份空项目 |
+| DELETE | `/internal/v1/projects/{code}` | 模块侧停用或删除镜像 |
 
 模块 `standalone` / `standard` 不调用组织平台，也没有服务注册。`standard` 建项目只写本库。
 
@@ -134,7 +134,7 @@
 
 ## 6. 项目 ID
 
-组织（或普通模式下的本模块）创建项目时生成 `project_id`。`multi` 下组织对每个已注册且已对该租户开通的模块 `PUT /internal/v1/projects/{同一id}`。模块禁止另造项目号。跨模块 REST 只带 `tenant_id`（独立/普通可空）+ `project_id`。
+组织（或普通模式下的本模块）创建项目时生成 `project_id`。`multi` 下组织对每个已注册且已对该租户开通的模块 `PUT /internal/v1/projects/{同一 code}`（模块侧按 code 落成本地 id —— 组织主键不出组织，见 §3.3）。模块禁止另造项目号。跨模块 REST 只带 `tenant_id`（独立/普通可空）+ `project_id`。
 
 ## 7. 启动组合（例子）
 

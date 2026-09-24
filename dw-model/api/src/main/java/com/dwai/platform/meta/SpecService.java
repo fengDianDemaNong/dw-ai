@@ -60,6 +60,7 @@ public class SpecService {
     access.requireMember(projectId, "spec:write");
     String code = reqCode(in.code());
     DomainEntity exist = in.id() == null ? null : domains.selectById(in.id());
+    AccessService.requireSameProject(projectId, exist == null ? null : exist.getProjectId());
     long clash = domains.selectCount(Wrappers.<DomainEntity>lambdaQuery()
         .eq(DomainEntity::getProjectId, projectId).eq(DomainEntity::getCode, code)
         .ne(exist != null, DomainEntity::getId, exist == null ? "" : exist.getId()));
@@ -159,6 +160,7 @@ public class SpecService {
     access.requireMember(projectId, "spec:write");
     String code = reqCode(in.code());
     DataGradeEntity exist = in.id() == null ? null : grades.selectById(in.id());
+    AccessService.requireSameProject(projectId, exist == null ? null : exist.getProjectId());
     long clash = grades.selectCount(Wrappers.<DataGradeEntity>lambdaQuery()
         .eq(DataGradeEntity::getProjectId, projectId).eq(DataGradeEntity::getCode, code)
         .ne(exist != null, DataGradeEntity::getId, exist == null ? "" : exist.getId()));
@@ -201,6 +203,7 @@ public class SpecService {
   public ApiModels.RootDto saveRoot(String projectId, ApiModels.RootDto in) {
     access.requireMember(projectId, "spec:write");
     WordRootEntity exist = in.id() == null ? null : roots.selectById(in.id());
+    AccessService.requireSameProject(projectId, exist == null ? null : exist.getProjectId());
     long clash = roots.selectCount(Wrappers.<WordRootEntity>lambdaQuery()
         .eq(WordRootEntity::getProjectId, projectId).eq(WordRootEntity::getCode, in.code())
         .ne(exist != null, WordRootEntity::getId, exist == null ? "" : exist.getId()));

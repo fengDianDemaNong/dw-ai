@@ -274,7 +274,7 @@ test.describe.serial('工作台前端流程', () => {
   });
 
   test('平台用户进 /admin', async ({ page }) => {
-    await login(page, 'admin', 'admin123');
+    await login(page, 'admin', '123456');
     await expect(page).toHaveURL(/\/admin/);
     await expect(page.getByRole('heading', { name: /租户/ })).toBeVisible();
     await openNav(page, '平台用户');

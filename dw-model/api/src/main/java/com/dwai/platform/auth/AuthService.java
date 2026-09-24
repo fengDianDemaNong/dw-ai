@@ -90,9 +90,12 @@ public class AuthService {
     if (!"active".equalsIgnoreCase(nz(u.getStatus(), "active"))) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "用户名或密码错误");
     }
-    if (props.isStandard() && Boolean.TRUE.equals(u.getPlatformAdmin())) {
-      throw new ResponseStatusException(HttpStatus.FORBIDDEN, "普通模式不提供平台账号");
-    }
+    // 这里早前有一句「普通模式不提供平台账号」的拒绝，按「admin 是组织平台账号」的口径
+    // 把 platformAdmin 在 standard 下一律挡掉。但它让 standard 空库启动后**没有任何账号
+    // 能进**：本该顶上的本地账号（WarehouseLocalSeedRunner 里 `if (props.isStandard())`
+    // 建张三/李四/王五那一段）被它上面的 standalone 判断挡成了死代码，从未执行过。
+    // 放行 admin 是更小的改法，也不必再维护第二套本地账号 —— standard 没有平台后台，
+    // admin 登录后进的就是工作台，与普通管理员同路。
     refreshTokens.revokeAll(u.getId());
     return toLoginRes(u, refreshTokens.issue(u.getId()));
   }
@@ -195,7 +198,12 @@ public class AuthService {
     TenantEntity t = tid == null ? null : tenants.selectById(tid);
     UserTenantEntity ut = t == null ? null : acl.membership(u.getId(), t.getId());
     String role = ut == null ? null : ut.getTenantRole();
-    if (role == null && props.isWarehouseOnly() && props.isMulti()) {
+    // 两种模式都要回落：角色的**声明者**是 TenantFilter，不是这张表。
+    // standalone 的 user_tenants 行只是种子数据，真正的身份来自 TenantFilter 给的
+    // tenantRole=admin；multi 的仓建设成员表在组织侧，本地会话可能还没合成角色。
+    // 少了 standalone 这一支，me 会返回 tenantRole=null，前端把独立部署的**管理员**
+    // 当成非管理员 —— 项目页的「新增」按钮整块不渲染、项目列表被成员表过滤成空。
+    if (role == null && (props.isStandalone() || (props.isWarehouseOnly() && props.isMulti()))) {
       role = TenantContext.tenantRole();
     }
     return toMe(u, t, role);
@@ -303,10 +311,12 @@ public class AuthService {
         Wrappers.<ProjectEntity>lambdaQuery().eq(ProjectEntity::getTenantId, tenantId));
     for (ProjectEntity p : list) {
       if (!isActive(p)) continue;
-      ProjectMemberEntity m = members.selectOne(Wrappers.<ProjectMemberEntity>lambdaQuery()
+      // 只要在任一产品下有角色，这个项目就算「我参与的」—— landing 与产品无关。
+      // 加产品维后同一项目下会有多行，selectOne 会抛多行异常，所以用 selectList。
+      boolean joined = !members.selectList(Wrappers.<ProjectMemberEntity>lambdaQuery()
           .eq(ProjectMemberEntity::getProjectId, p.getId())
-          .eq(ProjectMemberEntity::getUserId, userId));
-      if (m != null) return p.getId();
+          .eq(ProjectMemberEntity::getUserId, userId)).isEmpty();
+      if (joined) return p.getId();
     }
     if (acl.platformGrantOf(userId, tenantId) != null) {
       List<String> scoped = acl.grantProjectIds(userId, tenantId);

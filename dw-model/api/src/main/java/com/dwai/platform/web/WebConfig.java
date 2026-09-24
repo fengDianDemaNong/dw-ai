@@ -36,10 +36,11 @@ public class WebConfig implements WebMvcConfigurer {
         .allowedMethods("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS")
         .allowedHeaders("*")
         .exposedHeaders("*");
-    if (origins.length == 1 && "*".equals(origins[0])) {
+    // "*" 或空值 → 放开所有；否则按 pattern 匹配（支持 *.example.com 通配符子域名）。
+    if (origins.length == 0 || (origins.length == 1 && "*".equals(origins[0]))) {
       mapping.allowedOriginPatterns("*");
-    } else if (origins.length > 0) {
-      mapping.allowedOrigins(origins);
+    } else {
+      mapping.allowedOriginPatterns(origins);
     }
   }
 

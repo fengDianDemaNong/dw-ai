@@ -21,7 +21,7 @@ cd dw-org/api && mvn spring-boot:run
 
 健康检查：`GET http://127.0.0.1:18080/api/health`
 
-空库会自动灌演示账号（张三 / 123456；admin / admin123）。Flyway 只建表。
+空库只建默认 admin 账户（admin / 123456），不灌演示数据；张三 / 李四 / 王五需执行 `packaging/bin/seed-demo.sh`。Flyway 只建表。
 
 ## 常用变量
 
@@ -33,7 +33,7 @@ cd dw-org/api && mvn spring-boot:run
 | `PUBLIC_BASE_URL` | 对外前端地址 | `http://127.0.0.1:5171` |
 | `JWT_SECRET` | 签发令牌；须与智仓 API 一致 | 开发默认值 |
 | `SECURITY_MODE` | `dev` 或 `oidc` | `dev` |
-| `BOOTSTRAP_ADMIN_USER` / `BOOTSTRAP_ADMIN_PASSWORD` | 空库平台用户 | `admin` / `admin123` |
+| `BOOTSTRAP_ADMIN_USER` / `BOOTSTRAP_ADMIN_PASSWORD` | 空库平台用户 | `admin` / `123456` |
 
 ## 给智仓的接口
 

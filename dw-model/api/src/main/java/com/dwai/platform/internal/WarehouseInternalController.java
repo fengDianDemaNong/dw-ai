@@ -14,6 +14,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.List;
+
 @RestController
 @RequestMapping("/internal/v1")
 public class WarehouseInternalController {
@@ -36,7 +40,9 @@ public class WarehouseInternalController {
         body == null ? null : body.name,
         tenantCode,
         body == null ? null : body.id,
-        body == null ? null : body.tenantName);
+        body == null ? null : body.tenantName,
+        body == null ? null : body.modules,
+        body == null ? null : body.aiCaps);
   }
 
   @DeleteMapping("/projects/{projectCode}")
@@ -46,20 +52,34 @@ public class WarehouseInternalController {
     projects.deleteByCode(projectCode, tenantCode);
   }
 
+  /**
+   * 服务间调用的唯一门禁：静态共享密钥（与 dw-org / dw-lineage 同一形态）。
+   *
+   * <p><b>未配置密钥时拒绝，而不是放行。</b>此前这里是「密钥为空就往下走」，
+   * 而 {@code /internal/v1/**} 在 SecurityConfig 里是 {@code permitAll} ——
+   * 叠加的效果是：默认部署（module-token 为空）下这两个入口（PUT / DELETE 项目镜像）
+   * 任何人都能调。现在未配置的表现是 401，错误信息里带要设的属性名。
+   *
+   * <p>{@code MessageDigest.isEqual} 做定长比对，避免按响应耗时逐字节猜密钥。
+   *
+   * <p>独立模式放行是刻意的：没有组织平面，不存在服务间调用。
+   *
+   * <p><b>改动需三处同步</b>：dw-org 的 {@code InternalController.assertInternal}、
+   * dw-lineage 的 {@code InternalProjectController.assertModule}。
+   */
   private void assertModule(HttpServletRequest req) {
     if (props.isStandalone()) return;
     String expected = props.getSecurity().getModuleToken();
-    if (expected != null && !expected.isBlank()) {
-      String given = req.getHeader("X-Module-Token");
-      if (!expected.equals(given)) {
-        throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "模块令牌无效");
-      }
-      return;
+    if (expected == null || expected.isBlank()) {
+      throw new ResponseStatusException(
+          HttpStatus.UNAUTHORIZED,
+          "未配置模块令牌，服务间接口已拒绝：请设置 dwai.security.module-token（环境变量 MODULE_TOKEN）");
     }
-    // 未配模块令牌时，本机开发允许组织 fan-out（与 InternalController 一致）
-    String user = TenantContext.user();
-    if (user == null || user.isBlank() || "anonymous".equals(user)) {
-      return;
+    String given = req.getHeader("X-Module-Token");
+    if (given == null
+        || !MessageDigest.isEqual(
+            expected.getBytes(StandardCharsets.UTF_8), given.getBytes(StandardCharsets.UTF_8))) {
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "模块令牌无效");
     }
   }
 
@@ -74,5 +94,16 @@ public class WarehouseInternalController {
     public String tenantCode;
     public String tenantName;
     public String id;
+
+    /**
+     * 该租户在组织侧开通的模块。
+     *
+     * <p><b>null 与空数组不是一回事</b>：null = 组织没带这项（老版本组织，或本地没有
+     * 那行许可），此时不校准本地许可；空数组 = 组织那边确实一项都没开通。
+     */
+    public List<String> modules;
+
+    /** 同上，组织侧算出的 AI 能力开关（随 modules 一起变）。 */
+    public List<String> aiCaps;
   }
 }

@@ -32,6 +32,7 @@ npm run dev:model         # 5172
 ### 普通 `standard`
 
 本进程本地账号，不启组织。打开 http://127.0.0.1:5172/model/login 。
+首次启动只建默认 admin 账户，无演示数据；需要演示数据执行 `dw-model/packaging/bin/seed-demo.sh`（**手工触发**，启动不自动灌）。standard 下它只灌本环境的隐含租户（星河电商）那一套 —— 第二个租户「启航科技」在本模式下不可见，灌进去只会变成不可达数据。
 
 ```bash
 DW_AI_MODE=standard npm run dev:api:model
@@ -71,4 +72,6 @@ docker compose -f dw-model/docker-compose.yml up -d --build
 # 控制台 http://127.0.0.1:8081/   API http://127.0.0.1:18081/
 ```
 
-多租户须先起租户管理。`conf/env.sh` 里 `DW_AI_MODE`、`ORG_BASE_URL`、`JWT_SECRET` 与组织一致。
+多租户须先起租户管理。`conf/env.sh` 里 `DW_AI_MODE`、`ORG_BASE_URL`、`JWT_SECRET`、`MODULE_TOKEN`
+与组织一致。最后一项漏配的表现是「组织里建了项目，这里打开却是『还没有可进入的项目』」——
+multi 下本模块**不建任何本地租户/项目**，全部靠组织 fan-out 与心跳补发灌进来（见根 [README](../README.md)）。

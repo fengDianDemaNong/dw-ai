@@ -54,7 +54,15 @@ const rows = computed(() =>
     const projects = app.projects
       .filter((p) => p.tenantId === app.currentTenantId)
       .map((p) => {
-        const role = app.members.find((m) => m.projectId === p.id && m.userId === u.id)?.role;
+        // 加产品过滤：产品维进来后同一个人在同一项目下会有多行（仓建设、数据地图各一行），
+        // 不指定产品会随机取一行、显示成另一个产品的角色。
+        // 这一页的角色词表（见上面的 catalog）整张都是仓建设语义 —— 「拉项目成员、改规范、
+        // 建模与发布」，所以这里明确取仓建设那行。数据地图的角色（目录管理员 / 血缘分析 /
+        // 只读访客）这一页不展示。
+        const role = app.members.find(
+          (m) =>
+            m.projectId === p.id && m.userId === u.id && (m.product ?? 'warehouse') === 'warehouse'
+        )?.role;
         return role ? `${p.name} · ${PROJECT_ROLE_LABEL[role]}` : null;
       })
       .filter(Boolean)

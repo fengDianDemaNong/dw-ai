@@ -214,21 +214,8 @@ public class TenantAdminService {
       }
       if (!blank(req.projectId())) {
         access.requireProject(req.projectId());
-        ProjectMemberEntity exist = members.selectOne(Wrappers.<ProjectMemberEntity>lambdaQuery()
-            .eq(ProjectMemberEntity::getProjectId, req.projectId())
-            .eq(ProjectMemberEntity::getUserId, userId));
-        if (exist == null) {
-          ProjectMemberEntity m = new ProjectMemberEntity();
-          m.setProjectId(req.projectId());
-          m.setUserId(userId);
-          m.setRole("admin");
-          members.insert(m);
-        } else {
-          exist.setRole("admin");
-          members.update(exist, Wrappers.<ProjectMemberEntity>lambdaQuery()
-              .eq(ProjectMemberEntity::getProjectId, req.projectId())
-              .eq(ProjectMemberEntity::getUserId, userId));
-        }
+        // 「指定项目管理员」= 该项目在所有已开通产品下的管理角色，不只仓建设。
+        projectService.grantProjectAdmin(req.projectId(), tenantId, userId);
       }
     }
     ut = access.membership(userId, tenantId);
@@ -665,39 +652,50 @@ public class TenantAdminService {
       if (item == null || blank(item.projectId()) || !known.contains(item.projectId())) {
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "项目不存在或不属于本组织");
       }
+      // 与 ProjectService.putMember 同口径：缺产品按仓建设处理。
+      String product = blank(item.product()) ? "warehouse" : item.product().trim();
       String role = blank(item.role()) ? "viewer" : item.role();
       if (!List.of("admin", "modeler", "viewer").contains(role)) {
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "非法项目角色");
       }
       ProjectMemberEntity exist = members.selectOne(Wrappers.<ProjectMemberEntity>lambdaQuery()
           .eq(ProjectMemberEntity::getProjectId, item.projectId())
-          .eq(ProjectMemberEntity::getUserId, userId));
+          .eq(ProjectMemberEntity::getUserId, userId)
+          .eq(ProjectMemberEntity::getProduct, product));
       if (exist == null) {
         ProjectMemberEntity m = new ProjectMemberEntity();
         m.setProjectId(item.projectId());
         m.setUserId(userId);
+        m.setProduct(product);
         m.setRole(role);
         members.insert(m);
       } else if (!role.equals(exist.getRole())) {
         exist.setRole(role);
         members.update(exist, Wrappers.<ProjectMemberEntity>lambdaQuery()
             .eq(ProjectMemberEntity::getProjectId, item.projectId())
-            .eq(ProjectMemberEntity::getUserId, userId));
+            .eq(ProjectMemberEntity::getUserId, userId)
+            .eq(ProjectMemberEntity::getProduct, product));
       }
-      keep.add(item.projectId());
+      keep.add(mkey(product, item.projectId()));
     }
     if (!tenantPids.isEmpty()) {
       List<ProjectMemberEntity> existing = members.selectList(Wrappers.<ProjectMemberEntity>lambdaQuery()
           .in(ProjectMemberEntity::getProjectId, tenantPids)
           .eq(ProjectMemberEntity::getUserId, userId));
       for (ProjectMemberEntity e : existing) {
-        if (!keep.contains(e.getProjectId())) {
+        if (!keep.contains(mkey(e.getProduct(), e.getProjectId()))) {
           members.delete(Wrappers.<ProjectMemberEntity>lambdaQuery()
               .eq(ProjectMemberEntity::getProjectId, e.getProjectId())
-              .eq(ProjectMemberEntity::getUserId, userId));
+              .eq(ProjectMemberEntity::getUserId, userId)
+              .eq(ProjectMemberEntity::getProduct, e.getProduct()));
         }
       }
     }
+  }
+
+  /** 「某产品下的某个项目」的复合键 —— 只用于上面那轮增量对比，不是数据库值。 */
+  private static String mkey(String product, String projectId) {
+    return product + "|" + projectId;
   }
 
   private ApiModels.ProjectDto toProject(ProjectEntity p) {

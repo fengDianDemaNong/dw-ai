@@ -44,7 +44,7 @@ if (existsSync(path.join(org, 'vite.config.ts'))) {
 console.log(`仓建设 ${ver} → http://127.0.0.1:${vitePort(warehouse)}/`);
 kids.push(start(warehouse, '仓建设'));
 
-const lineage = path.resolve(here, '../../dw-lineage/sql-tools-vue');
+const lineage = path.resolve(here, '../../dw-lineage/ui');
 if (ver >= '0.2.0' && existsSync(path.join(lineage, 'vite.config.ts'))) {
   const lineageVite = existsSync(path.join(lineage, 'node_modules/.bin/vite'))
     ? path.join(lineage, 'node_modules/.bin/vite')

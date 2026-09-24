@@ -69,7 +69,7 @@ public class MetaController {
   @PutMapping("/projects/{projectId}/members/{userId}")
   public ApiModels.MemberDto putMember(
       @PathVariable String projectId, @PathVariable String userId, @RequestBody ApiModels.MemberReq req) {
-    return projects.putMember(projectId, new ApiModels.MemberReq(userId, req.role()));
+    return projects.putMember(projectId, new ApiModels.MemberReq(userId, req.product(), req.role()));
   }
 
   @DeleteMapping("/projects/{projectId}/members/{userId}")

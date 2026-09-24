@@ -31,6 +31,7 @@ import {
   ROLE_LABEL,
   roleHas,
   type Perm,
+  type Product,
   type ProductModule,
   type ProjectRole,
 } from '../config/iam';
@@ -57,11 +58,16 @@ const STORAGE_KEY = 'dw-ai.state.v1';
 
 function defaultIam(): Pick<AppState, 'members' | 'licenses'> {
   return {
+    // 产品维是 project_members 主键的一部分，这几行必须写清楚 product ——
+    // 缺了它的行在 projectRoleOf(product) 里永远匹配不上，表现为演示模式下
+    //「所有人所有产品都没角色」（菜单全灰、进不去项目），而不会报错。
+    // 只补 warehouse：standard/standalone 下数据地图整组本就不可见
+    //（otherProductsVisible() 为假），补 metadata 行没有界面会用到。
     members: [
-      { projectId: 'p-trade', userId: '张三', role: 'admin' },
-      { projectId: 'p-trade', userId: '李四', role: 'modeler' },
-      { projectId: 'p-empty', userId: '李四', role: 'admin' },
-      { projectId: 'p-empty', userId: '张三', role: 'viewer' },
+      { projectId: 'p-trade', userId: '张三', product: 'warehouse', role: 'admin' },
+      { projectId: 'p-trade', userId: '李四', product: 'warehouse', role: 'modeler' },
+      { projectId: 'p-empty', userId: '李四', product: 'warehouse', role: 'admin' },
+      { projectId: 'p-empty', userId: '张三', product: 'warehouse', role: 'viewer' },
     ],
     licenses: [
       {
@@ -78,10 +84,13 @@ function hydrateIam(state: AppState) {
   if (!Array.isArray(state.members) || !state.members.length) state.members = fresh.members;
   if (!Array.isArray(state.licenses) || !state.licenses.length) state.licenses = fresh.licenses;
   for (const p of state.projects) {
-    if (!state.members.some((m) => m.projectId === p.id)) {
+    // 判重也按 (项目, 产品)：只要没有仓库产品那一行就补，
+    // 不能因为「这个项目已经有行（是数据地图的）」就漏掉负责人的 admin
+    if (!state.members.some((m) => m.projectId === p.id && m.product === 'warehouse')) {
       state.members.push({
         projectId: p.id,
         userId: p.owner || state.currentUser,
+        product: 'warehouse',
         role: 'admin',
       });
     }
@@ -464,15 +473,36 @@ export const projectRecs = computed(() => inProject(state.recs));
 export const projectApiCalls = computed(() => inProject(state.apiCalls));
 export const currentUser = computed(() => state.currentUser);
 
-export const currentProjectRole = computed<ProjectRole | undefined>(() => {
-  if (!state.currentProjectId) return undefined;
+/**
+ * 某产品下，当前人在本项目的角色。
+ *
+ * <p>加了产品维之后「我在本项目的角色」不再唯一：同一个「项目管理员」在仓建设是
+ * 规范管理员、在数据地图是目录管理员。所以 product 是必填参数 —— 没有全局默认值，
+ * 猜错了就是拿 A 产品的角色去判 B 产品的权。
+ *
+ * <p>{@code projectId} 缺省时看当前选中的项目；显式传进来是为了判断项目列表里
+ * 「那一行」的按钮状态 —— 那时还没 enterProject，currentProjectId 不是它。
+ */
+export function projectRoleOf(product: Product, projectId?: string): ProjectRole | undefined {
+  const pid = projectId ?? state.currentProjectId;
+  if (!pid) return undefined;
   const uid = state.currentUserId || state.currentUser;
-  const found = state.members.find((m) => m.projectId === state.currentProjectId && m.userId === uid)?.role;
+  const found = state.members.find(
+    // 缺 product 的行按仓建设算 —— 与 dw-model/ui 的同名判断保持逐字一致：
+    // 同一份后端数据在两个前端里必须给出同一个答案，否则「工作台说你是管理员、
+    // 仓建设说你不是」这种故障没有任何单侧日志能看出来。类型上 product 本来就
+    // 是可选的（授权码访客的合成行、还没跟上产品维的旧接口不一定带得回来）。
+    (m) => m.projectId === pid && m.userId === uid && (m.product ?? 'warehouse') === product
+  )?.role;
   if (found) return found;
-  // 平台持码进入：会话里合成 viewer，拉快照时可能被冲掉，只读权限仍按访客算
+  // 平台持码进入：会话里合成 viewer，拉快照时可能被冲掉，只读权限仍按访客算。
+  // 授权码的 project_roles 不带产品维（后端 roleOf 同样这么兜底），两个产品一视同仁。
   if (state.platformAdmin && state.currentTenantId && state.tenantRole !== 'admin') return 'viewer';
   return undefined;
-});
+}
+
+/** 仓建设下的角色 —— 工作台的「当前角色」标签与几个写权限都看它。 */
+export const currentProjectRole = computed<ProjectRole | undefined>(() => projectRoleOf('warehouse'));
 
 export const sessionAccount = computed(() =>
   state.currentUserId
@@ -497,9 +527,9 @@ export function tenantRoleOf(_userId?: string): 'admin' | 'member' | null {
 export const isPlatformAdmin = computed(() => state.platformAdmin);
 export const isRealTenantAdmin = computed(() => state.tenantRole === 'admin');
 export const isTenantAdmin = computed(() => state.tenantRole === 'admin');
-export const canWriteSpec = computed(() => can('spec:write'));
-export const canWriteModel = computed(() => can('model:write'));
-export const canPublishModel = computed(() => can('model:publish'));
+export const canWriteSpec = computed(() => can('warehouse', 'spec:write'));
+export const canWriteModel = computed(() => can('warehouse', 'model:write'));
+export const canPublishModel = computed(() => can('warehouse', 'model:publish'));
 
 export function resolveTenantHome(): string {
   if (state.platformAdmin && !state.currentTenantId) return ADMIN_HOME;
@@ -534,15 +564,33 @@ export const currentRoleLabel = computed(() =>
   currentProjectRole.value ? ROLE_LABEL[currentProjectRole.value] : '未加入项目'
 );
 
-export function can(perm: Perm): boolean {
+/**
+ * 当前用户在本项目的角色，够不够该产品下的某个权限。
+ *
+ * <p>产品码必须显式给：工作台要同时判断仓建设与数据地图能不能进
+ * （见 `pages/projects.vue` 的 `go()`），这里给个隐含默认值只会帮倒忙。
+ */
+export function can(product: Product, perm: Perm): boolean {
   if (isStandalone()) return true;
-  return roleHas(currentProjectRole.value, perm);
+  return roleHas(product, projectRoleOf(product), perm);
 }
 
 export function hasModule(mod: ProductModule): boolean {
   if (isStandalone()) return mod === 'warehouse' || mod === 'metadata';
   const lic = state.licenses.find((l) => l.tenantId === state.currentTenantId);
   return Boolean(lic?.modules.includes(mod));
+}
+
+/**
+ * 能不能进某个产品 —— 工作台这一层对「服务展示」的判断。
+ *
+ * <p>两道门都要过：租户开通了这个产品（平台许可），并且我本人在这项目下被派了这个
+ * 产品的角色。只判前一道会给出「点进去被 403 顶回来」的入口，只判后一道则会在未开通
+ * 的产品上留一个永远进不去的按钮。standalone 没有登录也没有角色，两道门都不适用。
+ */
+export function canEnterProduct(product: Product, projectId?: string): boolean {
+  if (isStandalone()) return true;
+  return hasModule(product) && projectRoleOf(product, projectId) !== undefined;
 }
 
 /** 会话里的 aiCaps 已是许可 ∩ 授权码交集；空数组 = 未开通。本地演示无列表时，仓建设即三项全开。 */
@@ -564,7 +612,7 @@ export function switchUser(userId: string) {
 }
 
 export function setMemberRole(userId: string, role: ProjectRole) {
-  if (!can('iam:member')) {
+  if (!can('warehouse', 'iam:member')) {
     message.error('没有成员管理权限');
     return;
   }
@@ -583,7 +631,7 @@ export function setMemberRole(userId: string, role: ProjectRole) {
 }
 
 function deny(perm: Perm): boolean {
-  if (can(perm)) return false;
+  if (can('warehouse', perm)) return false;
   message.error('当前角色无权执行此操作');
   return true;
 }
@@ -670,11 +718,28 @@ export async function enterProject(projectId: string) {
   sessionStorage.setItem('dw-ai.projectCode', p.code);
   const t = state.tenants.find((x) => x.id === p.tenantId);
   if (t?.code) sessionStorage.setItem('dw-ai.tenantCode', t.code);
+  persistRoles(p.id);
   if (useRemoteApi()) {
     if (!isOrgUi()) applySnapshot(p.id, await api.snapshot(p.id));
     return;
   }
   persist();
+}
+
+/**
+ * 把「我在这项目下各产品的角色」写进 sessionStorage，供下游服务的 `#boot=` 带走
+ * （见 `config/product.ts` 的 `bootPayload`）。
+ *
+ * <p>下游只拿它把菜单先画对 —— 真正的门禁在各服务后端，它们各自调组织平台的
+ * `authz/check` 兜底。所以这一份即便被改，后果也只是看到一个点不进去的入口。
+ */
+function persistRoles(projectId: string) {
+  const uid = state.currentUserId || state.currentUser;
+  const roles: Record<string, string> = {};
+  for (const m of state.members) {
+    if (m.projectId === projectId && m.userId === uid && m.product) roles[m.product] = m.role;
+  }
+  sessionStorage.setItem('dw-ai.roles', JSON.stringify(roles));
 }
 
 /** 成员直接落到 /w 时也要拉快照，否则建模侧栏没有分层。 */
@@ -726,8 +791,16 @@ export async function createProject(input: {
       ? await api.org.createProject(state.currentTenantId, payload)
       : await api.createProject(payload);
     state.projects.push(project);
-    if (!state.members.some((m) => m.projectId === project.id && m.userId === state.currentUser)) {
-      state.members.push({ projectId: project.id, userId: state.currentUser, role: 'admin' });
+    // 判重与写入都必须带 product 那一维：不带的话这行在 projectRoleOf('warehouse')
+    // 里匹配不上，表现是「刚建完项目，创建者自己进不去」
+    if (!state.members.some((m) =>
+      m.projectId === project.id && m.userId === state.currentUser && m.product === 'warehouse')) {
+      state.members.push({
+        projectId: project.id,
+        userId: state.currentUser,
+        product: 'warehouse',
+        role: 'admin',
+      });
     }
     message.success(
       input.bootstrapSpec
@@ -748,7 +821,12 @@ export async function createProject(input: {
     engines: input.engines ?? [],
   };
   state.projects.push(project);
-  state.members.push({ projectId: project.id, userId: state.currentUser, role: 'admin' });
+  state.members.push({
+    projectId: project.id,
+    userId: state.currentUser,
+    product: 'warehouse',
+    role: 'admin',
+  });
   const techTime: WordRoot[] = state.roots
     .filter((r) => r.projectId === 'p-trade' && r.kind !== 'biz')
     .map((r) => ({ ...r, id: `${r.id}-${project.id}`, projectId: project.id }));

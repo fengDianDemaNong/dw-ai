@@ -26,7 +26,21 @@ export function warehouseOrigin(): string {
 
 export function lineageOrigin(): string {
   return (import.meta.env.VITE_LINEAGE_ORIGIN as string | undefined)?.replace(/\/$/, '')
-    || 'http://127.0.0.1:5175';
+    || 'http://127.0.0.1:5173';
+}
+
+/**
+ * 「我在这项目下各产品的角色」，由 `stores/app.ts` 的 enterProject 写好。
+ *
+ * <p>下游服务只拿它把菜单先画对 —— 真正的门禁在各服务后端，它们各自调组织平台的
+ * `authz/check` 兜底。所以这一份即便被改，后果也只是看到一个点不进去的入口。
+ */
+function bootRoles(): unknown {
+  try {
+    return JSON.parse(sessionStorage.getItem('dw-ai.roles') ?? '{}');
+  } catch {
+    return {};
+  }
 }
 
 function bootPayload(): string {
@@ -38,7 +52,8 @@ function bootPayload(): string {
   const tenantCode = sessionStorage.getItem('dw-ai.tenantCode') ?? '';
   const projectCode = sessionStorage.getItem('dw-ai.projectCode') ?? '';
   const userId = sessionStorage.getItem('dw-ai.userId') ?? '';
-  return encodeURIComponent(JSON.stringify({ token, refreshToken, tokenExp, tenant, project, tenantCode, projectCode, userId }));
+  const roles = bootRoles();
+  return encodeURIComponent(JSON.stringify({ token, refreshToken, tokenExp, tenant, project, tenantCode, projectCode, userId, roles }));
 }
 
 export function lineageEmbedUrl(path: string, extra?: Record<string, string>): string {
@@ -53,6 +68,7 @@ export function lineageEmbedUrl(path: string, extra?: Record<string, string>): s
     project: sessionStorage.getItem('dw-ai.projectId') ?? '',
     tenantCode: sessionStorage.getItem('dw-ai.tenantCode') ?? '',
     projectCode: sessionStorage.getItem('dw-ai.projectCode') ?? '',
+    roles: bootRoles(),
     embed: true,
   };
   return `${lineageOrigin()}${p}?${q}#boot=${encodeURIComponent(JSON.stringify(boot))}`;

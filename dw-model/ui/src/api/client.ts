@@ -34,6 +34,11 @@ export function storedRefreshToken() {
   return sessionStorage.getItem('dw-ai.refreshToken') ?? '';
 }
 
+/** 当前 access token 的到期毫秒时间戳（无则空串）。供 ProductEmbed 转发给嵌入的子应用。 */
+export function storedTokenExp() {
+  return sessionStorage.getItem('dw-ai.tokenExp') ?? '';
+}
+
 export type AuthTokens = { refreshToken?: string; expiresIn?: number; touch?: boolean };
 
 const LAST_ACTIVITY_KEY = 'dw-ai.lastActivity';
@@ -68,6 +73,15 @@ function expireIdle() {
   }
 }
 
+/**
+ * 令牌变更事件。
+ *
+ * <p>嵌进来的子应用（数据地图）用自己的后端校验同一个 JWT，需要在续期后拿到新令牌。
+ * 这里广播一个事件，由 {@code ProductEmbed} 转发给 iframe —— 比让 iframe 重建
+ * （sessionKey 里含 token）保住页面状态，也不必让客户端去轮询 sessionStorage。
+ */
+export const AUTH_TOKEN_EVENT = 'dw-ai-token-changed';
+
 export function setAuthToken(token: string | null, extras?: AuthTokens) {
   if (token) {
     sessionStorage.setItem('dw-ai.token', token);
@@ -81,6 +95,16 @@ export function setAuthToken(token: string | null, extras?: AuthTokens) {
     sessionStorage.removeItem('dw-ai.refreshToken');
     sessionStorage.removeItem('dw-ai.tokenExp');
     sessionStorage.removeItem(LAST_ACTIVITY_KEY);
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent(AUTH_TOKEN_EVENT, {
+        detail: {
+          token: sessionStorage.getItem('dw-ai.token') ?? '',
+          tokenExp: sessionStorage.getItem('dw-ai.tokenExp') ?? '',
+        },
+      })
+    );
   }
 }
 
@@ -140,7 +164,11 @@ function isAuthFailure(err: unknown) {
 }
 
 function asciiHeader(v: string) {
-  return /^[\x20-\x7E]+$/.test(v) ? v : '';
+  if (!v) return '';
+  if (/^[\x20-\x7E]+$/.test(v)) return v;
+  // 非 ASCII 的值塞进 HTTP 头会被浏览器拒绝整条请求，只能丢弃；但要留下线索，别静默
+  console.warn('[dw-ai] 请求头含非 ASCII 字符，已丢弃:', v.slice(0, 32));
+  return '';
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {

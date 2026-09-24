@@ -4,23 +4,23 @@
 
 - **JDK 21**
 - Maven 3.8+
-- Node 22.13+（pnpm 11 依赖 Node 内置 `node:sqlite`）
-- **pnpm 11** —— 版本由 `sql-tools-vue/package.json` 的 `packageManager` 字段声明，
-  执行 `corepack enable` 后会自动使用正确版本。**不要手工安装其它版本**：
-  pnpm 10/11 之间配置项的位置和名称有变动，版本不一致会导致构建失败
+- Node 22.13+（下限来自 pnpm 时期，见 `ui/package.json` 的 `engines`；迁 npm 后保留未动）
+- **npm**（随 Node 附带）—— 前端已并入仓库根的 npm workspaces，依赖在**仓库根**装一次，
+  五个工作区共用；不再需要 `corepack` / `packageManager` 字段
+  （迁移决策见 [ADR-0014](../../docs/tech/adr/0014-frontend-package-manager-unification.md)）
 - Docker（跑 MySQL / PostgreSQL 的持久化测试时需要）
 
 ## 测试
 
 ```bash
 # 后端全量（默认跳过依赖外部服务的用例）
-(cd sql-tools && mvn test)
+(cd api && mvn test)
 
 # 含需要 Gravitino 服务的用例
-(cd sql-tools && mvn test -Pexternal-tests)
+(cd api && mvn test -Pexternal-tests)
 
 # 只跑某个套件
-(cd sql-tools && mvn test -Dtest=SQLLineageMergerCorrectnessTest)
+(cd api && mvn test -Dtest=SQLLineageMergerCorrectnessTest)
 ```
 
 ### 持久化的多数据库测试
@@ -38,7 +38,7 @@ docker run -d --name sqltools-pg-test \
   -p 15432:5432 postgres:15
 
 # 三后端共用同一份用例
-(cd sql-tools && mvn test -Dtest='H2LineageRepositoryTest,MySqlLineageRepositoryIT,PostgresLineageRepositoryIT' \
+(cd api && mvn test -Dtest='H2LineageRepositoryTest,MySqlLineageRepositoryIT,PostgresLineageRepositoryIT' \
   -Dit.mysql.url='jdbc:mysql://localhost:13306/dw_lineage?allowPublicKeyRetrieval=true&useSSL=false' \
   -Dit.mysql.username=root -Dit.mysql.password=root \
   -Dit.postgres.url=jdbc:postgresql://localhost:15432/dw_lineage \
@@ -79,13 +79,14 @@ docker rm -f sqltools-mysql-test sqltools-pg-test
 ## 前端
 
 ```bash
-cd sql-tools-vue
-corepack enable   # 首次，让 pnpm 版本跟随 packageManager 字段
-pnpm install
-pnpm dev              # http://localhost:5173，/api 已代理到 localhost:8080
-pnpm build            # 带类型检查
-pnpm build:no-check   # 跳过类型检查，CI 与打包用
+cd ..                 # 依赖装在仓库根，不在 ui 子目录里单独装
+npm install
+npm run dev -w sql-tools              # http://localhost:5173，/api 已代理到 localhost:8080
+npm run build -w sql-tools            # 带类型检查
+npm run build:no-check -w sql-tools   # 跳过类型检查，CI 与打包用
 ```
+
+> `-w` 后面是**包名**（`sql-tools`），不是目录名 —— 目录叫 `ui`。
 
 后端地址通过环境变量配置，**不要硬编码**：
 
@@ -99,7 +100,7 @@ pnpm build:no-check   # 跳过类型检查，CI 与打包用
 
 ## 添加一种新方言
 
-1. 在 `sql-tools/pom.xml` 加对应的 `superior-xxx-parser` 依赖
+1. 在 `api/pom.xml` 加对应的 `superior-xxx-parser` 依赖
 2. 在 `DatabaseTypeEnum` 加一行：
 
 ```java
@@ -149,10 +150,11 @@ public class MyMetadataProvider implements MetadataProvider {
 **H2 文件锁冲突**
 默认连接串带了 `AUTO_SERVER=TRUE`。若仍冲突，确认没有多个进程同时打开同一个库文件。
 
-**前端 `ERR_PNPM_IGNORED_BUILDS: Ignored build scripts: core-js, esbuild`**
-pnpm 10 起默认不执行依赖的 install 脚本。配置在 `sql-tools-vue/pnpm-workspace.yaml`
-的 `allowBuilds` 中（pnpm 11 已把该设置从 package.json 的 `pnpm` 字段挪到这里并改名）。
-若报错说明该文件缺失或未被拷贝 —— 例如 Docker 构建时忘了 COPY 它。
+**（历史，pnpm 时期）前端 `ERR_PNPM_IGNORED_BUILDS: Ignored build scripts: core-js, esbuild`**
+pnpm 10 起默认不执行依赖的 install 脚本，靠 `ui/pnpm-workspace.yaml` 的 `allowBuilds` 放行。
+2026-09 迁到 npm 后这个问题不再存在 —— **npm 默认就执行依赖的 install 脚本**，没有等价配置项，
+`pnpm-workspace.yaml` 也已删除。保留此条只为解释历史提交；若在别处再见到 `allowBuilds`，
+说明那是还没迁完的分支。
 
 **前端构建报 `Rollup failed to resolve import "@antv/algorithm/lib/asyncIndex"`**
 `@antv/g6-pc@0.8.18` 引用了一个在 `@antv/algorithm` 任何版本中都不存在的文件（上游缺陷）。
@@ -160,12 +162,15 @@ pnpm 10 起默认不执行依赖的 install 脚本。配置在 `sql-tools-vue/pn
 
 **前端构建报 `__spreadArray is not exported by tslib`**
 依赖图里混入了 tslib 1.x，而 `@antv/algorithm` 需要 2.x 的辅助函数。
-已在 `pnpm-workspace.yaml` 的 `overrides` 中统一到 `^2.6.0`。
+已在**仓库根** `package.json` 的 `overrides` 中统一到 `^2.6.0` —— 必须是根，
+npm 只在 workspaces 根应用 `overrides`，放子包会被静默忽略。
 
 **前端构建报某个包 `Failed to resolve`，但该包确实装了**
 多半是**隐式依赖**：源码直接 import 了某个传递依赖，却没写进 `package.json`。
-以前靠 `shamefully-hoist` 侥幸能用，pnpm 新版本下不再 hoist 就会暴露。
-正确做法是把它声明为直接依赖（`@antv/layout` 就是这么修的）。
+以前靠 `shamefully-hoist`（pnpm）或「向上遍历到仓库根 `node_modules`」（npm）侥幸能用，
+一旦安装结构变了就暴露。正确做法是把它声明为直接依赖（`@antv/layout` 就是这么修的）。
+迁到 npm workspaces 时正是靠这条抓出 `@dw-ai/engine` —— 数据地图一直在用它，
+`package.json` 里却从来没写过，全靠向上遍历到根那条软链。
 
 ---
 

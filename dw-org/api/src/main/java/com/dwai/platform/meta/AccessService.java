@@ -33,6 +33,18 @@ import java.util.Map;
 
 @Service
 public class AccessService {
+  /**
+   * 本进程判权时用的产品码，权限表 {@link Perms} 的第一维。
+   *
+   * <p>组织平台自己不做业务，默认取 {@code warehouse} 是因为 {@code snapshot} / {@code members}
+   * 这几个接口是<b>给仓建设控制台用的</b>（仓建设前端带组织会话直接调组织），
+   * 它们检查的 `spec:read` / `iam:member` 是仓建设权限词。
+   *
+   * <p>值来自 {@code dwai.product-code} 而不是写死：换产品部署时不该去几个类里各改一遍
+   * 字面量。空值回落 warehouse（见 {@link DwaiProperties#productCode()}）。
+   */
+  private final String product;
+
   private final ProjectMapper projects;
   private final ProjectMemberMapper members;
   private final UserMapper users;
@@ -62,6 +74,7 @@ public class AccessService {
     this.grants = grants;
     this.licenses = licenses;
     this.props = props;
+    this.product = props.productCode();
   }
 
   public UserEntity requireUser() {
@@ -271,7 +284,7 @@ public class AccessService {
       return out;
     }
     if (project != null) out.put("projectCode", project.getCode());
-    List<String> modules = licensedModules(tenant.getId());
+    List<String> modules = licensedProducts(tenant.getId());
     String prod = (String) out.get("product");
     if (!modules.contains(prod)) {
       out.put("allow", false);
@@ -285,8 +298,10 @@ public class AccessService {
       return out;
     }
     try {
-      String role = roleOf(u.getId(), tenant.getId(), project == null ? null : project.getId(), u);
-      Perms.require(role, (String) out.get("action"));
+      String role = roleOf(
+          u.getId(), tenant.getId(), project == null ? null : project.getId(),
+          (String) out.get("product"), u);
+      Perms.require((String) out.get("product"), role, (String) out.get("action"));
       out.put("allow", true);
       out.put("role", role);
     } catch (ResponseStatusException e) {
@@ -308,16 +323,17 @@ public class AccessService {
     String user = TenantContext.user();
     ProjectMemberEntity m = members.selectOne(Wrappers.<ProjectMemberEntity>lambdaQuery()
         .eq(ProjectMemberEntity::getProjectId, projectId)
-        .eq(ProjectMemberEntity::getUserId, user));
+        .eq(ProjectMemberEntity::getUserId, user)
+        .eq(ProjectMemberEntity::getProduct, product));
     if (m == null) {
       String tid = TenantContext.tenantId();
       if (tid != null && grantCoversProject(user, tid, projectId)) {
-        Perms.require(grantProjectRole(user, tid, projectId), perm);
+        Perms.require(product, grantProjectRole(user, tid, projectId), perm);
         return;
       }
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "未加入该项目");
     }
-    Perms.require(m.getRole(), perm);
+    Perms.require(product, m.getRole(), perm);
   }
 
   public UserEntity requireTenantUser(String userId) {
@@ -364,7 +380,17 @@ public class AccessService {
     return users.selectByUsername(userId.trim());
   }
 
-  private String roleOf(String userId, String tenantId, String projectId, UserEntity user) {
+  /**
+   * 某人在某项目、<b>某产品</b>下的角色。
+   *
+   * <p>加了产品维之后「某人在某项目的角色」不再唯一：同一个人在仓建设是规范管理员，
+   * 在数据地图可能只是只读。所以 product 是必填参数 —— 这里没有「默认产品」这种东西，
+   * 猜错了就是拿 A 产品的角色去判 B 产品的权。
+   *
+   * <p>租户管理员短路返回 `admin`：他在每个已开通产品里都是该产品的管理角色
+   * （PRD §3「项目管理员各已启用产品自动映射为该产品管理角色」）。
+   */
+  private String roleOf(String userId, String tenantId, String projectId, String product, UserEntity user) {
     UserTenantEntity ut = membership(userId, tenantId);
     if (ut != null && "admin".equalsIgnoreCase(ut.getTenantRole())) return "admin";
     if (projectId == null) {
@@ -373,7 +399,8 @@ public class AccessService {
     }
     ProjectMemberEntity m = members.selectOne(Wrappers.<ProjectMemberEntity>lambdaQuery()
         .eq(ProjectMemberEntity::getProjectId, projectId)
-        .eq(ProjectMemberEntity::getUserId, userId));
+        .eq(ProjectMemberEntity::getUserId, userId)
+        .eq(ProjectMemberEntity::getProduct, product));
     if (m != null) return m.getRole();
     if (grantCoversProject(userId, tenantId, projectId)) {
       return grantProjectRole(userId, tenantId, projectId);
@@ -384,7 +411,14 @@ public class AccessService {
     throw new ResponseStatusException(HttpStatus.FORBIDDEN, "未加入该项目");
   }
 
-  private List<String> licensedModules(String tenantId) {
+  /**
+   * 某租户已开通的产品码。
+   *
+   * <p>public 是因为 {@link ProjectService} 也要用：建项目 / 换 owner 时得知道
+   * 该给这个人在几个产品下建管理角色行（见 {@code grantProjectAdmin}）。
+   * 两处各写一份的话，口径迟早会漂。
+   */
+  public List<String> licensedProducts(String tenantId) {
     TenantLicenseEntity lic = licenses.selectById(tenantId);
     return lic == null ? List.of("warehouse") : Jsons.strings(lic.getModules());
   }

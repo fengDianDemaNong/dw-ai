@@ -1,5 +1,6 @@
 package com.dwai.platform.db;
 
+import com.dwai.platform.meta.support.SeedDb;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.env.EnvironmentPostProcessor;
 import org.springframework.core.Ordered;
@@ -19,13 +20,24 @@ public class MetaDbEnvironmentPostProcessor implements EnvironmentPostProcessor,
     String url = firstNonBlank(env.getProperty("DB_URL"), env.getProperty("spring.datasource.url"));
     String type = env.getProperty("DB_TYPE");
     boolean urlMissing = url == null || url.isBlank() || url.equals("jdbc:");
-    String vendor = MetaDb.detect(type, urlMissing ? "" : url);
+    String vendor = SeedDb.detect(type, urlMissing ? "" : url);
 
     Map<String, Object> map = new HashMap<>();
-    if (urlMissing && MetaDb.H2.equals(vendor)) {
+    if (urlMissing && SeedDb.H2.equals(vendor)) {
       String home = firstNonBlank(env.getProperty("DW_AI_HOME"), System.getProperty("user.dir"));
-      String dbFile = firstNonBlank(env.getProperty("dwai.db-file"), env.getProperty("dwai.product"));
-      url = MetaDb.h2FileUrl(home, dbFile.isBlank() ? "dw_mode" : dbFile);
+      // 只认 dwai.db-file。环境变量 DWAI_DB_FILE 会被 Spring 的宽松绑定映射到同名属性，
+      // 所以 conf/env.sh 里那一行是现场真正生效的来源；本文件里的 dw_mode 只是
+      // 「不走 env.sh、直接 mvn spring-boot:run」时的兜底。
+      //
+      // 这里曾经回落到 dwai.product —— 那是「进程角色」（org / warehouse / lineage），
+      // 与「库文件名」是两个维度的东西。一旦 db-file 缺失，仓建设进程的 H2 会悄悄变成
+      // data/dw_mode.mv.db 之外的另一个库（旧注释这里写的是 data/warehouse.mv.db，
+      // 与实际的 dw_mode 对不上，是个陈述错误），跟 dwai.db-file 声明的库串味，
+      // 而且不报错、只有翻文件系统才发现。
+      //
+      // seed 进程（bin/seed-demo.sh → SeedMain）读的是同一个 DWAI_DB_FILE，
+      // 两边必须同库，否则建表在 A、数据在 B。
+      url = SeedDb.h2FileUrl(home, firstNonBlank(env.getProperty("dwai.db-file"), "dw_mode"));
       map.put("DB_URL", url);
       map.put("spring.datasource.url", url);
       if (isBlank(env.getProperty("DB_USER"))) {
@@ -36,7 +48,7 @@ public class MetaDbEnvironmentPostProcessor implements EnvironmentPostProcessor,
       map.put("spring.datasource.url", url);
     }
     map.put("dwai.db-type", vendor);
-    map.put("spring.flyway.locations", MetaDb.flywayLocation(vendor));
+    map.put("spring.flyway.locations", SeedDb.flywayLocation(vendor));
     env.getPropertySources().addFirst(new MapPropertySource("dwai-db", map));
   }
 

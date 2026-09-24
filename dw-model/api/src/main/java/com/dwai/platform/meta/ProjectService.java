@@ -25,11 +25,22 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 @Service
 public class ProjectService {
+  /**
+   * 本进程的产品码。仓建设只服务自己，本地成员行的产品维恒为它。
+   *
+   * <p>与 {@link AccessService} 取的是同一个配置项（{@code dwai.product-code}）——
+   * 两处各写一份字面量的话，改一处漏一处会让「写进去的行」和「判权查的行」对不上，
+   * 表现为成员列表空掉而没人知道为什么。
+   */
+  private final String product;
+
   private final TenantMapper tenants;
   private final TenantLicenseMapper licenses;
   private final UserMapper users;
@@ -61,6 +72,7 @@ public class ProjectService {
     this.tables = tables;
     this.access = access;
     this.props = props;
+    this.product = props.productCode();
     this.auth = auth;
   }
 
@@ -100,11 +112,21 @@ public class ProjectService {
       String uid = me.userId();
       List<ProjectEntity> allowed = new ArrayList<>();
       memberDtos = new ArrayList<>();
+      // 成员名单问组织要一次（权威在组织，与 remoteProjectRole 同一条通道）。此前这里
+      // 只给每个项目造一条「我自己」，且只有 userId —— 前端于是只能把「显示名」列退化成
+      // 内部 id。准入判断仍逐项目走 remoteProjectRole，不受这份镜像影响。
+      // 拉不到时回落成「只造自己」：成员不全好过项目列表整个空掉。
+      Map<String, List<ApiModels.MemberDto>> byProject = access.remoteMembers(me.tenantId());
       for (ProjectEntity p : list) {
         String role = access.remoteProjectRole(p.getId());
         if (role == null) continue;
         allowed.add(p);
-        memberDtos.add(new ApiModels.MemberDto(p.getId(), uid, role));
+        List<ApiModels.MemberDto> mirror = byProject.get(p.getId());
+        if (mirror == null || mirror.isEmpty()) {
+          memberDtos.add(new ApiModels.MemberDto(p.getId(), uid, product, role));
+        } else {
+          memberDtos.addAll(mirror);
+        }
       }
       list = allowed;
     } else {
@@ -118,8 +140,10 @@ public class ProjectService {
       for (ProjectEntity p : list) {
         boolean has = memberDtos.stream().anyMatch((m) -> m.projectId().equals(p.getId()) && m.userId().equals(me.userId()));
         if (!has) {
+          // 授权码的 project_roles 不带产品维，合成行挂 warehouse（与组织侧同口径）。
           memberDtos.add(new ApiModels.MemberDto(
-              p.getId(), me.userId(), access.grantProjectRole(me.userId(), me.tenantId(), p.getId())));
+              p.getId(), me.userId(), product,
+              access.grantProjectRole(me.userId(), me.tenantId(), p.getId())));
         }
       }
     }
@@ -206,12 +230,18 @@ public class ProjectService {
 
   @Transactional
   public ApiModels.ProjectDto upsertInternal(
-      String projectCode, String name, String tenantCode, String preferredId, String tenantName) {
+      String projectCode,
+      String name,
+      String tenantCode,
+      String preferredId,
+      String tenantName,
+      List<String> modules,
+      List<String> aiCaps) {
     if (projectCode == null || projectCode.isBlank()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "需要项目编码");
     }
     String code = projectCode.trim();
-    String tid = ensureTenant(tenantCode, tenantName);
+    String tid = ensureTenant(tenantCode, tenantName, modules, aiCaps);
     ProjectEntity existing = null;
     if (tid != null && !tid.isBlank()) {
       existing = projects.selectOne(Wrappers.<ProjectEntity>lambdaQuery()
@@ -282,7 +312,19 @@ public class ProjectService {
   }
 
   /** 组织 fan-out 时本地可能还没有租户行，按 code / 上下文 id 补一份。 */
-  private String ensureTenant(String tenantCode, String tenantName) {
+  /**
+   * 解析（必要时新建）租户，并用组织侧的许可校准本地行。
+   *
+   * <p><b>许可的权威在组织。</b>这里以前对新租户写死 {@code [warehouse, metadata]}，
+   * 后果是「组织里只开通了仓建设」的租户在仓建设里照样看得见数据地图入口，点进去必然报错；
+   * 反过来只开通数据地图的租户会被凭空赋予仓建设。现在两项由组织随项目镜像带过来
+   * （见 {@code com.dwai.platform.internal.ModuleSyncService#bodyOf}），这里只负责落库。
+   *
+   * <p>两个参数都是 null 表示组织没带这项（老版本组织），此时**不动**本地行 ——
+   * 与「组织说这个租户一项都没开通」（空数组）必须区分开。
+   */
+  private String ensureTenant(
+      String tenantCode, String tenantName, List<String> modules, List<String> aiCaps) {
     String existing = resolveTenantId(tenantCode);
     TenantEntity found = existing == null ? null : tenants.selectById(existing);
     String display = blankToNull(tenantName);
@@ -291,6 +333,7 @@ public class ProjectService {
         found.setName(display);
         tenants.updateById(found);
       }
+      syncLicense(found.getId(), modules, aiCaps);
       return found.getId();
     }
     String code = blankToNull(tenantCode);
@@ -298,11 +341,17 @@ public class ProjectService {
     String id = blankToNull(TenantContext.tenantId());
     if (id != null) {
       TenantEntity byId = tenants.selectById(id);
-      if (byId != null) return byId.getId();
+      if (byId != null) {
+        syncLicense(byId.getId(), modules, aiCaps);
+        return byId.getId();
+      }
     }
     if (code != null) {
       TenantEntity byCode = tenants.selectByCode(code);
-      if (byCode != null) return byCode.getId();
+      if (byCode != null) {
+        syncLicense(byCode.getId(), modules, aiCaps);
+        return byCode.getId();
+      }
     }
     if (code == null && id == null) return null;
     if (id == null) id = code.startsWith("t-") ? code : "t-" + code;
@@ -319,16 +368,47 @@ public class ProjectService {
       TenantEntity raced = code != null ? tenants.selectByCode(code) : null;
       if (raced == null) raced = tenants.selectById(id);
       if (raced == null) throw e;
+      syncLicense(raced.getId(), modules, aiCaps);
       return raced.getId();
     }
-    if (licenses.selectById(id) == null) {
-      TenantLicenseEntity lic = new TenantLicenseEntity();
-      lic.setTenantId(id);
-      lic.setModules(Jsons.toJson(List.of("warehouse", "metadata")));
-      lic.setAiCaps(Jsons.toJson(List.of("spec_design", "spec_ask", "model_design")));
-      licenses.insert(lic);
-    }
+    syncLicense(id, modules, aiCaps);
     return id;
+  }
+
+  /**
+   * 用组织侧的许可校准本地 {@code tenant_licenses} 行。
+   *
+   * <p>只写「传了、而且确实不一样」的字段 —— modules 与 aiCaps 各自独立，缺一项不该把另一项抹掉。
+   * 比对用集合语义：这个方法的调用频率跟着心跳走（组织每 120 秒全量补发一次项目），
+   * 顺序不同不该被判成变更、白写一次库。
+   */
+  private void syncLicense(String tenantId, List<String> modules, List<String> aiCaps) {
+    if (tenantId == null || tenantId.isBlank()) return;
+    TenantLicenseEntity lic = licenses.selectById(tenantId);
+    if (lic == null) {
+      // 本地还没有这行：按组织给的值建。组织没带（老版本）时回落最小集 ——
+      // 能走到这里说明该租户至少开了仓建设，别再像以前那样顺手把数据地图也开上。
+      lic = new TenantLicenseEntity();
+      lic.setTenantId(tenantId);
+      lic.setModules(Jsons.toJson(modules != null ? modules : List.of("warehouse")));
+      lic.setAiCaps(Jsons.toJson(aiCaps != null ? aiCaps : List.of()));
+      licenses.insert(lic);
+      return;
+    }
+    boolean changed = false;
+    if (modules != null && !sameSet(Jsons.strings(lic.getModules()), modules)) {
+      lic.setModules(Jsons.toJson(modules));
+      changed = true;
+    }
+    if (aiCaps != null && !sameSet(Jsons.strings(lic.getAiCaps()), aiCaps)) {
+      lic.setAiCaps(Jsons.toJson(aiCaps));
+      changed = true;
+    }
+    if (changed) licenses.updateById(lic);
+  }
+
+  private static boolean sameSet(List<String> a, List<String> b) {
+    return new HashSet<>(a).equals(new HashSet<>(b));
   }
 
   private static String blankToNull(String v) {
@@ -360,7 +440,7 @@ public class ProjectService {
     p.setStatus("active");
     p.setEngines(Jsons.toJson(AiCaps.normalizeEngines(req.engines())));
     projects.insert(p);
-    upsertMember(p.getId(), adminId, "admin");
+    upsertMember(p.getId(), adminId, product, "admin");
     if (Boolean.TRUE.equals(req.bootstrapSpec())) {
       spec.bootstrap(p.getId());
     }
@@ -388,7 +468,7 @@ public class ProjectService {
       if (req.owner() != null && !req.owner().isBlank()) {
         access.requireTenantUser(req.owner());
         p.setOwner(req.owner().trim());
-        upsertMember(p.getId(), p.getOwner(), "admin");
+        upsertMember(p.getId(), p.getOwner(), product, "admin");
       }
       if (req.status() != null && !req.status().isBlank()) {
         String st = req.status().trim().toLowerCase();
@@ -435,7 +515,8 @@ public class ProjectService {
     if (tid == null || tid.isBlank() || !access.grantCoversProject(me.userId(), tid, projectId)) return list;
     boolean has = list.stream().anyMatch((m) -> m.userId().equals(me.userId()) && m.projectId().equals(projectId));
     if (!has) {
-      list.add(new ApiModels.MemberDto(projectId, me.userId(), access.grantProjectRole(me.userId(), tid, projectId)));
+      list.add(new ApiModels.MemberDto(
+          projectId, me.userId(), product, access.grantProjectRole(me.userId(), tid, projectId)));
     }
     return list;
   }
@@ -444,7 +525,8 @@ public class ProjectService {
     access.requireProject(projectId);
     access.requireMember(projectId, "spec:read");
     return members.selectList(Wrappers.<ProjectMemberEntity>lambdaQuery()
-            .eq(ProjectMemberEntity::getProjectId, projectId))
+            .eq(ProjectMemberEntity::getProjectId, projectId)
+            .eq(ProjectMemberEntity::getProduct, product))
         .stream().map(this::toMember).toList();
   }
 
@@ -460,8 +542,8 @@ public class ProjectService {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "非法角色");
     }
     access.requireTenantUser(req.userId());
-    upsertMember(projectId, req.userId(), role);
-    return new ApiModels.MemberDto(projectId, req.userId(), role);
+    upsertMember(projectId, req.userId(), product, role);
+    return new ApiModels.MemberDto(projectId, req.userId(), product, role);
   }
 
   @Transactional
@@ -492,21 +574,24 @@ public class ProjectService {
     users.insert(u);
   }
 
-  private void upsertMember(String projectId, String userId, String role) {
+  private void upsertMember(String projectId, String userId, String product, String role) {
     ProjectMemberEntity exist = members.selectOne(Wrappers.<ProjectMemberEntity>lambdaQuery()
         .eq(ProjectMemberEntity::getProjectId, projectId)
-        .eq(ProjectMemberEntity::getUserId, userId));
+        .eq(ProjectMemberEntity::getUserId, userId)
+        .eq(ProjectMemberEntity::getProduct, product));
     if (exist == null) {
       ProjectMemberEntity m = new ProjectMemberEntity();
       m.setProjectId(projectId);
       m.setUserId(userId);
+      m.setProduct(product);
       m.setRole(role);
       members.insert(m);
     } else {
       exist.setRole(role);
       members.update(exist, Wrappers.<ProjectMemberEntity>lambdaQuery()
           .eq(ProjectMemberEntity::getProjectId, projectId)
-          .eq(ProjectMemberEntity::getUserId, userId));
+          .eq(ProjectMemberEntity::getUserId, userId)
+          .eq(ProjectMemberEntity::getProduct, product));
     }
   }
 
@@ -535,7 +620,7 @@ public class ProjectService {
   }
 
   private ApiModels.MemberDto toMember(ProjectMemberEntity m) {
-    return new ApiModels.MemberDto(m.getProjectId(), m.getUserId(), m.getRole());
+    return new ApiModels.MemberDto(m.getProjectId(), m.getUserId(), m.getProduct(), m.getRole());
   }
 
   private ApiModels.LicenseDto toLicense(TenantLicenseEntity lic, String tenantId) {

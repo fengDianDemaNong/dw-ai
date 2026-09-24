@@ -24,8 +24,17 @@ mybatis-plus:
 
 dwai:
   product: warehouse
+  # 判权用的产品码，权限表 Perms 的第一维。与上面的 product（进程角色）不是一回事：
+  # product=warehouse 说的是「这个进程开仓建设」，product-code 说的是「这些权限词属于仓建设」。
+  product-code: ${DWAI_PRODUCT_CODE:warehouse}
   db-file: dw_mode
-  deploy-mode: ${DW_AI_MODE:multi}
+  deploy-mode: ${DW_AI_MODE:standard}
+  # 占位符的默认值必须留空，不能写 standard！
+  # DwaiProperties.runMode() 的回落是「runMode 非空则用它，否则用 deployMode」，
+  # 这里一旦给出非空默认值，runMode 就永远非空 —— deploy-mode（= DW_AI_MODE）被彻底架空，
+  # 于是 DW_AI_MODE=standalone 启动出来的进程其实是 standard：接口要登录、前端要登录。
+  # 留空后三种写法都成立：都不设 → deploy-mode 的 standard；设 DW_AI_MODE=x → x；
+  # 设 DW_AI_RUN_MODE=y → y（更具体者胜）。dw-org 的同一行也是留空的，别再改回去。
   run-mode: ${DW_AI_RUN_MODE:}
   org-base-url: ${ORG_BASE_URL:http://127.0.0.1:18080}
   service-base-url: ${SERVICE_BASE_URL:http://127.0.0.1:18081}
@@ -33,7 +42,7 @@ dwai:
   llm-secret: ${DW_AI_LLM_SECRET:dw-ai-llm-dev-secret-change-me-32b}
   bootstrap:
     admin-username: ${BOOTSTRAP_ADMIN_USER:admin}
-    admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:admin123}
+    admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:123456}
     admin-display-name: ${BOOTSTRAP_ADMIN_NAME:平台管理员}
   security:
     # dev = HS256 开发令牌；oidc = 校验 Casdoor JWT。接口形态相同。
@@ -43,6 +52,9 @@ dwai:
     refresh-ttl-seconds: ${REFRESH_TTL_SECONDS:900}
     idle-ttl-seconds: ${IDLE_TTL_SECONDS:900}
     allow-dev-login: ${ALLOW_DEV_LOGIN:true}
+    # 服务间令牌，保护 /internal/v1/**（组织 fan-out 到本模块的两个项目镜像入口）。
+    # 留空 = 这些接口一律 401，不再回落成开放 —— 「忘了配」要立刻报错，不能默认打开。
+    # org / model / lineage 三处必须配同一个值（环境变量 MODULE_TOKEN）。
     module-token: ${MODULE_TOKEN:}
     casdoor:
       issuer: ${CASDOOR_ISSUER:}
@@ -65,4 +77,4 @@ dwai:
     project-code: ${DS_PROJECT_CODE:0}
   web:
     static-dir: ${WEB_STATIC_DIR:}
-    cors-origins: ${CORS_ORIGINS:http://127.0.0.1:5171,http://localhost:5171,http://127.0.0.1:5172,http://localhost:5172,http://127.0.0.1:5173,http://localhost:5173,http://localhost,http://127.0.0.1}
+    cors-origins: ${CORS_ORIGINS:*}

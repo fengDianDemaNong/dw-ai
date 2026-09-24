@@ -27,7 +27,7 @@ Vite 把 `/api`、`/internal` 代理到 `http://127.0.0.1:18081`。请先启动 
 | `VITE_PRODUCT` | `warehouse` | 固定为本产品 |
 | `VITE_ORG_ORIGIN` | `http://127.0.0.1:5171` | 未登录跳转 |
 | `VITE_WAREHOUSE_ORIGIN` | `http://127.0.0.1:5172` | 自己的 origin |
-| `VITE_LINEAGE_ORIGIN` | `http://127.0.0.1:5175` | 数据地图 iframe |
+| `VITE_LINEAGE_ORIGIN` | `http://127.0.0.1:5173` | 数据地图 iframe |
 | `VITE_RUN_MODE` | 空（跟 API） | `multi` / `standard` / `standalone` |
 | `VITE_API_BASE` | 空（走代理） | 可选直连 API |
 | `VITE_RULES_BASE` | 空 | 规则服务；空则走同源 `/api` 编排 |

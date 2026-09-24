@@ -46,12 +46,12 @@ check_min_tests() {
 if [ "$TARGET" = "all" ] || [ "$TARGET" = "backend" ]; then
 
   step "构建并测试 sql-tools"
-  if (cd "$ROOT/sql-tools" && mvn -B -ntp clean test -q); then
+  if (cd "$ROOT/api" && mvn -B -ntp clean test -q); then
     ok "sql-tools 测试通过"
   else
     bad "sql-tools 测试失败"
   fi
-  check_min_tests "sql-tools" "$ROOT/sql-tools" "$MIN_TESTS_SQLTOOLS"
+  check_min_tests "sql-tools" "$ROOT/api" "$MIN_TESTS_SQLTOOLS"
 fi
 
 # ---------------------------------------------------------------
@@ -60,9 +60,11 @@ fi
 if [ "$TARGET" = "all" ] || [ "$TARGET" = "frontend" ]; then
 
   step "构建前端"
-  if (cd "$ROOT/sql-tools-vue" && {
-        [ -d node_modules ] || CI=true pnpm install --no-frozen-lockfile
-        CI=true pnpm run build:no-check
+  # 依赖装在仓库根（ui 已并入根 npm workspaces，见 ADR-0014），所以 install 要在根做；
+  # 构建仍用 build:no-check（vite build，不含 vue-tsc），与迁移前口径一致。
+  if (cd "$ROOT/.." && {
+        [ -d node_modules ] || CI=true npm install
+        CI=true npm run build:no-check -w sql-tools
       } > /tmp/ci-frontend.log 2>&1); then
     ok "前端构建通过"
   else
@@ -70,9 +72,9 @@ if [ "$TARGET" = "all" ] || [ "$TARGET" = "frontend" ]; then
   fi
 
   step "检查前端产物是否含硬编码后端地址"
-  if [ -d "$ROOT/sql-tools-vue/dist" ]; then
+  if [ -d "$ROOT/ui/dist" ]; then
     HITS="$(grep -rlE '10\.36\.218\.98|192\.168\.|localhost:8080' \
-              "$ROOT"/sql-tools-vue/dist/assets/*.js 2>/dev/null || true)"
+              "$ROOT"/ui/dist/assets/*.js 2>/dev/null || true)"
     if [ -n "$HITS" ]; then
       bad "产物中出现硬编码地址，应改用 VITE_API_BASE_URL + nginx 反代"
       echo "$HITS" | sed 's/^/        /'

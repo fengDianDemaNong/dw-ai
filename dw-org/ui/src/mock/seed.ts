@@ -74,11 +74,14 @@ export function createSeed(): AppState {
     currentTenantId: T1,
     currentProjectId: null,
     currentUser: '张三',
+    // product 不能省：projectRoleOf / can 都按 (项目, 用户, 产品) 三元查，
+    // 没有产品那一列的行等于不存在 —— 本地演示模式会整个变成「菜单全灰、进不去项目」。
+    // 只写 warehouse：本地模式下数据地图整组不可见，写 metadata 没有界面会用到。
     members: [
-      { projectId: P1, userId: '张三', role: 'admin' },
-      { projectId: P1, userId: '李四', role: 'modeler' },
-      { projectId: P2, userId: '李四', role: 'admin' },
-      { projectId: P2, userId: '张三', role: 'viewer' },
+      { projectId: P1, userId: '张三', product: 'warehouse', role: 'admin' },
+      { projectId: P1, userId: '李四', product: 'warehouse', role: 'modeler' },
+      { projectId: P2, userId: '李四', product: 'warehouse', role: 'admin' },
+      { projectId: P2, userId: '张三', product: 'warehouse', role: 'viewer' },
     ],
     licenses: [
       {

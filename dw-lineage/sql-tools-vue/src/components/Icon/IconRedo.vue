@@ -1,6 +1,0 @@
-<template>
-  <svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M21 7v6h-6"></path>
-    <path d="M3 17a9 9 0 019-9 9 9 0 016 2.3L21 13"></path>
-  </svg>
-</template>

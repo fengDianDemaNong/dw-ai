@@ -30,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "dwai.security.mode=dev",
         "dwai.security.allow-dev-login=true",
         "dwai.bootstrap.admin-username=admin",
-        "dwai.bootstrap.admin-password=admin123"
+        "dwai.bootstrap.admin-password=123456"
 })
 @AutoConfigureMockMvc
 class AuthSmokeTest {
@@ -44,7 +44,7 @@ class AuthSmokeTest {
     void adminCanLoginAndReadOwnProfile() throws Exception {
         String body = mvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"username\":\"admin\",\"password\":\"admin123\"}"))
+                        .content("{\"username\":\"admin\",\"password\":\"123456\"}"))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 

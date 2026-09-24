@@ -10,7 +10,7 @@ import re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 COMMENTS = json.loads((ROOT / "release/sql/comments.json").read_text(encoding="utf-8"))
-SCHEMA = (ROOT / "sql-tools/src/main/resources/db/migration/h2/V1__schema.sql").read_text(encoding="utf-8")
+SCHEMA = (ROOT / "api/src/main/resources/db/migration/h2/V1__schema.sql").read_text(encoding="utf-8")
 
 
 def parse_columns(table: str):

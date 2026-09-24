@@ -1,2 +1,17 @@
-ALTER TABLE tenant_grants ADD COLUMN IF NOT EXISTS project_roles JSON NULL;
-UPDATE tenant_grants SET project_roles = '{}' WHERE project_roles IS NULL;
+-- MySQL 下本迁移是空操作，这不是笔误，缘由如下。
+--
+-- 本意是给 tenant_grants 补上 project_roles 列（授权时按项目派角色用）。但
+-- mysql/V1__schema.sql:72 建表时就已经带上这一列了（JSON NOT NULL），列在所有
+-- MySQL 库上都存在，再 ADD 一次只会抛 Duplicate column name 'project_roles'。
+--
+-- 最初写的是 `ADD COLUMN IF NOT EXISTS`，那是 MariaDB / PostgreSQL / H2 的扩展语法：
+-- H2 认，所以测试一直全绿；MySQL 8 不认，于是 dw-org 在任何全新的 MySQL 库上
+-- 都起不来（V8 直接 SQLSyntaxErrorException）。去掉 IF NOT EXISTS 后又暴露了
+-- 上面那个「列已存在」的真相 —— 两层问题叠在一起，只在真 MySQL 上才看得见。
+--
+-- postgresql/V8 那边用的是 IF NOT EXISTS，行为正确，不要跟着改。
+-- 本文件保留而不删除，是为了让 flyway_schema_history 里的版本序列保持连续。
+--
+-- 写注释注意：MySQL 的 `--` 后面必须跟一个空格。中文全角括号紧跟 `--`（写成
+-- `--（`）不算注释，整行会被当 SQL 解析 —— 上面这几行踩过这个坑。
+SELECT 1;

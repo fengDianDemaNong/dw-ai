@@ -42,8 +42,9 @@ services:
 
   org-api:
     build:
-      context: ./dw-org/api
-      dockerfile: Dockerfile
+      # 上下文必须是仓库根：dw-common 是独立模块，只给 api 目录 COPY 不到它
+      context: .
+      dockerfile: dw-org/api/Dockerfile
     image: dw-org:0.1.3
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -55,6 +56,10 @@ services:
       DB_PASSWORD: ${ORG_DB_PASSWORD:-${DB_PASSWORD:-}}
       DB_TYPE: ${ORG_DB_TYPE:-${DB_TYPE:-}}
       DW_AI_MODE: ${DW_AI_MODE:-multi}
+      # 服务间令牌，仅 multi 需要。org / model / lineage 三处必须是同一个值，
+      # 这里由同一个 .env 透传，天然一致。留空 = /internal/v1/** 一律 401（见 ADR-0012），
+      # 表现为「组织里建了项目，仓建设里看不见」。
+      MODULE_TOKEN: ${MODULE_TOKEN:-}
       JWT_SECRET: ${JWT_SECRET:-dw-ai-dev-secret-change-me-please-32b}
       ALLOW_DEV_LOGIN: ${ALLOW_DEV_LOGIN:-true}
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
@@ -85,8 +90,9 @@ services:
 
   model-api:
     build:
-      context: ./dw-model/api
-      dockerfile: Dockerfile
+      # 上下文必须是仓库根：dw-common 是独立模块，只给 api 目录 COPY 不到它
+      context: .
+      dockerfile: dw-model/api/Dockerfile
     image: dw-model:0.1.3
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -98,6 +104,10 @@ services:
       DB_PASSWORD: ${MODEL_DB_PASSWORD:-${DB_PASSWORD:-}}
       DB_TYPE: ${MODEL_DB_TYPE:-${DB_TYPE:-}}
       DW_AI_MODE: ${DW_AI_MODE:-multi}
+      # 服务间令牌，仅 multi 需要。org / model / lineage 三处必须是同一个值，
+      # 这里由同一个 .env 透传，天然一致。留空 = /internal/v1/** 一律 401（见 ADR-0012），
+      # 表现为「组织里建了项目，仓建设里看不见」。
+      MODULE_TOKEN: ${MODULE_TOKEN:-}
       DW_AI_LLM_SECRET: ${DW_AI_LLM_SECRET:-dw-ai-llm-dev-secret-change-me-32b}
       SECURITY_MODE: ${SECURITY_MODE:-dev}
       JWT_SECRET: ${JWT_SECRET:-dw-ai-dev-secret-change-me-please-32b}

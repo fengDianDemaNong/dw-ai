@@ -5,17 +5,17 @@
 #    不改也能跑，默认用内嵌 H2，数据存在 docker 卷 backend-data 里。
 #
 # 2) 构建后端 jar：
-#      (cd sql-tools && mvn package -DskipTests)
+#      (cd api && mvn package -DskipTests)
 #
 # 3) 启动：docker compose up -d
 #
-# 访问：控制台 http://localhost/   （会跳转到 /sql-tools/）
+# 访问：控制台 http://localhost/lineage/
 #       接口文档 http://localhost:8080/swagger-ui.html
 
 services:
   backend:
     build:
-      context: ./sql-tools
+      context: ./api
     image: sql-tools-backend
     networks:
       - docker-bridge
@@ -27,6 +27,10 @@ services:
       DB_HOST: ${DB_HOST:-host.docker.internal}
       DB_PORT: ${DB_PORT:-}
       DB_NAME: ${DB_NAME:-dw_lineage}
+      # DB_USER 是新口径，与 org / model 共用一份 .env；DB_USERNAME 是 lineage 老名字，
+      # 继续透传以兼容老 .env。两个都注入空串也没关系 —— resolveUsername() 取第一个
+      # 非空的，不看「有没有定义」，所以空串不会顶掉另一个。
+      DB_USER: ${DB_USER:-}
       DB_USERNAME: ${DB_USERNAME:-}
       DB_PASSWORD: ${DB_PASSWORD:-}
       DB_PARAMS: ${DB_PARAMS:-}
@@ -53,7 +57,11 @@ services:
 
   frontend:
     build:
-      context: ./sql-tools-vue
+      # 上下文必须是仓库根：前端依赖 npm workspace 的 packages/engine，
+      # 且 npm ci 要按根 workspaces 数组找到全部五个成员目录。见 ADR-0014。
+      # 与 dw-org / dw-model 的 docker-compose.yml 同写法。
+      context: ..
+      dockerfile: dw-lineage/ui/Dockerfile
     image: sql-tools-frontend
     networks:
       - docker-bridge

@@ -186,7 +186,7 @@ tenant
 
 建表与升级由 Flyway 托管（与 dw-org / dw-model 一致）：空库启动自动执行迁移并灌初始数据，
 已用安装包脚本建好的库 `baseline` 接管、不重复建表。
-迁移脚本按方言分目录（`sql-tools/src/main/resources/db/migration/{h2,mysql,postgresql}`），
+迁移脚本按方言分目录（`api/src/main/resources/db/migration/{h2,mysql,postgresql}`），
 安装包里的 `release/sql/{h2,mysql,postgresql}` 与之内容完全一致，供离线手工安装 / DBA 审阅。
 `release/sql/upgrade/` 保留离线升级脚本，供无外网 / 停机窗口手工执行。
 三个后端共用同一份测试用例；MySQL / PostgreSQL 由 `MigrationExternalDbIT` 在真实库上验证，

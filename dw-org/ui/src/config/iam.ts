@@ -1,16 +1,13 @@
-import type { ProjectMember, TenantLicense } from '../types';
+import type { Perm, Product, ProjectMember, ProjectRole, TenantLicense } from '@dw-ai/engine';
 
-export type { ProjectMember, TenantLicense };
+export type { Perm, Product, ProjectMember, ProjectRole, TenantLicense };
 
-export type Perm =
-  | 'spec:read'
-  | 'spec:write'
-  | 'model:read'
-  | 'model:write'
-  | 'model:publish'
-  | 'iam:member';
-
-export type ProjectRole = ProjectMember['role'];
+/**
+ * 权限矩阵（`ROLE_PERMS`）与判权函数（`roleHas`）在共享包里 —— 工作台、仓建设、
+ * 数据地图三个前端都要用它画菜单，各抄一份的话加一个产品得改三处，而漏掉的那一处
+ * 不会编译报错，只在运行时判否。这里只做转发，让原 import 路径继续可用。
+ */
+export { ROLE_PERMS, roleHas } from '@dw-ai/engine';
 
 /** 与产品 SKU 对应。运行时只开放仓建设（规范中心 + 建模中心）。 */
 export type ProductModule = TenantLicense['modules'][number];
@@ -54,7 +51,7 @@ export const PROJECT_ROLE_LABEL: Record<ProjectRole, string> = {
 };
 
 export const DEMO_ACCOUNTS_MULTI = [
-  { username: 'admin', password: 'admin123', note: '平台用户' },
+  { username: 'admin', password: '123456', note: '平台用户' },
   { username: '张三', password: '123456', note: '仅星河 · 管理员' },
   { username: '李四', password: '123456', note: '星河建模 / 启航管理员' },
 ] as const;
@@ -71,13 +68,3 @@ export const ROLE_LABEL: Record<ProjectRole, string> = {
   viewer: '只读访客',
 };
 
-export const ROLE_PERMS: Record<ProjectRole, Perm[]> = {
-  admin: ['spec:read', 'spec:write', 'model:read', 'model:write', 'model:publish', 'iam:member'],
-  modeler: ['spec:read', 'model:read', 'model:write'],
-  viewer: ['spec:read', 'model:read'],
-};
-
-export function roleHas(role: ProjectRole | undefined, perm: Perm): boolean {
-  if (!role) return false;
-  return ROLE_PERMS[role].includes(perm);
-}

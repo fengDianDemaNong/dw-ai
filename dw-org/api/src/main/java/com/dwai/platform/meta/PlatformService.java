@@ -2,18 +2,18 @@ package com.dwai.platform.meta;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.dwai.platform.auth.AuthService;
+import com.dwai.platform.auth.RefreshTokenService;
 import com.dwai.platform.auth.TenantContext;
+import com.dwai.platform.internal.ModuleSyncService;
 import com.dwai.platform.meta.dto.ApiModels;
 import com.dwai.platform.meta.entity.AppearancePrefEntity;
 import com.dwai.platform.meta.entity.ProjectEntity;
-import com.dwai.platform.meta.entity.ProjectMemberEntity;
 import com.dwai.platform.meta.entity.TenantEntity;
 import com.dwai.platform.meta.entity.TenantLicenseEntity;
 import com.dwai.platform.meta.entity.UserEntity;
 import com.dwai.platform.meta.entity.UserTenantEntity;
 import com.dwai.platform.meta.mapper.AppearancePrefMapper;
 import com.dwai.platform.meta.mapper.ProjectMapper;
-import com.dwai.platform.meta.mapper.ProjectMemberMapper;
 import com.dwai.platform.meta.mapper.TenantLicenseMapper;
 import com.dwai.platform.meta.mapper.TenantMapper;
 import com.dwai.platform.meta.mapper.UserMapper;
@@ -26,7 +26,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.time.LocalDate;
 import java.util.List;
 
 @Service
@@ -38,9 +37,10 @@ public class PlatformService {
   private final UserMapper users;
   private final UserTenantMapper userTenants;
   private final ProjectMapper projects;
-  private final ProjectMemberMapper members;
   private final AppearancePrefMapper prefs;
   private final PasswordEncoder passwords;
+  private final ModuleSyncService moduleSync;
+  private final RefreshTokenService refreshTokens;
 
   public PlatformService(
       AccessService access,
@@ -50,9 +50,10 @@ public class PlatformService {
       UserMapper users,
       UserTenantMapper userTenants,
       ProjectMapper projects,
-      ProjectMemberMapper members,
       AppearancePrefMapper prefs,
-      PasswordEncoder passwords) {
+      PasswordEncoder passwords,
+      ModuleSyncService moduleSync,
+      RefreshTokenService refreshTokens) {
     this.access = access;
     this.auth = auth;
     this.tenants = tenants;
@@ -60,9 +61,10 @@ public class PlatformService {
     this.users = users;
     this.userTenants = userTenants;
     this.projects = projects;
-    this.members = members;
     this.prefs = prefs;
     this.passwords = passwords;
+    this.moduleSync = moduleSync;
+    this.refreshTokens = refreshTokens;
   }
 
   public List<ApiModels.TenantDto> listTenants() {
@@ -100,17 +102,9 @@ public class PlatformService {
     lic.setAiCaps(Jsons.toJson(AiCaps.licensed(modules.contains("warehouse"), null)));
     licenses.insert(lic);
     upsertTenantRole(admin.getId(), t.getId(), "admin");
-    ProjectEntity p = new ProjectEntity();
-    p.setId("p-" + System.currentTimeMillis());
-    p.setTenantId(t.getId());
-    p.setCode("default");
-    p.setName("默认项目");
-    p.setDescription("");
-    p.setOwner(admin.getId());
-    p.setCreatedAt(LocalDate.now());
-    p.setEngines(Jsons.toJson(List.of()));
-    projects.insert(p);
-    upsertMember(p.getId(), admin.getId(), "admin");
+    // 不预置项目：新租户从「一个项目都没有」开始，由租户管理员进去后自建。
+    // 之前这里自动插一个「默认项目」（id 还是建租户那一刻的时间戳），结果是每个租户
+    // 都凭空多出一个没人建过的项目，管理员还得先删掉它才能开始干活。
     upsertPref("tenant", t.getId());
     return auth.toTenant(t);
   }
@@ -120,10 +114,12 @@ public class PlatformService {
     access.requirePlatform();
     TenantEntity t = tenants.selectById(id);
     if (t == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "租户不存在");
+    boolean modulesChanged = false;
     if (req != null) {
       if (!blank(req.status())) t.setStatus(req.status());
       if (!blank(req.name())) t.setName(req.name().trim());
       if (req.modules() != null) {
+        modulesChanged = true;
         TenantLicenseEntity lic = licenses.selectById(id);
         List<String> modules = req.modules();
         if (lic == null) {
@@ -147,7 +143,78 @@ public class PlatformService {
       }
       tenants.updateById(t);
     }
+    // 许可变了就得让模块知道。改许可本身不产生「项目变更」事件，而模块侧只在收到
+    // 项目镜像时才校准本地许可（见 ModuleSyncService.bodyOf），少了这一步，
+    // 组织里刚开通的数据地图要等到下次有人动项目才在仓建设里出现 ——
+    // 表现为「我明明开了，模块里还是进不去」。
+    if (modulesChanged) resyncTenant(id);
     return auth.toTenant(t);
+  }
+
+  /**
+   * 重置某租户管理员的密码。
+   *
+   * <p>为什么必须由平台侧单独开一个入口：{@code POST /api/tenants/{id}/users/{userId}}
+   * 要求调用者<b>正处在该租户里</b>（{@code requireTenantAdmin} 先要 TenantContext 有租户），
+   * 而平台管理员在租户管理页并没有进入租户，拿不到租户上下文；{@code /api/platform/users/{id}}
+   * 又只认 {@code platformAdmin=true} 的账号，租户管理员通常不是。两条路都覆盖不到这个场景。
+   *
+   * <p>顺带作废该账号已签发的 refresh token：重置密码的用意就是「原来的密码不算数了」，
+   * 不作废的话旧会话还能继续换新 access token，等于没重置。
+   */
+  @Transactional
+  public void resetTenantAdminPassword(String tenantId, String password) {
+    access.requirePlatform();
+    if (blank(password)) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请填写新密码");
+    }
+    TenantEntity t = tenants.selectById(tenantId);
+    if (t == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "租户不存在");
+    UserEntity admin = requireTenantAdmin(t);
+    admin.setPasswordHash(passwords.encode(password));
+    users.updateById(admin);
+    refreshTokens.revokeAll(admin.getId());
+  }
+
+  /**
+   * 找出该租户的管理员账号。
+   *
+   * <p>权威来源是 {@code user_tenants}（建租户与「指定管理员」都会往这里写 role=admin），
+   * <b>不是</b> {@code tenants.owner} —— 后者存的是显示名（见 {@link #createTenant}），
+   * 既可能重复也会被改名，只适合展示。
+   *
+   * <p>一个租户允许有多名管理员，此时拿 owner 显示名消歧；仍不唯一就报错让人去「编辑」里
+   * 指定，好过随便挑一个重置掉 —— 重置错了账号是没法撤销的。
+   */
+  private UserEntity requireTenantAdmin(TenantEntity t) {
+    List<UserTenantEntity> admins = userTenants.selectList(Wrappers.<UserTenantEntity>lambdaQuery()
+        .eq(UserTenantEntity::getTenantId, t.getId())
+        .eq(UserTenantEntity::getTenantRole, "admin"));
+    if (admins.isEmpty()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "该租户没有管理员账号");
+    }
+    if (admins.size() == 1) {
+      UserEntity u = users.selectById(admins.get(0).getUserId());
+      if (u == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "管理员账号不存在");
+      return u;
+    }
+    List<UserEntity> matched = admins.stream()
+        .map(a -> users.selectById(a.getUserId()))
+        .filter(u -> u != null && u.getDisplayName() != null && u.getDisplayName().equals(t.getOwner()))
+        .toList();
+    if (matched.size() != 1) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+          "该租户有多名管理员，无法确定重置哪一个，请先在「编辑」里指定管理员");
+    }
+    return matched.get(0);
+  }
+
+  /** 把该租户的所有项目重推一遍，顺带把许可带到各模块。 */
+  private void resyncTenant(String tenantId) {
+    for (ProjectEntity p : projects.selectList(
+        Wrappers.<ProjectEntity>lambdaQuery().eq(ProjectEntity::getTenantId, tenantId))) {
+      moduleSync.syncProject(p);
+    }
   }
 
   public List<ApiModels.OrgUserDto> listAccounts() {
@@ -278,19 +345,6 @@ public class PlatformService {
       userTenants.update(exist, Wrappers.<UserTenantEntity>lambdaQuery()
           .eq(UserTenantEntity::getUserId, userId)
           .eq(UserTenantEntity::getTenantId, tenantId));
-    }
-  }
-
-  private void upsertMember(String projectId, String userId, String role) {
-    ProjectMemberEntity exist = members.selectOne(Wrappers.<ProjectMemberEntity>lambdaQuery()
-        .eq(ProjectMemberEntity::getProjectId, projectId)
-        .eq(ProjectMemberEntity::getUserId, userId));
-    if (exist == null) {
-      ProjectMemberEntity m = new ProjectMemberEntity();
-      m.setProjectId(projectId);
-      m.setUserId(userId);
-      m.setRole(role);
-      members.insert(m);
     }
   }
 

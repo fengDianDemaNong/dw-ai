@@ -163,7 +163,12 @@ public class TenantFilter extends OncePerRequestFilter {
       TenantEntity byCode = tenants.selectByCode(tenantCode);
       if (byCode != null) return byCode.getId();
     }
-    return headerTenant;
+    // 解析不到时一律把原始值往下带，让下面的存在性校验把它拒掉（403）。
+    //
+    // 这里刻意不 return null：只传了 X-Tenant-Code 且解析不到时，返回 null 会让
+    // 请求「静默变成没有租户」，调用方拿到 200 —— 与只传 X-Tenant-Id 却对不上时的
+    // 403 行为不一致，也正是技术方案 §3.3「解析不到不准静默回落」要禁止的形态。
+    return headerTenant != null ? headerTenant : tenantCode;
   }
 
   private String resolveProjectId(String headerProject, String projectCode, String tenantId) {

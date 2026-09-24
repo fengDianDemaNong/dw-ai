@@ -3,8 +3,9 @@
 services:
   model-api:
     build:
-      context: ./api
-      dockerfile: Dockerfile
+      # 上下文必须是仓库根：dw-common 是独立模块，只给 api 目录 COPY 不到它
+      context: ..
+      dockerfile: dw-model/api/Dockerfile
     image: dw-model:0.1.3
     extra_hosts:
       - "host.docker.internal:host-gateway"

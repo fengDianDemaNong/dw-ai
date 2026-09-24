@@ -31,7 +31,9 @@
         </button>
         <button v-if="!standalone" type="button" class="act" @click="openProfile">个人信息</button>
         <button v-if="!standalone" type="button" class="act" @click="openPwd">修改密码</button>
-        <button v-if="isRealTenantAdmin && project && isStandardMode()" type="button" class="act" @click="toWorkbench">返回工作台</button>
+        <!-- 判据见 `config/pages.ts` 的 `canBackToWorkbench`：multi 下所有人都该有
+             （上一级在组织平台），其余模式只给租户管理员，standalone 兜底。 -->
+        <button v-if="canBackHome" type="button" class="act" @click="toWorkbench">返回工作台</button>
         <button v-if="!remote && !standalone" type="button" class="act" @click="resetAndLeave">重置演示</button>
         <button v-if="!standalone" type="button" class="act danger" @click="out">退出</button>
       </div>
@@ -80,9 +82,10 @@ import { message } from 'ant-design-vue';
 import { useRemoteApi } from '../api/client';
 import { PROJECT_ROLE_LABEL, TENANT_ROLE_LABEL } from '../config/iam';
 import { LOGIN_PATH, SYS_HOME } from '../config/paths';
-import { openOrgLogin } from '../config/product';
+import { openOrgLogin, openOrgWorkbench } from '../config/product';
 import { APP_VERSION } from '../config/version';
-import { isMultiTenant, isStandalone, isStandardMode } from '../config/runtime';
+import { isMultiTenant, isStandalone } from '../config/runtime';
+import { canBackToWorkbench } from '../config/pages';
 import type { MenuPos } from '../stores/prefs';
 import {
   currentProject,
@@ -115,6 +118,8 @@ const standalone = isStandalone();
 const orgWord = multi ? '租户' : '组织';
 const onAdmin = computed(() => route.path.startsWith('/admin'));
 const canSwitchTenant = computed(() => false);
+/** multi 下上一级在组织平台，所以判据里还要问「当前有没有项目」——没有项目就没有「上一级」可回。 */
+const canBackHome = computed(() => Boolean(project.value) && canBackToWorkbench(isRealTenantAdmin.value));
 
 onMounted(() => {
   if (remote && multi) void refreshMyTenants();
@@ -191,6 +196,11 @@ function toSelectTenant() {
 
 function toWorkbench() {
   leaveProject();
+  // multi 的工作台在组织平台（本进程没有这一级），所以是整页跳转而非 router.push。
+  if (multi) {
+    openOrgWorkbench();
+    return;
+  }
   router.push(SYS_HOME);
 }
 

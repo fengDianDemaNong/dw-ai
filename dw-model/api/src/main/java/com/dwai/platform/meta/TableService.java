@@ -68,6 +68,7 @@ public class TableService {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "表名必填");
     }
     WarehouseTableEntity exist = in.id() == null ? null : tables.selectById(in.id());
+    AccessService.requireSameProject(projectId, exist == null ? null : exist.getProjectId());
     long clash = tables.selectCount(Wrappers.<WarehouseTableEntity>lambdaQuery()
         .eq(WarehouseTableEntity::getProjectId, projectId)
         .eq(WarehouseTableEntity::getName, in.name())
@@ -155,6 +156,7 @@ public class TableService {
   public ApiModels.DraftDto saveDraft(String projectId, ApiModels.DraftDto in) {
     access.requireMember(projectId, "model:write");
     ModelingDraftEntity exist = in.id() == null ? null : drafts.selectById(in.id());
+    AccessService.requireSameProject(projectId, exist == null ? null : exist.getProjectId());
     ModelingDraftEntity e = exist == null ? new ModelingDraftEntity() : exist;
     if (exist == null) {
       e.setId(in.id() == null || in.id().isBlank() ? "draft-" + System.currentTimeMillis() : in.id());

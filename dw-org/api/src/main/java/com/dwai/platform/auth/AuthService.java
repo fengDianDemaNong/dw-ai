@@ -90,9 +90,11 @@ public class AuthService {
     if (!"active".equalsIgnoreCase(nz(u.getStatus(), "active"))) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "用户名或密码错误");
     }
-    if (props.isStandard() && Boolean.TRUE.equals(u.getPlatformAdmin())) {
-      throw new ResponseStatusException(HttpStatus.FORBIDDEN, "普通模式不提供平台账号");
-    }
+    // 这里早前有一句「普通模式不提供平台账号」的拒绝，按「admin 是组织平台账号」的口径
+    // 把 platformAdmin 在 standard 下一律挡掉。但本进程启动只建 admin 一个账号
+    // （DemoSeedRunner 是空壳，演示数据要手动跑 seed-demo.sh），挡掉它等于 standard
+    // 空库启动后谁都进不来。放行后 admin 在普通模式下进的就是工作台 —— 那个模式没有
+    // 平台后台可进，不存在「平台账号越权」的面。
     refreshTokens.revokeAll(u.getId());
     return toLoginRes(u, refreshTokens.issue(u.getId()));
   }
@@ -271,10 +273,12 @@ public class AuthService {
         Wrappers.<ProjectEntity>lambdaQuery().eq(ProjectEntity::getTenantId, tenantId));
     for (ProjectEntity p : list) {
       if (!isActive(p)) continue;
-      ProjectMemberEntity m = members.selectOne(Wrappers.<ProjectMemberEntity>lambdaQuery()
+      // 只要在任一产品下有角色，这个项目就算「我参与的」—— landing 与产品无关。
+      // 加产品维后同一项目下会有多行，selectOne 会抛多行异常，所以用 selectList。
+      boolean joined = !members.selectList(Wrappers.<ProjectMemberEntity>lambdaQuery()
           .eq(ProjectMemberEntity::getProjectId, p.getId())
-          .eq(ProjectMemberEntity::getUserId, userId));
-      if (m != null) return p.getId();
+          .eq(ProjectMemberEntity::getUserId, userId)).isEmpty();
+      if (joined) return p.getId();
     }
     if (acl.platformGrantOf(userId, tenantId) != null) {
       List<String> scoped = acl.grantProjectIds(userId, tenantId);

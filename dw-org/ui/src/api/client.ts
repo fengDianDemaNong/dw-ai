@@ -137,7 +137,11 @@ function isAuthFailure(err: unknown) {
 }
 
 function asciiHeader(v: string) {
-  return /^[\x20-\x7E]+$/.test(v) ? v : '';
+  if (!v) return '';
+  if (/^[\x20-\x7E]+$/.test(v)) return v;
+  // 非 ASCII 的值塞进 HTTP 头会被浏览器拒绝整条请求，只能丢弃；但要留下线索，别静默
+  console.warn('[dw-ai] 请求头含非 ASCII 字符，已丢弃:', v.slice(0, 32));
+  return '';
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -372,6 +376,11 @@ export const api = {
       req<Tenant>('/api/v1/platform/tenants', { method: 'POST', body: JSON.stringify(body) }),
     patchTenant: (id: string, body: Record<string, unknown>) =>
       req<Tenant>(`/api/v1/platform/tenants/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    resetAdminPassword: (id: string, password: string) =>
+      req<void>(`/api/v1/platform/tenants/${id}/reset-admin-password`, {
+        method: 'POST',
+        body: JSON.stringify({ password }),
+      }),
     users: () => req<OrgUser[]>('/api/v1/platform/users'),
     accounts: () => req<OrgUser[]>('/api/v1/platform/accounts'),
     createUser: (body: { username: string; displayName?: string; password: string }) =>

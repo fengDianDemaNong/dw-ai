@@ -191,7 +191,7 @@ async function main() {
     sessionStorage.clear();
     localStorage.clear();
   });
-  await login(page, 'admin', 'admin123');
+  await login(page, 'admin', '123456');
   await page.waitForURL(/\/admin/, { timeout: 20_000 });
   await page.getByRole('heading', { name: /租户/ }).waitFor();
   await shot(page, 'admin-tenants');

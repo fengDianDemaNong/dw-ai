@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 })
 class SchemaBootstrapTest {
 
-    /** dw-org 全库应有的表（跨 V1~V14 全部迁移）。 */
+    /** dw-org 全库应有的表（跨 V1~V15 全部迁移）。 */
     private static final List<String> EXPECTED_TABLES = List.of(
             "tenants", "users", "user_tenants", "projects", "project_members",
             "platform_access", "tenant_grants", "tenant_licenses", "tenant_llm",

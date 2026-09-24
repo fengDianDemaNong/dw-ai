@@ -8,7 +8,7 @@ Accepted（2026-09-21）
 
 `dw-lineage` 引入 Flyway 后，同一份建表 DDL 同时存在于两处：
 
-- `sql-tools/src/main/resources/db/migration/<方言>/V1__schema.sql`（Flyway 执行，打进 jar）
+- `api/src/main/resources/db/migration/<方言>/V1__schema.sql`（Flyway 执行，打进 jar）
 - `release/sql/<方言>/01_schema.sql`（安装包离线手工建库，`init-db.sh` 执行）
 
 两份内容逐字节相同，靠人工同步。这个项目在早期就因此漂移过一次：安装包脚本少了

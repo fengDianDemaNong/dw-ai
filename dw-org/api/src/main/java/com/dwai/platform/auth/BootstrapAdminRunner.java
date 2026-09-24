@@ -52,7 +52,7 @@ public class BootstrapAdminRunner implements ApplicationRunner {
     u.setStatus("active");
     u.setPlatformAdmin(true);
     users.insert(u);
-    log.info("已创建初始平台用户 {}，登录后请尽快改密。演示租户仍须执行 seed.sh。", username);
+    log.info("已创建初始平台用户 {}，登录后请尽快改密。演示数据请执行 bin/seed-demo.sh。", username);
   }
 
   private static boolean blank(String s) {

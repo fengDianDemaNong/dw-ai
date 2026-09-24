@@ -79,7 +79,10 @@ async function submit() {
 
 onMounted(async () => {
   if (isStandalone()) {
-    router.replace(MODEL_HOME);
+    // 正常到不了这里（路由守卫先把 standalone 弹回本模式首页），留着是兜底。
+    // 落点交给 `resolveTenantHome()` 而不是写死 MODEL_HOME —— standalone 也有工作台，
+    // 管理员在没有当前项目时该看到的是工作台，不是项目概况。
+    router.replace(resolveTenantHome());
     return;
   }
   if (isMultiTenant()) {

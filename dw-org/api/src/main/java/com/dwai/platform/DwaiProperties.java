@@ -13,6 +13,15 @@ public class DwaiProperties {
   private String runMode = "";
   /** suite | org | warehouse。suite 为过渡期单进程全开。 */
   private String product = "suite";
+  /**
+   * 本进程判权用的<b>产品码</b>（warehouse | metadata），权限表 {@code Perms} 的第一维。
+   *
+   * <p>与 {@link #product()} <b>不是一回事</b>，别互相顶替：那个是「进程角色」（这个进程
+   * 开了哪些功能），这个是「这套权限词属于哪个产品」。两者会分叉 —— suite 角色下
+   * {@code product()} 返回 {@code "suite"}，而 {@code "suite"} 在权限表里查不到任何东西，
+   * 拿它去判权会让全部请求静默变 403。
+   */
+  private String productCode = "warehouse";
   /** 仓建设 / 血缘 multi 时组织平台基址。 */
   private String orgBaseUrl = "";
   /** 本进程给别人登记用的浏览器可访问根地址。 */
@@ -57,6 +66,20 @@ public class DwaiProperties {
   public boolean isWarehouseProcess() { return "warehouse".equals(product()) || "suite".equals(product()); }
   public boolean isOrgOnly() { return "org".equals(product()); }
   public boolean isWarehouseOnly() { return "warehouse".equals(product()); }
+  public String getProductCode() { return productCode; }
+  public void setProductCode(String productCode) { this.productCode = productCode; }
+
+  /**
+   * 归一化后的产品码。空值回落 {@code warehouse}。
+   *
+   * <p>不像 {@link #product()} 那样做白名单：配了个权限表里没有的值，后果是全部判权 403
+   * （fail-closed，看得见），而不是被静默改写成另一个产品（fail-open，看不见）。
+   */
+  public String productCode() {
+    if (productCode == null || productCode.isBlank()) return "warehouse";
+    return productCode.trim().toLowerCase();
+  }
+
   public String getOrgBaseUrl() { return orgBaseUrl; }
   public void setOrgBaseUrl(String orgBaseUrl) { this.orgBaseUrl = orgBaseUrl; }
   public String getPublicBaseUrl() { return publicBaseUrl; }
@@ -80,7 +103,18 @@ public class DwaiProperties {
   /** 空库首次启动时补一个平台用户，与演示 seed 无关。 */
   public static class Bootstrap {
     private String adminUsername = "admin";
-    private String adminPassword = "admin123";
+    /**
+     * 平台管理员（{@code admin}）默认密码。
+     *
+     * <p>这里写的默认值只在 {@code application.yml} 的 {@code bootstrap.admin-password}
+     * 缺失时才生效，而那一行是 {@code ${BOOTSTRAP_ADMIN_PASSWORD:123456}} ——
+     * 所以<b>实际默认是 123456</b>。两处保持一致；要换密码得显式设
+     * {@code BOOTSTRAP_ADMIN_PASSWORD}。
+     *
+     * <p>取值与仓建设（dw-model）、数据地图（dw-lineage）对齐：三个模块的默认管理员
+     * 用同一组 {@code admin / 123456}，只记一套。
+     */
+    private String adminPassword = "123456";
     private String adminDisplayName = "平台管理员";
 
     public String getAdminUsername() { return adminUsername; }

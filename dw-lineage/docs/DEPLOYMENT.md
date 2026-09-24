@@ -5,7 +5,7 @@
 后端 jar 需先在宿主机构建：
 
 ```bash
-(cd sql-tools && mvn package -DskipTests)
+(cd api && mvn package -DskipTests)
 
 docker compose up -d
 ```
@@ -15,7 +15,7 @@ docker compose up -d
 | frontend | 80 | nginx，`/api` 反代到后端 |
 | backend | 8080 | Spring Boot |
 
-访问 <http://localhost/sql-tools/>。
+访问 <http://localhost/lineage/>。
 
 指定 Gravitino 地址：
 
@@ -29,8 +29,8 @@ GRAVITINO_URL=http://your-gravitino:8090 docker compose up -d
 java -jar sql-tools-1.0-SNAPSHOT.jar --spring.profiles.active=prd
 ```
 
-前端产物 `sql-tools-vue/dist` 交给 nginx，并配置 `/api` 反代到后端
-（参考 `sql-tools-vue/nginx.conf`）。
+前端产物 `ui/dist` 交给 nginx，并配置 `/api` 反代到后端
+（参考 `ui/nginx.conf`）。
 
 > **不要**让前端直连后端地址。前端默认走相对路径 `/api`，
 > 由 nginx 同源反代，这样构建产物不绑定任何主机，也不需要开跨域。
@@ -45,17 +45,36 @@ java -jar sql-tools-1.0-SNAPSHOT.jar --spring.profiles.active=prd
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `DB_URL` | `jdbc:h2:file:./data/dw_lineage;AUTO_SERVER=TRUE` | 连接串 |
-| `DB_USERNAME` | `sa` | |
+| `DB_TYPE` | `h2` | `h2` / `mysql` / `postgresql`；驱动与 Flyway 脚本目录都按它推导，不可单独配置 |
+| `DB_URL` | 由 `DB_TYPE` 推导 | 完整连接串，填了会忽略下面的 host/port/name |
+| `DB_HOST` | `localhost` | 仅 mysql / postgresql |
+| `DB_PORT` | `3306` / `5432` | 仅 mysql / postgresql，留空用默认值 |
+| `DB_NAME` | `dw_lineage` | 仅 mysql / postgresql |
+| `DB_USER` | `sa`（h2） | 用户名，与 dw-org / dw-model 同口径 |
+| `DB_USERNAME` | — | 上面那个的旧名字，`DB_USER` 为空时回落到它；新配置不用填 |
 | `DB_PASSWORD` | 空 | |
-| `DB_DRIVER` | `org.h2.Driver` | |
+| `DB_H2_PATH` | `${DW_AI_HOME}/data/dw_lineage` | 仅 type=h2。**安装包形态不认这个变量**，改 `conf/application.yml` 的 `database.h2-path`（原因见下） |
+
+这一组在三种部署形态里名字相同：docker compose 从 `.env` 读；安装包在 `conf/env.sh` 里
+`export`（`bin/start.sh` 会桥接成 Spring 的绑定名传给服务端，`bin/init-db.sh` 与
+`bin/sql-cli.sh` 直接按环境变量优先取）；源码 `java -jar` 时放在 `java` 之前。安装包也可以
+完全不设，直接改 `conf/application.yml` —— 两条路都通，都填时以环境变量为准。
+
+> **安装包的 `conf/application.yml` 不能写 `${DB_USER:}` 这类占位符。**
+> `bin/init-db.sh` 用 `yaml_get` 以纯文本方式读它取账号建库，读到的是占位符字面量本身，
+> 会把库建到错误的账号上 —— 所以这一项只能靠 `conf/env.sh` 注入，不能靠占位符回落。
+> 源码形态的 `api/src/main/resources/application.yml` 不经 `yaml_get`，没有这个限制，
+> 两边写法不同是有意的，不要「顺手统一」。
 
 切换到 MySQL：
 
 ```bash
-java -jar sql-tools.jar --spring.profiles.active=prd,mysql \
-  -DDB_URL='jdbc:mysql://host:3306/dw_lineage' \
-  -DDB_USERNAME=user -DDB_PASSWORD=pass
+# 环境变量要放在 java 之前。写在 -jar 之后会被当成程序参数，不会成为 JVM 属性，
+# 配置不生效且不报错 —— 排查起来很费时间。
+DB_TYPE=mysql \
+DB_URL='jdbc:mysql://host:3306/dw_lineage' \
+DB_USER=user DB_PASSWORD=pass \
+java -jar sql-tools.jar --spring.profiles.active=prd,mysql
 ```
 
 切换到 PostgreSQL 把 `mysql` 换成 `postgresql`。
@@ -101,7 +120,7 @@ CREATE DATABASE dw_lineage;
 ```
 
 库本身仍需先建好（应用账号通常没有建库权限），建表则交给 Flyway：
-改好 `conf/application.yml` 的 `database.type` 与连接信息后直接 `bin/start.sh`。
+在 `conf/env.sh` 里 export 好库类型与账号（或改 `conf/application.yml`）后直接 `bin/start.sh`。
 
 需要离线手工建库 / DBA 先审阅 DDL 时，才按顺序执行对应方言的脚本（`sql/` 目录随安装包发布）：
 

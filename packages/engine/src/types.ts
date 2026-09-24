@@ -439,6 +439,29 @@ export interface ProjectMember {
   projectId: string;
   userId: string;
   role: 'admin' | 'modeler' | 'viewer';
+  /**
+   * 产品码（`warehouse` / `metadata`）。一行 = (项目, 用户, 产品) 一个角色。
+   *
+   * <p>加产品维之前「某人在某项目的角色」是唯一的；现在同一个人在同一项目下会有多行 ——
+   * 同一个「项目管理员」在仓建设是规范管理员、在数据地图是目录管理员。所以只按
+   * (projectId, userId) 找会拿到随机一行的角色，判权一律走带产品过滤的
+   * `stores/app.ts` 的 `projectRoleOf(product)` / `can(product, perm)`。
+   *
+   * <p>可选：授权码访客的合成行与还没跟上产品维的旧接口不一定带得回来。
+   */
+  product?: string | null;
+  /**
+   * 显示名。只有从组织拉来的成员镜像会带（仓建设 multi）；
+   * 本地模式的成员表没这一列，界面退回展示 `userId`。
+   */
+  displayName?: string | null;
+  /**
+   * 登录账号。与 {@link displayName} 同源，同样只有组织拉来的镜像会带。
+   *
+   * <p>这一列存在的意义是给成员一个「可对照的稳定标识」—— 显示名可以重名、可以改，
+   * 内部 userId（`u-1790075246594`）又是主键、对人没有意义。
+   */
+  username?: string | null;
 }
 
 export interface TenantLicense {

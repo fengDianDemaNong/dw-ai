@@ -27,8 +27,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "spring.datasource.password=",
         "dwai.security.mode=dev",
         "dwai.security.allow-dev-login=true",
+        // 必须显式钉住 multi：application.yml 里 run-mode 的默认值已是 standard，
+        // 不写这行，跑的就是 standard —— 类名里的 multi 形同虚设。403 由
+        // AuthController「warehouse 进程 + multi 不提供登录」给出，那条分支
+        // 只在 multi 下成立。早前这行缺失，测试是靠 AuthService 里一句
+        // 「standard 不接受平台账号」侥幸变绿的，那句已随本次口径调整删除。
+        "dwai.run-mode=multi",
         "dwai.bootstrap.admin-username=admin",
-        "dwai.bootstrap.admin-password=admin123"
+        "dwai.bootstrap.admin-password=123456"
 })
 @AutoConfigureMockMvc
 class AuthSmokeTest {
@@ -46,7 +52,7 @@ class AuthSmokeTest {
     void loginIsRefusedInWarehouseMultiMode() throws Exception {
         mvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"username\":\"admin\",\"password\":\"admin123\"}"))
+                        .content("{\"username\":\"admin\",\"password\":\"123456\"}"))
                 .andExpect(status().isForbidden());
     }
 

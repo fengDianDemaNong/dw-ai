@@ -9,7 +9,10 @@
     <a-table :data-source="rows" :columns="cols" row-key="userId" size="small" :pagination="false" class="card card-flush">
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'name'">
-          {{ nameOf(record.userId) }}
+          {{ nameOf(record) }}
+        </template>
+        <template v-else-if="column.key === 'account'">
+          {{ accountOf(record) }}
         </template>
         <template v-else-if="column.key === 'role'">
           <a-select
@@ -65,12 +68,30 @@ const availableUsers = computed(() =>
 const canAdd = computed(() => can('iam:member') && availableUsers.value.length > 0);
 const cols = [
   { title: '显示名', key: 'name' },
-  { title: '用户', dataIndex: 'userId' },
+  { title: '用户', key: 'account' },
   { title: '角色', key: 'role', width: 200 },
 ];
 
-function nameOf(userId: string) {
-  return orgUsers.value.find((u) => u.id === userId)?.displayName || userId;
+/**
+ * 显示名。
+ *
+ * <p>优先用后端直接给的（仓建设 multi 下由组织推来，见 `GET /internal/v1/members`）；
+ * 再退到本地拉的组织用户列表（`api.org.users` 在仓建设后端并不存在，那一列一直是空的，
+ * 留着是为了本地模式）；最后才退回 `userId`。
+ */
+function nameOf(m: { userId: string; displayName?: string | null }) {
+  if (m.displayName) return m.displayName;
+  return orgUsers.value.find((u) => u.id === m.userId)?.displayName || m.userId;
+}
+
+/**
+ * 登录账号。
+ *
+ * <p>这一列以前直接渲染 `userId`，于是页面上出现的是 `u-1790075246594` 这样的内部主键 ——
+ * 对人没有任何意义。换成登录名；确实拿不到时退回 `userId`，总比空着让人以为这行坏了强。
+ */
+function accountOf(m: { userId: string; username?: string | null }) {
+  return m.username || m.userId;
 }
 
 function add() {

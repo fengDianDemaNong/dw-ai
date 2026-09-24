@@ -19,6 +19,16 @@
     <mybatis-plus.version>3.5.9</mybatis-plus.version>
   </properties>
   <dependencies>
+    <!--
+      组织与平台领域的共享类型（实体 / Mapper / 工具 / 跨服务 DTO）。
+      用 ${project.version}：本服务与 dw-common 同版本发布，改版本号只改一处；
+      两者版本被改得不一致时构建会直接失败，不会静默降到某个旧版本。
+    -->
+    <dependency>
+      <groupId>com.dwai</groupId>
+      <artifactId>dw-common</artifactId>
+      <version>${project.version}</version>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-web</artifactId>

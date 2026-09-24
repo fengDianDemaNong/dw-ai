@@ -29,8 +29,12 @@
         </div>
         <div class="meta">项目管理员 {{ ownerName(p.owner) }} · {{ p.createdAt }}</div>
         <div class="ops">
-          <a-button v-if="!isDisabled(p)" type="primary" @click="go(p.id)">{{ isOrgUi() ? '进入仓建设' : '进入项目' }}</a-button>
-          <a-button v-if="!isDisabled(p) && isOrgUi()" @click="goLineage(p.id)">打开数据地图</a-button>
+          <a-tooltip v-if="!isDisabled(p)" :title="enterBlockedReasonFor(p.id)">
+            <!-- antd 的 disabled 按钮不触发鼠标事件，tooltip 要靠外层 span 才生效 -->
+            <span>
+              <a-button type="primary" :disabled="!!enterBlockedReasonFor(p.id)" @click="go(p.id)">进入项目</a-button>
+            </span>
+          </a-tooltip>
           <a-button v-if="isTenantAdmin" @click="openEdit(p)">编辑</a-button>
         </div>
       </div>
@@ -55,8 +59,11 @@
         </template>
         <template v-else-if="column.key === 'act'">
           <a-space>
-            <a-button v-if="!isDisabled(record)" type="link" size="small" @click="go(record.id)">{{ isOrgUi() ? '仓建设' : '进入' }}</a-button>
-            <a-button v-if="!isDisabled(record) && isOrgUi()" type="link" size="small" @click="goLineage(record.id)">数据地图</a-button>
+            <a-tooltip v-if="!isDisabled(record)" :title="enterBlockedReasonFor(record.id)">
+              <span>
+                <a-button type="link" size="small" :disabled="!!enterBlockedReasonFor(record.id)" @click="go(record.id)">进入项目</a-button>
+              </span>
+            </a-tooltip>
             <a-button v-if="isTenantAdmin" type="link" size="small" @click="openEdit(record)">编辑</a-button>
           </a-space>
         </template>
@@ -164,8 +171,10 @@ import { isOrgUi, openLineageApp, openWarehouseApp } from '../config/product';
 import type { EngineKind, Project } from '../types';
 import {
   app,
+  canEnterProduct,
   createProject,
   enterProject,
+  hasModule,
   isTenantAdmin,
   patchProject,
   removeProject,
@@ -269,18 +278,35 @@ function openCreate() {
   open.value = true;
 }
 
+/**
+ * 这个项目点进去有没有地方可去 —— 「进入项目」按钮的禁用条件兼提示原因。
+ *
+ * <p>两道门都要过（见 `canEnterProduct`）：租户开通了服务，并且我被派了该服务的角色。
+ * 两种情况分开说 —— 一个都没开通是管理员要去平台办的事，开通了却没我的角色是
+ * 项目管理员要办的事，合成一句话会让人找错人。
+ */
+function enterBlockedReasonFor(projectId: string): string {
+  if (canEnterProduct('warehouse', projectId) || canEnterProduct('metadata', projectId)) return '';
+  if (!hasModule('warehouse') && !hasModule('metadata')) return '本组织未开通建模与数据地图';
+  return '你在这个项目下没有被派角色，请联系项目管理员';
+}
+
 async function go(id: string) {
   await enterProject(id);
-  if (isOrgUi()) {
+  if (!isOrgUi()) {
+    router.push('/model');
+    return;
+  }
+  // 两个服务都能进时先给仓建设：它左侧菜单本来就带完整的数据地图菜单组。
+  if (canEnterProduct('warehouse', id)) {
     openWarehouseApp();
     return;
   }
-  router.push('/model');
-}
-
-async function goLineage(id: string) {
-  await enterProject(id);
-  openLineageApp('/lineage/tables');
+  if (canEnterProduct('metadata', id)) {
+    openLineageApp('/lineage/tables');
+    return;
+  }
+  message.error(enterBlockedReasonFor(id) || '这个项目下没有你能进入的服务');
 }
 
 async function goFromDrawer() {
@@ -375,6 +401,12 @@ onMounted(async () => {
 .ops {
   display: flex;
   gap: 8px;
+}
+
+/* 按钮为了 tooltip 包了一层 span，span 得替它把 flex 撑起来，否则按钮缩回内容宽度 */
+.ops > span {
+  flex: 1;
+  display: flex;
 }
 
 .ops :deep(.ant-btn) {

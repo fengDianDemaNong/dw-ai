@@ -146,7 +146,9 @@ CREATE TABLE table_columns (
   type          VARCHAR(64) NOT NULL,
   comment       TEXT,
   nullable      BOOLEAN,
-  sensitive     BOOLEAN,
+  -- `sensitive` 是 MySQL 8 的保留字，不加反引号这条 CREATE TABLE 直接语法错。
+  -- H2（MODE=MySQL）同样认反引号，所以这一个写法两边通用。
+  `sensitive`   BOOLEAN,
   grade         VARCHAR(16),
   enum_values   JSON,
   pos           INT NOT NULL DEFAULT 0,
@@ -254,7 +256,8 @@ CREATE TABLE quality_rules (
   logic      TEXT,
   threshold  VARCHAR(64),
   status     VARCHAR(16) NOT NULL,
-  last_value VARCHAR(64),
+  -- 同上，last_value 也是 MySQL 8 保留字（窗口函数用）。
+  `last_value` VARCHAR(64),
   CONSTRAINT fk_qr_proj FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
 );
 

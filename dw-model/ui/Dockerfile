@@ -8,6 +8,7 @@ COPY dw-org/ui ./dw-org/ui
 COPY packages/engine ./packages/engine
 COPY dw-model/ui ./dw-model/ui
 COPY dw-model/rules ./dw-model/rules
+COPY dw-lineage/ui ./dw-lineage/ui
 
 RUN npm ci
 

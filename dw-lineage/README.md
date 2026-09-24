@@ -1,6 +1,6 @@
 # dw-lineage（数据地图）
 
-由旁边仓库 `sql-lineage` 拷入本仓库，目录名改为 `dw-lineage`。内部工程名仍是 `sql-tools` / `sql-tools-vue`。智仓侧栏 iframe 嵌本模块（默认 `http://127.0.0.1:5175`）。
+由旁边仓库 `sql-lineage` 拷入本仓库，目录名改为 `dw-lineage`。目录名已与 dw-org / dw-model 统一为 `ui/` + `api/`；内部工程名（pom 的 artifactId、npm 包名）仍是 `sql-tools`。智仓侧栏 iframe 嵌本模块（默认 `http://127.0.0.1:5173`）。
 
 输入一段 SQL，解析出**字段级血缘**（哪个字段来自哪个字段）与**表级血缘**，并渲染成可交互的血缘图。
 
@@ -25,27 +25,32 @@ dws.stat.user_name ←  ods.users.name
 
 ```
 dw-lineage/
-├── sql-tools/             后端服务（Spring Boot 3.3，JDK 21）
-├── sql-tools-vue/         前端（Vue 3.5 + Vite 6 + AntV G6 + Monaco）
-├── release/               安装包模板（bin / conf / sql）
-├── build-release.sh       打安装包
+├── api/                   后端服务（Spring Boot 3.3，JDK 21）
+├── ui/                    前端（Vue 3.5 + Vite 6 + AntV G6 + Monaco）
+├── packaging/             安装包模板（bin / conf）
+├── release/               打包产物输出
+├── package.sh             打安装包
 └── ci.sh                  应用层校验
 ```
 
 在仓库根目录也可按模式启动（三种模式说明见仓库根 [README.md](../README.md)）：
 
 ```bash
-# —— 多租户 multi（嵌入组织 / 仓建设，端口 18082 / 5175）
-npm run dev:api:lineage     # sql-tools，profile=multi
-npm run dev:lineage         # 或：(cd dw-lineage/sql-tools-vue && pnpm install && pnpm run dev:multi)
+# —— 多租户 multi（嵌入组织 / 仓建设，端口 18082 / 5173）
+# multi 必须与组织、仓建设配**同一个** MODULE_TOKEN，否则 /internal/v1/** 一律 401，
+# 项目镜像同步不过来，页面表现是「租户编码未同步」。
+MODULE_TOKEN=<与 org 相同的值> npm run dev:api:lineage     # sql-tools
+npm run dev:lineage         # multi 模式，等价于 npm run dev:multi -w sql-tools
 
-# —— 独立 standalone（默认，不管登录，端口 8080 / 5173）
-mvn -f dw-lineage/sql-tools/pom.xml spring-boot:run
-(cd dw-lineage/sql-tools-vue && pnpm install && pnpm run dev:standalone)
+# —— 普通 standard（默认，本模块账号，端口 8080 / 5173）
+mvn -f dw-lineage/api/pom.xml spring-boot:run
+npm run dev:standard -w sql-tools
 
-# —— 普通 standard（本模块账号，端口 8080 / 5173）
-LINEAGE_RUN_MODE=standard mvn -f dw-lineage/sql-tools/pom.xml spring-boot:run
-(cd dw-lineage/sql-tools-vue && pnpm install && pnpm run dev:standard)
+# —— 独立 standalone（不管登录，端口 8080 / 5173）
+# 注意两边都要指定：后端不设模式变量时默认是 standard。
+# 两个变量都认，LINEAGE_RUN_MODE 更具体、优先；跟着 org / model 统一设 DW_AI_MODE 也可以。
+LINEAGE_RUN_MODE=standalone mvn -f dw-lineage/api/pom.xml spring-boot:run
+npm run dev:standalone -w sql-tools
 ```
 
 解析与列级血缘不在本仓库内，通过 Maven 依赖引用：
@@ -61,17 +66,17 @@ LINEAGE_RUN_MODE=standard mvn -f dw-lineage/sql-tools/pom.xml spring-boot:run
 
 - JDK 21
 - Maven 3.8+
-- Node 22.13+ 与 pnpm 11（仅前端需要；pnpm 11 依赖 `node:sqlite`）
+- Node 22.13+ 与 npm（仅前端需要；依赖在**仓库根**统一安装，ui 已并入根 npm workspaces，见 [ADR-0014](../docs/tech/adr/0014-frontend-package-manager-unification.md)）
 
 ### 构建与启动
 
 ```bash
 # 1. 后端，默认用内嵌 H2，无需任何外部数据库
 #    空库启动时 Flyway 自动建表 + 灌初始数据（与 dw-org / dw-model 一致）
-(cd sql-tools && mvn package -DskipTests && java -jar target/sql-tools-1.0-SNAPSHOT.jar)
+(cd api && mvn package -DskipTests && java -jar target/sql-tools-1.0-SNAPSHOT.jar)
 
-# 2. 前端
-(cd sql-tools-vue && pnpm install && pnpm dev)
+# 2. 前端（依赖在仓库根统一安装 —— ui 已并入根 npm workspaces，见 docs/tech/adr/0014）
+(cd .. && npm install && npm run dev -w sql-tools)
 ```
 启动后：
 
@@ -83,7 +88,7 @@ LINEAGE_RUN_MODE=standard mvn -f dw-lineage/sql-tools/pom.xml spring-boot:run
 
 ### 校验（`ci.sh`）
 
-本地或流水线用，**校验应用能否通过测试**，不打安装包（打包装用 `./build-release.sh`）。
+本地或流水线用，**校验应用能否通过测试**，不打安装包（打包装用 `./package.sh`）。
 
 ```bash
 ./ci.sh              # 全部：后端测试 + 前端构建
@@ -92,21 +97,21 @@ LINEAGE_RUN_MODE=standard mvn -f dw-lineage/sql-tools/pom.xml spring-boot:run
 ```
 
 后端会检查实际执行的测试数（默认不少于 100），防止套件被静默跳过却显示成功。
-前端会检查 `sql-tools-vue/dist` 里没有硬编码的主机/端口。任一项失败则退出码非 0。
+前端会检查 `ui/dist` 里没有硬编码的主机/端口。任一项失败则退出码非 0。
 
 ### 安装包部署
 
 打出可分发的安装包（bin / conf / sql / lib / web / logs）：
 
 ```bash
-./build-release.sh
-# 产物：dist/sql-lineage-1.0.0.tar.gz
+./package.sh
+# 产物：release/dw-lineage-1.0.0.tar.gz
 ```
 
 目标机器上只需 JDK 21：
 
 ```bash
-tar zxf sql-lineage-1.0.0.tar.gz && cd sql-lineage-1.0.0
+tar zxf dw-lineage-1.0.0.tar.gz && cd dw-lineage-1.0.0
 bin/start.sh        # 默认内嵌 H2，空库启动时 Flyway 自动建表，零配置
 ```
 
@@ -126,7 +131,7 @@ bin/start.sh        # 默认内嵌 H2，空库启动时 Flyway 自动建表，�
 docker compose up -d
 ```
 
-前端 <http://localhost/sql-tools/>，后端 8080。nginx 已把 `/api` 反代到后端，因此前端产物不含任何硬编码地址。
+前端 <http://localhost/lineage/>，后端 8080。nginx 已把 `/api` 反代到后端，因此前端产物不含任何硬编码地址。
 
 ---
 
@@ -140,8 +145,25 @@ docker compose up -d
 
 ```bash
 bin/seed-demo.sh                      # 灌进默认租户/项目
-SEED_SECOND_TENANT=1 bin/seed-demo.sh # 顺带建一个租户，用来看隔离效果
+SEED_SECOND_TENANT=1 bin/seed-demo.sh # 顺带建第二个项目与演示租户，用来看隔离效果
 ```
+
+脚本先读 `/api/auth/config` 判运行模式，再决定要不要登录 —— 三种模式下的行为不一样：
+
+| 运行模式 | 鉴权 | `SEED_SECOND_TENANT=1` |
+|---|---|---|
+| `standalone` | 无，`/api/**` 全放行 | 第二个项目与演示租户都建出来 |
+| `standard` | 用 `SEED_USERNAME` / `SEED_PASSWORD`（默认 `admin` / `123456`）自动调 `/api/auth/login` 换令牌；也可直接给 `AUTH_TOKEN=xxx` 跳过登录 | 只建第二个项目。建租户会被服务端 403（`assertTenantWritable`），脚本按设计跳过并打印原因 |
+| `multi` | 必须给 `AUTH_TOKEN`（组织签发的令牌） | 两半都不建：租户与项目由组织平台同步，脚本只往里头灌元数据与血缘 |
+
+`multi` 下先把 `TENANT_ID` / `PROJECT_ID` **填组织侧的编码**（如 `TENANT_ID=tenant02 PROJECT_ID=pj02`）
+再跑本脚本。服务端对能 `parseLong` 的值按本地 id 解析、否则按编码查库，所以编码直接填进这两个变量
+就能寻址 —— 变量名叫 ID，但值可以是编码。默认值 `1` 在 multi 下指的是本地内置的「默认租户」，
+与组织侧的租户没有必然关系，别拿它当默认。
+
+模式探测不出来时（对端不返回 `runMode`）脚本会打印提示，并按最保守的方式处理 —— 不建租户、
+不建项目，因为认错方向的代价是往生产库写演示数据。也可以 `RUN_MODE=standalone|standard|multi`
+显式指定，省掉那次探测请求。
 
 脚本走 REST 接口而不是直接灌 SQL —— 血缘是一张图，边引用的是列的自增 id，
 手写 INSERT 既要自己维护这些 id，又要在三种方言里各写一份，稍有不一致就会造出
@@ -248,7 +270,7 @@ insert into sink_b select * from tmp.bb;
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 开发指南、构建顺序、测试、常见问题 |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | 部署、配置项、数据库切换 |
 | [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) | 已知缺陷与限制，每条附最小复现 SQL |
-| [sql-tools/README.md](sql-tools/README.md) | 后端 API 详细说明 |
+| [api/README.md](api/README.md) | 后端 API 详细说明 |
 | `/swagger-ui.html` | 由代码自动生成的接口文档 |
 
 ### 演进记录

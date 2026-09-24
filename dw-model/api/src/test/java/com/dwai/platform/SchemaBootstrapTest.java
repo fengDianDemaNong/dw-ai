@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 })
 class SchemaBootstrapTest {
 
-    /** dw-model 全库应有的表（跨 V1~V13 全部迁移），含组织与建模两侧。 */
+    /** dw-model 全库应有的表（跨 V1~V14 全部迁移），含组织与建模两侧。 */
     private static final List<String> EXPECTED_TABLES = List.of(
             // 组织与平台（与 dw-org 同源）
             "tenants", "users", "user_tenants", "projects", "project_members",

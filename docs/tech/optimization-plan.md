@@ -9,8 +9,18 @@
 |---|---|---|
 | P1-3 统一 dw-lineage 命名与结构 | ✅ 已完成 | 包名 `org.qq` → `com.dwai.lineage`；groupId `org.example` → `com.dwai`；360 个测试全绿。见 `dw-lineage/docs/adr/0001-unify-package-name.md` |
 | P1-4 Flyway 脚本收敛为单一来源 | ✅ 已完成 | `db/migration` 为唯一来源，`release/sql` 的 01/02 删除、打包时派生；实际打包验证派生逐字节一致。见 `dw-lineage/docs/adr/0002-schema-single-source.md` |
-| P0-1 消除 dw-org / dw-model 重复 | 🟡 部分完成 | dw-org 删掉 16 个建模死代码（14 表 ↔ 14 entity）✅；抽 `dw-common` 经评估后**回退**——需连带改 Dockerfile/compose/package.sh 等构建链路，且两模块**零测试**，收益不成比例。见 `docs/tech/adr/0003-dw-org-cleanup-and-defer-dw-common.md` |
-| 其余项 | ⏳ 待办 | 见下 |
+| P0-1 消除 dw-org / dw-model 重复 | ✅ 已完成 | 先清理 16 个建模死代码（14 表 ↔ 14 entity）；后抽 `dw-common`（32 个逐字节相同的类）。见 `docs/tech/adr/0003`、`docs/tech/adr/0008` |
+| P0-A 补最小回归网 | ✅ 已完成 | dw-org 6 → 25 个测试、dw-model 4 → 23 个。见 `docs/tech/adr/0004-add-minimal-test-suite.md` |
+| P0-A2 三模式冒烟测试 | ✅ 已完成 | 每服务一份 `RunModeSmokeTest`：dw-org 恒 multi（误配防护）、dw-model 三模式差异、lineage 三模式可启动。共 25 个用例。见 `docs/tech/adr/0006` |
+| P0-A3 跨服务契约测试 | ✅ 已完成 | `InternalContractTest` ×2 + `CrossServiceDesignGuardTest`（源码级守 §2 三条禁止项）。**修掉两个真实缺口**：`X-Tenant-Code` 静默忽略、模块直打组织 `/api/auth/*`。见 `docs/tech/adr/0006` |
+| P1-5 构建统一 + 版本对齐 | ✅ 已完成 | lineage 3.3.11 → 3.3.13；新增根聚合 pom；`npm run test:api` 一条命令构建全部后端。见 `docs/tech/adr/0007` |
+| P0-1b 抽 dw-common | ✅ 已完成 | 32 个类单点化 + 构建链路（Dockerfile ×2 / compose ×3 / package.sh ×2）同步改造。见 `docs/tech/adr/0008` |
+| P2-6 前端收敛 | 🟡 分析完成，待决策 | 修正误判：真实重复是 **15 个文件 / 2,042 行**（`src/engine/*` 是转发壳，非重复）。需要先让前端有可验证命令。见 `docs/tech/adr/0009` |
+| P2-7 dw-lineage 分层体检 | 🟡 分析完成，待决策 | 分层健康、**不建议拆模块**；真实负担是 4~5 个 700+ 行的大类。见 `docs/tech/adr/0009` |
+| P0-2 提交变更 | ⏳ 由用户处理 | 用户已提交两轮（`调整目录结构`）；本轮产出待提交 |
+
+> **进展更新（2026-09-21）**：P0-A 已完成 —— dw-org/api 与 dw-model/api 补上了最小回归网
+> （dw-org 6 个测试、dw-model 4 个测试，全部通过）。见 `docs/tech/adr/0004-add-minimal-test-suite.md`。
 
 ---
 
@@ -49,6 +59,20 @@
 | 4 | P0-1 续做（抽 dw-common） | 补完测试 + 构建统一后再动，成本显著下降、有回归保护 |
 | 5 | P2-6 前端收敛 | 先区分 23 相同 / 28 分叉，只抽真正共享的部分 |
 | 6 | P2-7 dw-lineage 分层体检 | 体量大但已有测试，风险最低，可最后做 |
+
+> ⚠️ **重要补充（2026-09-21）**：项目负责人澄清了架构约束 ——
+> org 做租户、model 做建模、lineage 做数据地图，后两者及后续服务都设计为**可独立拆出**，
+> 有 `multi` / `standard` / `standalone` 三种模式，**只有 multi 才与 org 整合**。
+> 这**修正了本方案对「重复」的定性**：32 个组织与平台类不是纯技术债，
+> 而是「每个服务能独立拿出用」的必要条件。
+> 由此新增两项、并调整一项优先级：
+>
+> | 新增 | 说明 |
+> |---|---|
+> | **P0-A2 三模式冒烟测试** | 每服务在三种模式下都要能启动 —— 「可独立拿出用」唯一可验证的方式 |
+> | **P0-A3 跨服务契约测试** | 固化设计禁令：不共库、不直打兄弟 `/api`、不用组织主键当 code、`X-Tenant-Code` 解析不到必须 400（不得静默落租户 1） |
+>
+> 详见 `docs/tech/adr/0005-three-modes-and-independence-tradeoff.md`。
 
 > 下面「一、现状诊断」「二、优化方案」「三、建议执行顺序」是首次审查原文，
 > **优先级以上述复审结论为准**。

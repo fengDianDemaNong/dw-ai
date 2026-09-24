@@ -23,6 +23,7 @@
           <a-space>
             <a-button size="small" @click="tryEnter(record)">进入</a-button>
             <a-button size="small" @click="edit(record)">编辑</a-button>
+            <a-button size="small" @click="openResetModal(record)">重置密码</a-button>
             <a-button size="small" @click="toggle(record)">
               {{ record.status === 'active' ? '停用' : '启用' }}
             </a-button>
@@ -88,6 +89,20 @@
       <p class="lead">每次进入 {{ redeeming?.name }} 都须输入该租户签发的授权码。向租户管理员索取（含有效期与范围）。</p>
       <a-input v-model:value="redeemCode" placeholder="请输入授权码" @pressEnter="submitRedeem" />
     </a-modal>
+
+    <a-modal v-model:open="openReset" title="重置管理员密码" ok-text="重置" :confirm-loading="busy" @ok="submitReset">
+      <p class="lead">
+        将重置「{{ resetting?.owner || '该租户管理员' }}」的登录密码，该账号<b>已登录的会话会一并失效</b>，需把新密码转告本人。
+      </p>
+      <a-form layout="vertical">
+        <a-form-item label="新密码" required>
+          <a-input-password v-model:value="resetForm.password" placeholder="请输入新密码" />
+        </a-form-item>
+        <a-form-item label="确认新密码" required>
+          <a-input-password v-model:value="resetForm.confirm" placeholder="再输一次" @pressEnter="submitReset" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
@@ -108,8 +123,10 @@ const accounts = ref<{ id: string; username: string; displayName: string }[]>([]
 const openCreate = ref(false);
 const openEdit = ref(false);
 const openRedeem = ref(false);
+const openReset = ref(false);
 const editing = ref<Tenant | null>(null);
 const redeeming = ref<Tenant | null>(null);
+const resetting = ref<Tenant | null>(null);
 const redeemCode = ref('');
 const busy = ref(false);
 
@@ -135,6 +152,8 @@ const editForm = reactive({
   owner: '',
 });
 
+const resetForm = reactive({ password: '', confirm: '' });
+
 const accountOpts = computed(() =>
   accounts.value.map((a) => ({ value: a.id, label: `${a.displayName}（${a.username}）` }))
 );
@@ -145,7 +164,7 @@ const tenantCols = [
   { title: '管理员', dataIndex: 'owner', width: 100 },
   { title: '状态', key: 'status', width: 90 },
   { title: '开通功能', key: 'modules' },
-  { title: '操作', key: 'act', width: 200 },
+  { title: '操作', key: 'act', width: 290 },
 ];
 
 function moduleLabel(m: string) {
@@ -195,6 +214,44 @@ async function toggle(t: Tenant) {
   try {
     await api.platform.patchTenant(t.id, { status: t.status === 'active' ? 'disabled' : 'active' });
     await reload();
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    busy.value = false;
+  }
+}
+
+/**
+ * 重置该租户管理员的密码。
+ *
+ * <p>页面上只拿得到 `owner`（后端存的是显示名，不是账号 id），由服务端自己去
+ * `user_tenants` 里认领管理员 —— 前端传 id 反而会把「谁是管理员」这件事
+ * 交给一个会过期的展示字段去猜。
+ */
+function openResetModal(t: Tenant) {
+  resetting.value = t;
+  resetForm.password = '';
+  resetForm.confirm = '';
+  openReset.value = true;
+}
+
+async function submitReset() {
+  if (!resetting.value) return;
+  const pwd = resetForm.password.trim();
+  // 只挡「空」与「两次不一致」：密码强度是产品策略，不在这里凭空定
+  if (!pwd) {
+    message.warning('请输入新密码');
+    return;
+  }
+  if (pwd !== resetForm.confirm.trim()) {
+    message.warning('两次输入的密码不一致');
+    return;
+  }
+  busy.value = true;
+  try {
+    await api.platform.resetAdminPassword(resetting.value.id, pwd);
+    openReset.value = false;
+    message.success(`已重置「${resetting.value.owner}」的密码，请转告本人`);
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));
   } finally {

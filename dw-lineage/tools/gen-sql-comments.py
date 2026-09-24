@@ -5,8 +5,8 @@
 三份手工维护必然漂移。改注释只改 comments.json，然后重跑本脚本。
 
 建表脚本的单一来源是 `db/migration/{方言}/V1__schema.sql`（Flyway 权威）。
-安装包里 `release/sql/{方言}/01_schema.sql` 只是它的派生产物，由 build-release.sh 在
-打包时复制生成，不在此维护。
+安装包里 `release/sql/{方言}/01_schema.sql` 只是它的派生产物，由 package.sh 的
+derive_sql() 在打包时复制生成，不在此维护。
 
 MySQL 用列内联 COMMENT，H2 与 PostgreSQL 用 COMMENT ON 语句追加在建表之后。
 """
@@ -15,7 +15,7 @@ import pathlib
 import re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-MIGRATION = ROOT / "sql-tools" / "src" / "main" / "resources" / "db" / "migration"
+MIGRATION = ROOT / "api" / "src" / "main" / "resources" / "db" / "migration"
 COMMENTS = json.loads((ROOT / "release" / "sql" / "comments.json").read_text(encoding="utf-8"))
 TABLES = {k: v for k, v in COMMENTS.items() if not k.startswith("_")}
 
