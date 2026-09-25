@@ -14,7 +14,7 @@
       show-icon
       class="cap-alert"
       message="本组织未开通此项"
-      description="未开通规范设计或规范问答。请联系平台开通仓建设下的 AI 能力。"
+      description="未开通规范设计或规范问答。请联系平台开通数仓建模下的 AI 能力。"
     />
     <SpecReadonlyTip v-else-if="isDesign" />
     <p v-if="canUseSpecAi" class="ctx">已带本项目规范：{{ specContext }}</p>

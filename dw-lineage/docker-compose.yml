@@ -10,7 +10,7 @@
 # 3) 启动：docker compose up -d
 #
 # 访问：控制台 http://localhost/lineage/
-#       接口文档 http://localhost:8080/swagger-ui.html
+#       接口文档 http://localhost:18082/swagger-ui.html
 
 services:
   backend:
@@ -21,6 +21,11 @@ services:
       - docker-bridge
     environment:
       SPRING_PROFILES_ACTIVE: prd
+
+      # ---- 服务端口 ----
+      # 容器内外一致（组织 18080 / 仓建设 18081 / 数据地图 18082），不搞「容器内 8080」。
+      # 下面 frontend 的 BACKEND_PORT 引用同一个变量，改一处两边同步，不会错位。
+      SERVER_PORT: ${SERVER_PORT:-18082}
 
       # ---- 后端存储数据库。全部来自 .env，见 .env.example 的说明 ----
       DB_TYPE: ${DB_TYPE:-h2}
@@ -46,7 +51,7 @@ services:
       # 生产走 nginx 同源，无需放开跨域
       CORS_ALLOWED_ORIGINS: ""
     ports:
-      - "8080:8080"
+      - "${SERVER_PORT:-18082}:${SERVER_PORT:-18082}"
     volumes:
       # H2 数据落在容器内的 /app/data，不挂卷的话容器一重建，
       # 页面上配好的元数据服务和已保存的血缘版本就全没了
@@ -68,7 +73,15 @@ services:
     environment:
       # nginx 把 /api 反代到后端，前端因此只用相对路径，不含任何硬编码地址
       BACKEND_HOST: backend
-      BACKEND_PORT: "8080"
+      BACKEND_PORT: ${SERVER_PORT:-18082}
+
+      # ---- 运行时配置 ----
+      # 容器启动时由 entrypoint 脚本渲染成 /config.json（见 ui/Dockerfile）。
+      # 部署期才知道的事（前后端不在一台机器）改这里重启容器即可，不必重新构建。
+      # 留空 = 同源相对路径，即改动前的默认行为。
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+      # 本控制台自己的对外地址，跨服务跳转时用来自报家门
+      VITE_BASE_URL: ${LINEAGE_UI_PUBLIC_URL:-}
     ports:
       - "80:80"
     depends_on:

@@ -81,7 +81,7 @@ docker rm -f sqltools-mysql-test sqltools-pg-test
 ```bash
 cd ..                 # 依赖装在仓库根，不在 ui 子目录里单独装
 npm install
-npm run dev -w sql-tools              # http://localhost:5173，/api 已代理到 localhost:8080
+npm run dev -w sql-tools              # http://localhost:5173，/api 已代理到 127.0.0.1:18082
 npm run build -w sql-tools            # 带类型检查
 npm run build:no-check -w sql-tools   # 跳过类型检查，CI 与打包用
 ```
@@ -92,9 +92,14 @@ npm run build:no-check -w sql-tools   # 跳过类型检查，CI 与打包用
 
 | 变量 | 说明 |
 |---|---|
-| `VITE_DEV_PROXY_TARGET` | 开发时 vite 代理的目标，默认 `http://localhost:8080` |
-| `VITE_API_BASE_URL` | 生产环境；留空表示走相对路径由 nginx 反代 |
+| `VITE_DEV_PROXY_TARGET` | 开发时 vite 代理的目标，默认 `http://127.0.0.1:18082`；`VITE_API_BASE_URL` 填绝对地址时以后者为准 |
+| `VITE_API_BASE_URL` | **我要调的后端**；留空表示走相对路径由 nginx 反代 |
+| `VITE_BASE_URL` | **我自己的对外地址**；容器启动时渲染进 `config.json` |
 | `VITE_API_TIMEOUT` | 请求超时（毫秒），默认 60000 |
+
+打包态改后端地址**不必重新构建**：容器启动时由 `docker-entrypoint.d/25-app-config.sh`
+渲染 `config.json`，前端挂载前读它（见 `src/config/appConfig.ts`）。
+
 
 ---
 

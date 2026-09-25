@@ -25,13 +25,16 @@ RUN mkdir -p /app/data
 RUN chown -R app:app /app
 USER app
 
-EXPOSE 8080
+EXPOSE 18082
 
+# 端口与镜像外一致（组织 18080 / 仓建设 18081 / 数据地图 18082），不搞「容器内 8080」那套。
+# SERVER_PORT 会覆盖 application.yml 的默认值，两边同值只是把意图写明确。
 ENV SPRING_PROFILES_ACTIVE=prd \
+    SERVER_PORT=18082 \
     GRAVITINO_URL=http://gravitino:8090 \
     JAVA_OPTS="-XX:MaxRAMPercentage=75 -XX:+UseG1GC"
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-  CMD wget -qO- http://localhost:8080/actuator/health | grep -q '"status":"UP"' || exit 1
+  CMD wget -qO- http://localhost:18082/actuator/health | grep -q '"status":"UP"' || exit 1
 
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]

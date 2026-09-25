@@ -15,7 +15,7 @@ export type ProductModule = TenantLicense['modules'][number];
 export const DEMO_USERS = ['张三', '李四'] as const;
 
 export const MODULE_OPTIONS: { value: ProductModule; label: string; shipped?: boolean }[] = [
-  { value: 'warehouse', label: '仓建设（规范中心、建模中心）', shipped: true },
+  { value: 'warehouse', label: '数仓建模（规范中心、建模中心）', shipped: true },
   { value: 'metadata', label: '数据地图', shipped: true },
   { value: 'serve', label: '数据服务', shipped: false },
   { value: 'quality', label: '数据质量', shipped: false },

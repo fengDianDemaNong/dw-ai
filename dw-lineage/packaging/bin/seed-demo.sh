@@ -36,7 +36,7 @@
 #
 # 用法：
 #   bin/seed-demo.sh                     # 灌进默认租户/项目
-#   BASE_URL=http://host:8080 bin/seed-demo.sh
+#   BASE_URL=http://host:18082 bin/seed-demo.sh
 #   TENANT_ID=2 PROJECT_ID=3 bin/seed-demo.sh
 #   TENANT_ID=tenant02 PROJECT_ID=pj02 bin/seed-demo.sh   # multi：填组织侧的编码。
 #                                          # 服务端对能 parseLong 的值按本地 id 解析、否则按
@@ -55,7 +55,7 @@
 # （这正好也能用来看版本切换）。
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-http://localhost:8080}"
+BASE_URL="${BASE_URL:-http://localhost:18082}"
 TENANT_ID="${TENANT_ID:-1}"
 PROJECT_ID="${PROJECT_ID:-1}"
 SEED_SECOND_TENANT="${SEED_SECOND_TENANT:-0}"

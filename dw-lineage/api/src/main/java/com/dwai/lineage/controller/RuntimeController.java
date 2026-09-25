@@ -26,6 +26,13 @@ public class RuntimeController {
         out.put("standalone", props.isStandalone());
         out.put("standard", props.isStandard());
         out.put("multi", props.isMulti());
+        // 组织平台的**前端**地址。本页被直接打开（地址栏手打、没有 `#boot=` 自报宿主）时，
+        // 前端靠它把「回门户登录」这类跳转指对地方 —— 以前这个地址来自构建期的
+        // `VITE_ORG_ORIGIN`，改一次要重新构建前端。空 = 没配，前端用内置默认。
+        //
+        // 注意这里给的是 org-ui-url 而不是 org-base-url：后者是**后端**基址（5171 vs 18080
+        // 在开发态就不一样），拿它拼 `/org/login` 会跳到接口服务上的 404。
+        out.put("orgUiUrl", props.getOrgUiUrl() == null ? "" : props.getOrgUiUrl());
         return out;
     }
 

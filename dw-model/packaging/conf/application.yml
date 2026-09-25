@@ -15,6 +15,10 @@ dwai:
   product: warehouse
   db-file: dw_mode
   org-base-url: ${ORG_BASE_URL:http://127.0.0.1:18080}
+  # 组织平台的**前端**地址，给浏览器跳转用（`/org/login` 等页面路径）。
+  # 与上一行不是一回事：开发态组织 UI 在 5171，而安装包形态下组织那个进程
+  # 同时托管前端与接口，所以这里填组织的安装地址 18080。
+  org-ui-url: ${ORG_UI_URL:http://127.0.0.1:18080}
   service-base-url: ${SERVICE_BASE_URL:http://127.0.0.1:18081}
   public-base-url: ${PUBLIC_BASE_URL:http://127.0.0.1:18081}
   web:

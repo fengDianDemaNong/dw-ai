@@ -84,6 +84,11 @@ public class DwaiProperties {
   public void setOrgBaseUrl(String orgBaseUrl) { this.orgBaseUrl = orgBaseUrl; }
   public String getPublicBaseUrl() { return publicBaseUrl; }
   public void setPublicBaseUrl(String publicBaseUrl) { this.publicBaseUrl = publicBaseUrl; }
+  /**
+   * <b>已停用</b>：与 dw-model / dw-lineage 的同名属性一样，是为模块心跳上报自己地址而留的。
+   * 心跳退役、{@code service_registry} 改存前端地址之后，全仓已无调用方。
+   * 字段与配置项保留只为兼容既有安装包的 {@code application.yml}。
+   */
   public String getServiceBaseUrl() { return serviceBaseUrl; }
   public void setServiceBaseUrl(String serviceBaseUrl) { this.serviceBaseUrl = serviceBaseUrl; }
   public String serviceBaseUrl() {

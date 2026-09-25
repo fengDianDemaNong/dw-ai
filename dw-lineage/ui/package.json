@@ -8,16 +8,18 @@
     "node": ">=22.13"
   },
   "scripts": {
-    "dev": "vite",
-    "dev:standalone": "VITE_RUN_MODE=standalone vite --port 5173",
-    "dev:standard": "VITE_RUN_MODE=standard vite --port 5173",
-    "dev:multi": "VITE_RUN_MODE=multi VITE_ORG_ORIGIN=http://127.0.0.1:5171 VITE_WAREHOUSE_ORIGIN=http://127.0.0.1:5172 VITE_DEV_PORT=5173 VITE_DEV_PROXY_TARGET=http://127.0.0.1:18082 vite --port 5173",
+    "dev": "npm run gen:menu && vite",
+    "dev:standalone": "npm run gen:menu && VITE_RUN_MODE=standalone vite --port 5173",
+    "dev:standard": "npm run gen:menu && VITE_RUN_MODE=standard vite --port 5173",
+    "dev:multi": "npm run gen:menu && VITE_RUN_MODE=multi VITE_DEV_PORT=5173 VITE_DEV_PROXY_TARGET=http://127.0.0.1:18082 vite --port 5173",
     "build": "vue-tsc --noEmit && vite build",
     "build:no-check": "vite build",
     "preview": "vite preview",
     "lint": "eslint src --ext .ts,.vue",
     "check-format": "prettier --check .",
-    "format:prettier": "prettier --write ."
+    "format:prettier": "prettier --write .",
+    "gen:menu": "node scripts/gen-menu.mjs",
+    "prebuild": "npm run gen:menu"
   },
   "dependencies": {
     "@ant-design/icons-vue": "^7.0.1",

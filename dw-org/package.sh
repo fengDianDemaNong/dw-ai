@@ -57,10 +57,7 @@ copy_seed_sql() {
 build_ui() {
   need node
   need npm
-  export VITE_API_BASE="${VITE_API_BASE:-.}"
-  export VITE_ORG_ORIGIN="${VITE_ORG_ORIGIN:-http://127.0.0.1:18080}"
-  export VITE_WAREHOUSE_ORIGIN="${VITE_WAREHOUSE_ORIGIN:-http://127.0.0.1:18081}"
-  export VITE_LINEAGE_ORIGIN="${VITE_LINEAGE_ORIGIN:-http://127.0.0.1:5173}"
+  export VITE_API_BASE_URL="${VITE_API_BASE_URL:-.}"
   echo "==> 构建租户管理控制台"
   npm install
   npm run build -w "$WS"

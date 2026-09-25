@@ -9,7 +9,7 @@
         </div>
       </div>
 
-      <p class="hint">先认人，再选租户。租户管理员进工作台；其他用户进入已加入的仓建设项目。</p>
+      <p class="hint">先认人，再选租户。租户管理员进工作台；其他用户直接进入已开通的产品页面。</p>
 
       <a-form layout="vertical" @submit.prevent="submit">
         <a-form-item label="用户名">
@@ -32,7 +32,7 @@ import { api, useRemoteApi } from '../api/client';
 import { ADMIN_HOME, SELECT_TENANT } from '../config/paths';
 import { followHome } from '../config/product';
 import { getDeployMode, setDeployModeHint } from '../config/runtime';
-import { loginDev, loginLocal, resolveTenantHome } from '../stores/app';
+import { loginDev, loginLocal, navReady, resolveTenantHome } from '../stores/app';
 
 const router = useRouter();
 const remote = useRemoteApi();
@@ -55,6 +55,8 @@ async function submit() {
       router.push(SELECT_TENANT);
       return;
     }
+    // 落地页要看门户菜单（见 resolveTenantHome 的注释），等这次拉取落定再决定去哪
+    await navReady();
     followHome(resolveTenantHome(), router);
   } catch (e) {
     err.value = e instanceof Error ? e.message : '用户名或密码错误';

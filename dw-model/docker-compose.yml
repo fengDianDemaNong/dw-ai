@@ -10,7 +10,10 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      SERVER_PORT: 8080
+      # 容器内外同一个端口（组织 18080 / 仓建设 18081 / 数据地图 18082）。
+      # 原先这里是 8080 + 映射 18081:8080，容器内外的端口号对不上，
+      # 排查时要不停在两个号之间换算；现在一律同号。
+      SERVER_PORT: 18081
       DW_AI_HOME: /app
       DB_URL: ${MODEL_DB_URL:-}
       DB_USER: ${MODEL_DB_USER:-${DB_USER:-}}
@@ -23,13 +26,17 @@ services:
       ALLOW_DEV_LOGIN: ${ALLOW_DEV_LOGIN:-true}
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
       ORG_BASE_URL: ${ORG_BASE_URL:-http://host.docker.internal:18080}
+      # 组织平台的**前端**地址，给浏览器跳转用（与上一行的 API 地址不是一回事）。
+      # 这里用 localhost 而不是 host.docker.internal：这个值最终会进浏览器的地址栏，
+      # 而 host.docker.internal 只在容器里能解析。组织平台在别的机器上时要显式覆盖。
+      ORG_UI_URL: ${ORG_UI_URL:-http://localhost:5171}
       RULES_BASE: ${RULES_BASE:-}
     ports:
-      - "${API_PORT:-18081}:8080"
+      - "${API_PORT:-18081}:18081"
     volumes:
       - dw-mode-h2:/app/data
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18081/api/health"]
       interval: 15s
       timeout: 3s
       retries: 10
@@ -39,9 +46,18 @@ services:
       context: ..
       dockerfile: dw-model/ui/Dockerfile
       args:
-        VITE_API_BASE: ${VITE_API_BASE:-.}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-.}
         VITE_DEPLOY_MODE: ${DW_AI_MODE:-multi}
     image: dw-model-ui:0.1.3
+    environment:
+      # ---- 运行时配置 ----
+      # 与上面的 build args 同名，但**不是同一条通路**：build args 是构建期烘焙进产物，
+      # 这里是容器启动时由 entrypoint 脚本渲染成 /config.json（见 ui/Dockerfile）。
+      # 部署期才知道的事（前后端不在一台机器）改这里重启容器即可，不必重新构建。
+      # 都留空 = 同源相对路径（由 nginx 反代 /api），即改动前的默认行为。
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+      # 本控制台自己的对外地址，跨服务跳转时用来自报家门
+      VITE_BASE_URL: ${MODEL_UI_PUBLIC_URL:-}
     ports:
       - "${MODEL_UI_PORT:-8081}:80"
     depends_on:

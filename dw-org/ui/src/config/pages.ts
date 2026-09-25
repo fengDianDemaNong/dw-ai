@@ -16,6 +16,8 @@ export const ORG_PAGES = {
   settings: `${ORG_HOME}/workbench/settings`,
   platformTenants: `${ORG_HOME}/platform/tenants`,
   platformServices: `${ORG_HOME}/platform/services`,
+  platformNav: `${ORG_HOME}/platform/nav-items`,
+  platformProductRoles: `${ORG_HOME}/platform/product-roles`,
   platformUsers: `${ORG_HOME}/platform/users`,
   platformSettings: `${ORG_HOME}/platform/settings`,
   noProject: `${ORG_HOME}/no-project`,

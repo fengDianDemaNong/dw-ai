@@ -1,4 +1,4 @@
-/** 生产控制台只调 API。未配置 VITE_API_BASE 时：开发态走 Vite `/api` 代理，已登录则同源。 */
+/** 生产控制台只调 API。未配置 VITE_API_BASE_URL 时：开发态走 Vite `/api` 代理，已登录则同源。 */
 import type {
   DataGrade,
   Domain,
@@ -12,11 +12,36 @@ import type {
   WordRoot,
 } from '../types';
 
-const rawApi = (import.meta.env.VITE_API_BASE as string | undefined)?.trim();
-const rawRules = (import.meta.env.VITE_RULES_BASE as string | undefined)?.trim();
 /** `.` 表示与页面同源（Docker Nginx 反代 / 安装包由 API 托管静态页 / Vite 代理） */
-export const API_BASE = !rawApi || rawApi === '.' ? '' : rawApi.replace(/\/$/, '');
-export const RULES_BASE = !rawRules || rawRules === '.' ? '' : rawRules.replace(/\/$/, '');
+function normalize(v: string | undefined): string {
+  const t = (v ?? '').trim();
+  return !t || t === '.' ? '' : t.replace(/\/$/, '');
+}
+
+/** 是否显式配置过后端地址（含 `.`）。useRemoteApi 用它，语义与改动前一致。 */
+let rawApi = ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '').trim();
+
+/**
+ * 后端基址。
+ *
+ * <p>初值取构建期 `VITE_API_BASE_URL` —— 这样即使没人调 configureApiBase，
+ * 行为也与改动前完全一致，不会静默退回同源。挂载前由 main.ts 用运行时配置覆盖
+ * （见 config/appConfig.ts）。消费点都在函数体内，所以 `export let` 的重新赋值
+ * 对它们是可见的（ESM live binding）；模块顶层就把它赋给别的 const 会快照旧值。
+ */
+export let API_BASE = normalize(rawApi);
+
+const rawRules = (import.meta.env.VITE_RULES_BASE as string | undefined)?.trim();
+export const RULES_BASE = normalize(rawRules);
+
+/**
+ * 注入运行时配置的后端地址。**必须在 createApp() 之前调用**，见 main.ts。
+ * 空串 = 同源相对路径（沿用改动前的默认行为）。
+ */
+export function configureApiBase(value: string | undefined): void {
+  rawApi = (value ?? '').trim();
+  API_BASE = normalize(rawApi);
+}
 
 export function useRemoteApi() {
   if (rawApi) return true;
@@ -30,6 +55,11 @@ export function authToken() {
 
 export function storedRefreshToken() {
   return sessionStorage.getItem('dw-ai.refreshToken') ?? '';
+}
+
+/** 当前 access token 的到期毫秒时间戳（无则空串）。供 ProductEmbed 转发给嵌入的子应用。 */
+export function storedTokenExp() {
+  return sessionStorage.getItem('dw-ai.tokenExp') ?? '';
 }
 
 export type AuthTokens = { refreshToken?: string; expiresIn?: number; touch?: boolean };
@@ -65,6 +95,15 @@ function expireIdle() {
   }
 }
 
+/**
+ * 令牌变更事件。
+ *
+ * <p>嵌进来的子应用（数据地图）用自己的后端校验同一个 JWT，需要在续期后拿到新令牌。
+ * 这里广播一个事件，由 {@code ProductEmbed} 转发给 iframe —— 比让 iframe 重建
+ * （sessionKey 里含 token）保住页面状态，也不必让客户端去轮询 sessionStorage。
+ */
+export const AUTH_TOKEN_EVENT = 'dw-ai-token-changed';
+
 export function setAuthToken(token: string | null, extras?: AuthTokens) {
   if (token) {
     sessionStorage.setItem('dw-ai.token', token);
@@ -78,6 +117,16 @@ export function setAuthToken(token: string | null, extras?: AuthTokens) {
     sessionStorage.removeItem('dw-ai.refreshToken');
     sessionStorage.removeItem('dw-ai.tokenExp');
     sessionStorage.removeItem(LAST_ACTIVITY_KEY);
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent(AUTH_TOKEN_EVENT, {
+        detail: {
+          token: sessionStorage.getItem('dw-ai.token') ?? '',
+          tokenExp: sessionStorage.getItem('dw-ai.tokenExp') ?? '',
+        },
+      })
+    );
   }
 }
 
@@ -326,6 +375,187 @@ export type LoginRes = {
   tenants?: Tenant[];
 };
 
+/** 门户菜单项：管理面看全部字段，消费面（`api.nav()`）拿到的是它的子集。 */
+/** 一条菜单项挂哪个壳：进项目**之前**（工作台）还是**之后**（项目）。 */
+export type NavScope = 'workbench' | 'project';
+
+export type NavItemRow = {
+  id: string;
+  product: string;
+  scope: NavScope;
+  /** 侧栏分组标题，如「数据地图」。为空 = 不分组。 */
+  groupTitle: string;
+  label: string;
+  icon: string;
+  /** 【子应用内】路径，如 /lineage/tables */
+  path: string;
+  /** 子应用内的权限词，如 `catalog:read`。为空 = 不判权。 */
+  perm: string;
+  sortOrder: number;
+  enabled: boolean;
+  createdAt?: string;
+};
+
+export type NavItemInput = {
+  product?: string;
+  scope?: NavScope;
+  groupTitle?: string;
+  label?: string;
+  icon?: string;
+  path?: string;
+  perm?: string;
+  sortOrder?: number;
+  enabled?: boolean;
+};
+
+/** 空组策略：没有可用菜单时，这个分组是保留（入口置灰并说明）还是整组隐藏。 */
+export type NavGroupEmptyPolicy = 'always' | 'hide';
+
+/**
+ * 一个侧栏分组的元数据（管理面 `platform.navGroups()` 与消费面 `api.navGroups()` 同一形状）。
+ *
+ * <p>名字带 `Row` 后缀，与 `NavItemRow` 同一套命名 —— `config/nav.ts` 里的 `NavGroup`
+ * 是**渲染后**的分组（带 items），两者不是一回事，别弄混。
+ *
+ * <p>它与 `NavItemRow.groupTitle` 是**软约束**关系：分组表只是候选清单 + 组间顺序 +
+ * 空组策略，菜单项里那个字符串仍是渲染真源。所以这里没有、也不该有 id 之外的关联字段。
+ */
+export type NavGroupRow = {
+  id: string;
+  scope: NavScope;
+  product: string;
+  title: string;
+  /** 组【间】顺序；组内顺序仍由菜单项的 `sortOrder` 决定。 */
+  sortOrder: number;
+  emptyPolicy: NavGroupEmptyPolicy;
+  createdAt?: string;
+};
+
+export type NavGroupInput = {
+  scope?: NavScope;
+  product?: string;
+  title?: string;
+  sortOrder?: number;
+  emptyPolicy?: NavGroupEmptyPolicy;
+};
+
+/** 改分组名的回执：`renamedItems` 是同事务里跟着改名的菜单条数。 */
+export type NavGroupUpdateResult = NavGroupRow & { renamedItems?: number };
+
+/**
+ * 删除分组的回执。
+ *
+ * `referenced` = 仍写着这个名字的菜单条数 —— 删除**不阻塞、不清空**菜单项的分组名
+ * （那等于静默改菜单），前端拿它提示「已删除，但有 N 条菜单仍写着这个名字」。
+ */
+export type NavGroupDeleteResult = { referenced: number };
+
+/** 权限词的一个可选值。`label` 是**产品自己的说法**（「查看目录」），org 侧原样展示。 */
+export type PermOption = { value: string; label: string };
+
+/**
+ * 某产品自报的权限词全集（`GET /api/v1/platform/product-perms`）。
+ *
+ * <p>`perms` 为空数组 = 该产品**还没上报词表**（老版本服务，或「服务注册」里没登记它的
+ * 页面地址）。这是个必须区分于「产品说它没有任何权限词」的状态：前者要回落到
+ * 「可手填 + 提示」，后者才是真的没得选。
+ *
+ * <p>词表里有**不在任何菜单上**的词（如 `lineage:write` 只用在 SQL 解析页的保存按钮上），
+ * 所以它不能由菜单候选聚合出来，必须由产品显式声明。
+ */
+export type ProductPerms = {
+  product: string;
+  perms: PermOption[];
+};
+
+/** 产品角色管理页的一行（`GET /api/v1/platform/product-roles`）。 */
+export type ProductRoleRow = {
+  id: string;
+  product: string;
+  /** 写进 `project_members.role` 的就是它；产品 + 角色码一起构成身份，都不能改。 */
+  code: string;
+  label: string;
+  hint: string;
+  /** 该产品的管理角色。每个产品恰有一个 true。 */
+  isAdmin: boolean;
+  /** 内置角色：不可删（它是 `Perms.java` 那份硬编码矩阵的投影）。 */
+  builtin: boolean;
+  sortOrder: number;
+  createdAt: string;
+  perms: PermOption[];
+  permCount: number;
+};
+
+/** 新建/修改产品角色的请求体。字段缺席 = 不改（`perms` 例外：传了就是全量替换）。 */
+export type ProductRoleInput = {
+  product?: string;
+  code?: string;
+  label?: string;
+  hint?: string;
+  sortOrder?: number;
+  isAdmin?: boolean;
+  perms?: string[];
+};
+
+/** 删除角色的回执。`referenced` = 仍被派了这个角色的成员人次 —— 删除**不阻塞、不改人**。 */
+export type ProductRoleDeleteResult = { referenced: number; code: string };
+
+/** 某个服务报上来的一个菜单候选（`{frontendUrl}/menu.json` 里的一项）。 */
+export type MenuCandidate = {
+  id: string;
+  /** 服务自己建议的归属壳；管理员可以改。 */
+  scope: NavScope;
+  group: string;
+  path: string;
+  label: string;
+  icon: string;
+  perm: string;
+  sort: number;
+};
+
+/**
+ * 某个产品的候选拉取结果。**逐产品报告**：一个产品拉失败不影响另一个。
+ *
+ * `url` 是实际请求的地址 —— 它是「页面地址填错了」时唯一能对的东西。
+ */
+export type MenuCandidatesOfProduct = {
+  product: string;
+  url?: string;
+  ok: boolean;
+  error: string;
+  menus: MenuCandidate[];
+};
+
+/** 批量新建的逐条回执（`created` / `skipped` 已配置 / `failed` 带 1 起序号）。 */
+export type NavBatchResult = {
+  created: NavItemRow[];
+  skipped: { product: string; path: string; scope: NavScope; reason: string }[];
+  failed: { index: number; reason: string }[];
+};
+
+/** 服务目录里的一条（`GET /api/services`）：产品码 → 它的站点根。 */
+export type ProductService = {
+  product: string;
+  /** 该产品的前端地址；为空 = 还没在「服务注册」里配。 */
+  frontendUrl: string;
+};
+
+/** 侧栏要渲染的一条产品菜单（`GET /api/nav`），许可过滤已在服务端做过。 */
+export type ProductMenu = {
+  product: string;
+  /** 挂哪个壳 —— 前端靠这一项把一份清单拆成工作台与项目两套侧栏。 */
+  scope: NavScope;
+  /** 侧栏分组标题，如「数据地图」。为空 = 不分组。 */
+  groupTitle: string;
+  label: string;
+  icon: string;
+  path: string;
+  /** 子应用内的权限词；为空 = 不判权。 */
+  perm: string;
+  /** 该产品页面的前端地址；为空 = 还没在「服务注册」里配。 */
+  frontendUrl: string;
+};
+
 export type Session = {
   user: Me;
   tenants: Tenant[];
@@ -366,6 +596,38 @@ export const api = {
   enterTenant: (tenantId: string, code: string) =>
     req<Me>('/api/v1/auth/enter-tenant', { method: 'POST', body: JSON.stringify({ tenantId, code }) }),
   me: () => req<Me>('/api/v1/auth/me'),
+  /**
+   * 当前租户可见的门户菜单。
+   *
+   * <p>注意路径是 `/api/nav` 而不是 `/api/v1/platform/...`：后者是平台管理员专属，
+   * 挂过去普通成员的侧栏会永远是空的（服务端 `NavController` 上有同样的注释）。
+   */
+  nav: () => req<ProductMenu[]>('/api/v1/nav'),
+
+  /**
+   * 当前租户侧栏要用的分组元数据（组间顺序 + 空组策略）。
+   *
+   * <p>**与 `nav()` 分开拉，不要合并**：两者失败后果不同。菜单拉不到 = 侧栏少入口；
+   * 分组拉不到 = 侧栏回落成现在的样子（按首次出现序、无空组）。合成一个请求会让
+   * 这两种症状互相掩盖 —— 与 `stores/app.ts` 里 `navItems` 与 `productServices`
+   * 分开拉是同一条理由。
+   *
+   * <p>返回条数**不受租户许可过滤**（服务端 `NavGroupService.groupsFor` 的注释解释了
+   * 为什么）：这正是 `emptyPolicy='always'` 能在「模块未开通」时仍出现的前提。
+   */
+  navGroups: () => req<NavGroupRow[]>('/api/v1/nav/groups'),
+
+  /**
+   * 产品服务目录（消费面）：当前租户开通的产品各自的前端地址在哪。
+   *
+   * <p>与 `nav()` 的分工：菜单回答「侧栏有哪些入口」（按管理员配的菜单项来），
+   * 这里回答「每个产品的站点根在哪」（按租户许可来）。「进入项目」按钮要的是后者 ——
+   * 开通了许可但还没配菜单项时，菜单里没有这个产品，但按钮仍应该能进去。
+   *
+   * <p>也别用上面管理面的 `services()`（`/api/v1/platform/services`，平台管理员专属）：
+   * 普通成员调它是 403。
+   */
+  productServices: () => req<ProductService[]>('/api/v1/services'),
   updateMe: (displayName: string) =>
     req<OrgUser>('/api/v1/me', { method: 'PUT', body: JSON.stringify({ displayName }) }),
   changePassword: (currentPassword: string, newPassword: string) =>
@@ -390,14 +652,80 @@ export const api = {
     appearance: () => req<Appearance>('/api/v1/platform/appearance'),
     putAppearance: (body: Appearance) =>
       req<Appearance>('/api/v1/platform/appearance', { method: 'PUT', body: JSON.stringify(body) }),
+    // 存的是产品的「页面地址」，供门户 iframe 嵌入用；不再有后端地址与探活状态
     services: () =>
-      req<{ product: string; version?: string; baseUrl: string; seenAt?: string; status?: string }[]>(
-        '/api/v1/platform/services'
-      ),
-    registerService: (body: { product: string; baseUrl: string; version?: string }) =>
+      req<{ product: string; version?: string; frontendUrl: string }[]>('/api/v1/platform/services'),
+    registerService: (body: { product: string; frontendUrl: string; version?: string }) =>
       req<unknown>('/api/v1/platform/services', { method: 'POST', body: JSON.stringify(body) }),
     removeService: (product: string) =>
       req<void>(`/api/v1/platform/services/${encodeURIComponent(product)}`, { method: 'DELETE' }),
+    // 门户菜单是平台管理员配的（管理面）；普通成员读的是下面 api.nav()
+    navItems: () => req<NavItemRow[]>('/api/v1/platform/nav-items'),
+    /**
+     * 各服务报上来的菜单候选。
+     *
+     * <p>由后端去拉各服务登记的**页面地址**（`{frontendUrl}/menu.json`）——
+     * 浏览器直接去拉会撞上跨域，而且这些地址在跨机部署时浏览器根本到不了。
+     */
+    navCandidates: () => req<{ products: MenuCandidatesOfProduct[] }>('/api/v1/platform/nav-candidates'),
+    createNavItemsBatch: (items: NavItemInput[]) =>
+      req<NavBatchResult>('/api/v1/platform/nav-items/batch', {
+        method: 'POST',
+        body: JSON.stringify({ items }),
+      }),
+    createNavItem: (body: NavItemInput) =>
+      req<NavItemRow>('/api/v1/platform/nav-items', { method: 'POST', body: JSON.stringify(body) }),
+    updateNavItem: (id: string, body: NavItemInput) =>
+      req<NavItemRow>(`/api/v1/platform/nav-items/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
+    deleteNavItem: (id: string) =>
+      req<void>(`/api/v1/platform/nav-items/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    // 分组：让管理员把「有哪些分组」提前建好（菜单管理页的「分组管理」抽屉）。
+    // 与 navItems 一样是管理面；消费面的只读版本是上面的 api.navGroups()。
+    navGroups: (query?: { scope?: NavScope; product?: string }) => {
+      const qs = new URLSearchParams();
+      if (query?.scope) qs.set('scope', query.scope);
+      if (query?.product) qs.set('product', query.product);
+      const suffix = qs.toString() ? `?${qs}` : '';
+      return req<NavGroupRow[]>(`/api/v1/platform/nav-groups${suffix}`);
+    },
+    createNavGroup: (body: NavGroupInput) =>
+      req<NavGroupRow>('/api/v1/platform/nav-groups', { method: 'POST', body: JSON.stringify(body) }),
+    /** 传 `title` 就是改名，服务端会级联更新菜单项的分组名（见返回的 `renamedItems`）。 */
+    updateNavGroup: (id: string, body: NavGroupInput) =>
+      req<NavGroupUpdateResult>(`/api/v1/platform/nav-groups/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
+    deleteNavGroup: (id: string) =>
+      req<NavGroupDeleteResult>(`/api/v1/platform/nav-groups/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /**
+     * 某产品认哪些权限词（产品自报，见各服务前端 `config/navData.ts` 的 `PERM_OPTIONS`）。
+     *
+     * <p>配菜单（挂哪个权限）与配产品角色（勾哪些权限）用的是同一份词表 ——
+     * 两处若各拿一份，会出现「菜单页拒掉的词、角色页能用」这种对不上的现象。
+     */
+    productPerms: (product: string) =>
+      req<ProductPerms>(`/api/v1/platform/product-perms?product=${encodeURIComponent(product)}`),
+    // 产品角色：全局一套、跟产品版本走（规范 06-runtime-modes.md:99）。
+    // 租户只在项目里「派」角色，角色定义本身只给平台管理员。
+    productRoles: (product?: string) =>
+      req<ProductRoleRow[]>(
+        `/api/v1/platform/product-roles${product ? `?product=${encodeURIComponent(product)}` : ''}`,
+      ),
+    createProductRole: (body: ProductRoleInput) =>
+      req<ProductRoleRow>('/api/v1/platform/product-roles', { method: 'POST', body: JSON.stringify(body) }),
+    updateProductRole: (id: string, body: ProductRoleInput) =>
+      req<ProductRoleRow>(`/api/v1/platform/product-roles/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
+    deleteProductRole: (id: string) =>
+      req<ProductRoleDeleteResult>(`/api/v1/platform/product-roles/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
   },
   org: {
     users: (tenantId: string) => req<OrgUser[]>(`/api/v1/tenants/${tenantId}/users`),

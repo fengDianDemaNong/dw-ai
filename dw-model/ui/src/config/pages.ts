@@ -1,17 +1,15 @@
 import { getRunMode, type RunMode } from './runtime';
-import { LINEAGE_HOME, LOGIN_PATH, MODEL_HOME } from './paths';
+import { LOGIN_PATH, MODEL_HOME } from './paths';
 
 /**
- * 三个产品的页面归属。仓建设进程只渲染 model 自己的路由；
- * 数据地图以 iframe 嵌 lineage（仅 multi）；登录/选租户属于 org，本进程不提供。
+ * 页面归属。仓建设进程只渲染 model 自己的路由；登录/选租户属于 org，本进程不提供。
  *
- * standalone / standard 不显示其他服务。
+ * <p><b>没有「其他产品」这一档。</b>数据地图、数据规范那些页面由组织平台的项目壳
+ * 自己整合（壳从各服务拉菜单、按 `scope` 摆到工作台或项目那一层），本进程不再
+ * 以 iframe 嵌别人的页面 —— 所以这里既没有 `owner: 'lineage'`，也没有
+ * 「这个部署有没有别的服务」这个判据。
  */
-export type PageOwner = 'org' | 'model' | 'lineage';
-
-export function otherProductsVisible(mode: RunMode = getRunMode()): boolean {
-  return mode === 'multi';
-}
+export type PageOwner = 'org' | 'model';
 
 export function localLoginRequired(mode: RunMode = getRunMode()): boolean {
   return mode === 'standard';
@@ -79,22 +77,6 @@ export const MODEL_PAGES = {
   knowledge: `${MODEL_HOME}/knowledge`,
   projects: `${MODEL_HOME}/projects`,
 } as const;
-
-export const LINEAGE_PAGES = {
-  home: LINEAGE_HOME,
-  search: `${LINEAGE_HOME}/search`,
-  tables: `${LINEAGE_HOME}/tables`,
-  catalogs: `${LINEAGE_HOME}/catalogs`,
-  tempRules: `${LINEAGE_HOME}/temp-rules`,
-  analyze: `${LINEAGE_HOME}/analyze`,
-  meta: `${LINEAGE_HOME}/meta`,
-  metadata: `${LINEAGE_HOME}/settings/metadata`,
-  settings: `${LINEAGE_HOME}/settings/map`,
-} as const;
-
-export function isLineagePath(path: string): boolean {
-  return path === LINEAGE_HOME || path.startsWith(`${LINEAGE_HOME}/`);
-}
 
 export function isModelPath(path: string): boolean {
   return path === MODEL_HOME || path.startsWith(`${MODEL_HOME}/`);

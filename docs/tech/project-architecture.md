@@ -82,19 +82,38 @@ multi 模式当前有两层门禁（顺序不能混）：
 
 ## 端口约定
 
-> 2026-09-22 更新：`dw-lineage` 前端端口由 5175 统一改为 **5173**（multi / standard / standalone 一致）。
+> 2026-09-25 更新：`dw-lineage` 后端端口由 `8080`（仅 multi 覆盖成 18082）统一为 **18082**，
+> 且**容器内外一致**（此前 compose 里 `SERVER_PORT: 8080` + `18082:8080` 映射）。
+> 2026-09-22：`dw-lineage` 前端端口由 5175 统一改为 **5173**（multi / standard / standalone 一致）。
 
 | 服务 | 前端 | 后端 | 规则 | 库 |
 |---|---|---|---|---|
 | dw-org | 5171 | 18080 | — | dw_org |
 | dw-model | 5172 | 18081 | 7080 | dw_mode |
-| dw-lineage | **5173** | 18082（独立默认 8080） | — | dw_lineage |
+| dw-lineage | **5173** | **18082** | — | dw_lineage |
 
-### 本次端口变更涉及的文件
+三个后端的端口都写成单文件 `${SERVER_PORT:18xxx}`，**没有任何 profile 覆盖**
+（`application-multi.yml` 里那份 lineage 覆盖已删）。安装包与容器都遵循「内外一致」。
+
+### 2026-09-25 端口 / 地址配置变更涉及的文件
+
+- `dw-lineage/api/src/main/resources/application.yml`：`${SERVER_PORT:8080}` → `${SERVER_PORT:18082}`。
+- `dw-lineage/api/src/main/resources/application-multi.yml`：**删掉**端口覆盖（对齐 org / model 的形态）。
+- `dw-lineage/packaging/conf/application.yml`、`bin/start.sh`、`status.sh`、`seed-demo.sh`、`env.sh`：默认端口 → 18082。
+- `dw-lineage/api/Dockerfile`、`ui/Dockerfile`、`docker-compose.yml`：`EXPOSE` / 健康检查 / 端口映射 → 18082，内外一致。
+- `dw-org` 与 `dw-model` 的 api Dockerfile、ui `nginx.conf`、compose：同样是「内外一致」（18080 / 18081）。
+- 三个 UI 的后端地址改由**运行期** `config.json` 注入（`config/appConfig.ts` +
+  `docker-entrypoint.d/25-app-config.sh`），变量统一为 `VITE_API_BASE_URL`（我调谁）/
+  `VITE_BASE_URL`（我在哪）。旧名 `VITE_API_BASE` 已直接改名，无兼容别名。
+- `VITE_ORG_ORIGIN` / `VITE_WAREHOUSE_ORIGIN` / `VITE_LINEAGE_ORIGIN`：**全部删除**。
+  跨服务地址改为运行期发现（见 `06-0.1.5-routes.md` §7）。
+
+### 2026-09-22 前端端口变更涉及的文件（历史）
 
 - `dw-lineage/ui/package.json`：`dev:multi` 的 `VITE_DEV_PORT` 与 `vite --port` 改为 5173（`dev:standalone` / `dev:standard` 本就是 5173）。
 - `dw-lineage/api/src/main/resources/application-multi.yml`：`lineage.public-base-url` 默认值改为 `http://127.0.0.1:5173`。
-- `dw-model/ui` 与 `dw-org/ui`：嵌入 lineage 的 iframe origin（`src/config/product.ts` fallback、`package.json` 的 `VITE_LINEAGE_ORIGIN`、`README` 环境变量表）同步改为 5173。
+- `dw-model/ui` 与 `dw-org/ui`：嵌入 lineage 的 iframe origin 同步改为 5173（当时的做法是环境变量
+  `VITE_LINEAGE_ORIGIN`，该变量已在 2026-09-25 删除）。
 - `README.md`（根与 `dw-lineage/`）：端口说明同步。
 - `vite.config.ts` 中 `server.port` 默认本就是 5173（`Number(process.env.VITE_DEV_PORT) || 5173`），无需改动。
 - `application.yml` 的 CORS `allowed-origins` 已含 5173（5175 保留为宽松白名单，无害）。

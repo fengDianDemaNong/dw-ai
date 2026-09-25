@@ -7,7 +7,6 @@
         </a-tooltip>
         <a-button v-if="firstModelLayer" @click="router.push(layerHref(firstModelLayer))">{{ firstModelLayer }} 总览</a-button>
         <a-button v-if="firstOds" type="primary" @click="router.push('/model/ods-dwd')">从 ODS 建模</a-button>
-        <a-button v-if="showMap" @click="router.push('/lineage/search')">打开数据地图</a-button>
       </template>
     </PageHeader>
 
@@ -84,7 +83,6 @@ import { computed } from 'vue';
 import { useRouter } from 'vue-router';
 import PageHeader from '../components/PageHeader.vue';
 import { layerHref } from '../config/layers';
-import { otherProductsVisible } from '../config/pages';
 import {
   canWriteSpec,
   currentProject,
@@ -96,8 +94,6 @@ import {
 } from '../stores/app';
 
 const hasSpecAi = computed(() => hasAiCap('spec_design') || hasAiCap('spec_ask'));
-const showMap = computed(() => otherProductsVisible());
-
 const router = useRouter();
 const project = currentProject;
 const domains = projectDomains;

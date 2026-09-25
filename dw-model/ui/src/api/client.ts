@@ -1,5 +1,6 @@
-/** 生产控制台只调 API。未配置 VITE_API_BASE 时：开发态走 Vite `/api` 代理，已登录则同源。 */
+/** 生产控制台只调 API。未配置 VITE_API_BASE_URL 时：开发态走 Vite `/api` 代理，已登录则同源。 */
 import { LOGIN_PATH } from '../config/paths';
+import { isEmbed } from '../config/product';
 import { isStandalone } from '../config/runtime';
 import type {
   DataGrade,
@@ -14,11 +15,36 @@ import type {
   WordRoot,
 } from '../types';
 
-const rawApi = (import.meta.env.VITE_API_BASE as string | undefined)?.trim();
-const rawRules = (import.meta.env.VITE_RULES_BASE as string | undefined)?.trim();
 /** `.` 表示与页面同源（Docker Nginx 反代 / 安装包由 API 托管静态页 / Vite 代理） */
-export const API_BASE = !rawApi || rawApi === '.' ? '' : rawApi.replace(/\/$/, '');
-export const RULES_BASE = !rawRules || rawRules === '.' ? '' : rawRules.replace(/\/$/, '');
+function normalize(v: string | undefined): string {
+  const t = (v ?? '').trim();
+  return !t || t === '.' ? '' : t.replace(/\/$/, '');
+}
+
+/** 是否显式配置过后端地址（含 `.`）。useRemoteApi 用它，语义与改动前一致。 */
+let rawApi = ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '').trim();
+
+/**
+ * 后端基址。
+ *
+ * <p>初值取构建期 `VITE_API_BASE_URL` —— 这样即使没人调 configureApiBase，
+ * 行为也与改动前完全一致，不会静默退回同源。挂载前由 main.ts 用运行时配置覆盖
+ * （见 config/appConfig.ts）。消费点都在函数体内，所以 `export let` 的重新赋值
+ * 对它们是可见的（ESM live binding）；模块顶层就把它赋给别的 const 会快照旧值。
+ */
+export let API_BASE = normalize(rawApi);
+
+const rawRules = (import.meta.env.VITE_RULES_BASE as string | undefined)?.trim();
+export const RULES_BASE = normalize(rawRules);
+
+/**
+ * 注入运行时配置的后端地址。**必须在 createApp() 之前调用**，见 main.ts。
+ * 空串 = 同源相对路径（沿用改动前的默认行为）。
+ */
+export function configureApiBase(value: string | undefined): void {
+  rawApi = (value ?? '').trim();
+  API_BASE = normalize(rawApi);
+}
 
 export function useRemoteApi() {
   if (rawApi) return true;
@@ -108,6 +134,22 @@ export function setAuthToken(token: string | null, extras?: AuthTokens) {
   }
 }
 
+/**
+ * 宿主推来的新 access token。
+ *
+ * <p>与本地登录拿到的那条走**同一处存储**（`dw-ai.token`）：请求头、`ProductEmbed`
+ * 往数据地图转发，都只看这一处，多一处就得记住「哪个来源优先」。
+ *
+ * <p>`touch: false`：这是壳续期推过来的，不代表用户此刻有动作，不该靠它推迟空闲登出。
+ */
+export function applyAccessToken(token: string, tokenExp = ''): void {
+  if (!token) return;
+  setAuthToken(token, { touch: false });
+  // 不传 expiresIn：宿主给的是绝对到期时间戳（毫秒），与 setAuthToken 的「还剩多少秒」
+  // 是两种量纲，换算一次就多一个算错的机会。
+  if (tokenExp) sessionStorage.setItem('dw-ai.tokenExp', tokenExp);
+}
+
 const ANON_AUTH = /\/auth\/(login|refresh|logout|config)(?:\?|$)/;
 
 function tokenExpiringSoon() {
@@ -156,6 +198,42 @@ async function doRefresh(): Promise<boolean> {
   }
 }
 
+/** 轮询等令牌被换掉（宿主回话是异步的，没法 await 那条 postMessage）。 */
+function waitForTokenChange(prev: string, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      const current = authToken();
+      if (current && current !== prev) {
+        window.clearInterval(timer);
+        resolve(true);
+      } else if (Date.now() - startedAt >= timeoutMs) {
+        window.clearInterval(timer);
+        resolve(false);
+      }
+    }, 50);
+  });
+}
+
+/**
+ * 嵌在壳里时，请宿主推一枚新 access token 过来。
+ *
+ * <p>为什么 embed 态不走本地的 `refreshAccess()`：这里的令牌是**组织平台**签发的，
+ * 而 `/api/auth/refresh` 换的是本模块自己签发的（standard 那套）。拿组织签发的
+ * refreshToken 去问本模块的后端只会失败，而 `doRefresh()` 失败时会顺手
+ * `setAuthToken(null)` —— 把壳刚给的那条也一起清掉，代价比不试还大。
+ *
+ * <p>动态 import 是刻意的：`config/embed.ts` 要用本模块的 `applyAccessToken`，
+ * 静态 import 会形成环。这条路径只在 401 之后走，不是首屏依赖。
+ */
+async function renewFromHost(): Promise<boolean> {
+  if (!isEmbed()) return false;
+  const before = authToken();
+  const { requestEmbedToken } = await import('../config/embed');
+  requestEmbedToken();
+  return waitForTokenChange(before, 2000);
+}
+
 function isAuthFailure(err: unknown) {
   const status = typeof err === 'object' && err && 'status' in err ? Number((err as { status?: number }).status) : 0;
   if (status === 401) return true;
@@ -181,8 +259,10 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     return await doFetch<T>(path, init);
   } catch (e) {
-    if (!anon && isAuthFailure(e) && (await refreshAccess())) {
-      return doFetch<T>(path, init);
+    if (!anon && isAuthFailure(e)) {
+      // 嵌入态先问宿主（见 renewFromHost 里为什么不能反着来）
+      if (await renewFromHost()) return doFetch<T>(path, init);
+      if (await refreshAccess()) return doFetch<T>(path, init);
     }
     throw e;
   }
@@ -255,6 +335,13 @@ export type AuthConfig = {
   accessTtlSeconds?: number;
   refreshTtlSeconds?: number;
   idleTtlSeconds?: number;
+  /**
+   * 组织平台的**前端**地址（门户 UI 站点根）；为空 = 后端没配。
+   *
+   * <p>注意不是后端的 API 基址：这里拼的是页面路径（`/org/login`）。
+   * 为空时走 config/product.ts 里 orgOrigin 的下一级回落。
+   */
+  orgUiUrl?: string;
   casdoor?: { issuer: string; audience: string };
 };
 

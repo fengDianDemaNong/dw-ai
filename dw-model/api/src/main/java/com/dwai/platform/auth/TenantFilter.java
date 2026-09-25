@@ -2,6 +2,7 @@ package com.dwai.platform.auth;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.dwai.platform.DwaiProperties;
+import com.dwai.platform.internal.OrgProjectPuller;
 import com.dwai.platform.meta.entity.PlatformAccessEntity;
 import com.dwai.platform.meta.entity.ProjectEntity;
 import com.dwai.platform.meta.entity.TenantEntity;
@@ -20,6 +21,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -29,6 +32,8 @@ import java.util.Map;
 
 /** 从 JWT 认人，从 X-Tenant-Id 再验库。不注册为 Servlet Filter，以免跑两遍。 */
 public class TenantFilter extends OncePerRequestFilter {
+  private static final Logger log = LoggerFactory.getLogger(TenantFilter.class);
+
   private final DwaiProperties props;
   private final TenantMapper tenants;
   private final UserMapper users;
@@ -36,6 +41,7 @@ public class TenantFilter extends OncePerRequestFilter {
   private final PlatformAccessMapper access;
   private final TenantGrantMapper grants;
   private final ProjectMapper projects;
+  private final OrgProjectPuller puller;
 
   public TenantFilter(
       DwaiProperties props,
@@ -44,7 +50,8 @@ public class TenantFilter extends OncePerRequestFilter {
       UserTenantMapper userTenants,
       PlatformAccessMapper access,
       TenantGrantMapper grants,
-      ProjectMapper projects) {
+      ProjectMapper projects,
+      OrgProjectPuller puller) {
     this.props = props;
     this.tenants = tenants;
     this.users = users;
@@ -52,6 +59,7 @@ public class TenantFilter extends OncePerRequestFilter {
     this.access = access;
     this.grants = grants;
     this.projects = projects;
+    this.puller = puller;
   }
 
   @Override
@@ -60,6 +68,35 @@ public class TenantFilter extends OncePerRequestFilter {
     try {
       String rawTenantCode = blankToNull(request.getHeader("X-Tenant-Code"));
       String rawProjectCode = blankToNull(request.getHeader("X-Project-Code"));
+      String rawTenantId = blankToNull(request.getHeader("X-Tenant-Id"));
+      String rawProjectId = blankToNull(request.getHeader("X-Project-Id"));
+      // 组织不再推送项目镜像（见 OrgProjectPuller 的类注释），这里分两条路：
+      // 本地缺东西 → 同步拉（required=true，拉不到就 503）；本地有、只是该对账了 →
+      // 后台刷一次（required=false，本次请求不受影响）。
+      // 必须放在解析**之前**、且两头都看：解析不到租户时 resolveTenantId 会把原始值往下带
+      // （见 :170 的注释），此时按租户 id 查项目必然查不到 —— 只看项目就永远触发不了。
+      if (props.isMulti() && (rawTenantId != null || rawTenantCode != null
+          || rawProjectId != null || rawProjectCode != null)) {
+        try {
+          puller.ensure(
+              firstNonBlank(rawTenantCode, rawTenantId),
+              firstNonBlank(rawProjectCode, rawProjectId),
+              needsPull(rawTenantId, rawTenantCode, rawProjectId, rawProjectCode));
+        } catch (OrgProjectPuller.Unavailable e) {
+          // 与下面「租户已停用或不存在」的 403 分开：那是「去找管理员加你」，
+          // 这个是「组织自己挂了」。混成一个，运维会拿租户号去查权限配置。
+          //
+          // 必须记日志：响应体里的 detail 只有调用方看得见（而且是个 iframe 里的页面），
+          // 服务端一行不留的话，「拉取为什么失败」就只剩一个 503 —— 真排查时得靠猜。
+          // 与 dw-lineage 的 TenantInterceptor 同一形态。
+          log.warn("组织不可达，无法解析租户上下文：{}", e.getMessage());
+          response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+          response.setContentType("application/json;charset=UTF-8");
+          response.getWriter().write("{\"error\":\"组织平台不可用\",\"detail\":\""
+              + e.getMessage() + "\",\"status\":503}");
+          return;
+        }
+      }
       String headerTenant = resolveTenantId(
           blankToNull(request.getHeader("X-Tenant-Id")),
           rawTenantCode);
@@ -154,6 +191,55 @@ public class TenantFilter extends OncePerRequestFilter {
     if (projectId == null) return null;
     ProjectEntity p = projects.selectById(projectId);
     return p == null ? null : p.getCode();
+  }
+
+  /**
+   * 这一段租户/项目在本地能不能解析出来；解析不出来才值得去问组织。
+   *
+   * <p><b>为什么不能无条件拉</b>：{@code X-Tenant-Id: 1} 这种<b>数字（或本地主键）</b> 是既有的
+   * 合法用法，本地就有，每个请求都去打组织纯属浪费；更要紧的是，组织不可达时本地能解析的
+   * 请求<b>必须照常服务</b> —— 连不上组织就整个模块 503，等于把模块的能力绑死在组织上。
+   *
+   * <p>判据与 {@link #resolveTenantId}/{@link #resolveProjectId} 逐字一致（先按本地 id、
+   * 再按 code），只是失败时返回「要不要问」而不是把原始值往下带 —— 两处若要改口径必须一起改，
+   * 否则会出现「这边说解析得出来、那边说解析不出来」的分叉。
+   */
+  private boolean needsPull(String rawTenantId, String rawTenantCode, String rawProjectId, String rawProjectCode) {
+    if (rawTenantId == null && rawTenantCode == null) return false;  // 连租户都没给：下面会 403，问了也没用
+    String tenantId = localTenantId(rawTenantId, rawTenantCode);
+    if (tenantId == null) return true;                               // 租户没落地：值得问一次
+    if (rawProjectId == null && rawProjectCode == null) return false; // 没带项目：没什么可补
+    return localProjectId(tenantId, rawProjectId, rawProjectCode) == null;
+  }
+
+  /** 与 {@link #resolveTenantId} 同一套判据，解析不出来时返回 {@code null}。 */
+  private String localTenantId(String headerTenant, String tenantCode) {
+    if (headerTenant != null) {
+      TenantEntity byId = tenants.selectById(headerTenant);
+      if (byId != null) return byId.getId();
+      TenantEntity byCode = tenants.selectByCode(headerTenant);
+      if (byCode != null) return byCode.getId();
+    }
+    if (tenantCode != null) {
+      TenantEntity byCode = tenants.selectByCode(tenantCode);
+      if (byCode != null) return byCode.getId();
+    }
+    return null;
+  }
+
+  /** 与 {@link #resolveProjectId} 同一套判据，解析不出来时返回 {@code null}。 */
+  private String localProjectId(String tenantId, String headerProject, String projectCode) {
+    if (headerProject != null) {
+      ProjectEntity byId = projects.selectById(headerProject);
+      if (byId != null) return byId.getId();
+    }
+    if (projectCode != null && tenantId != null) {
+      ProjectEntity byCode = projects.selectOne(Wrappers.<ProjectEntity>lambdaQuery()
+          .eq(ProjectEntity::getTenantId, tenantId)
+          .eq(ProjectEntity::getCode, projectCode));
+      if (byCode != null) return byCode.getId();
+    }
+    return null;
   }
 
   private String resolveTenantId(String headerTenant, String tenantCode) {

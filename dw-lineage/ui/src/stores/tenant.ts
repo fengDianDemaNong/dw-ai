@@ -124,13 +124,18 @@ export function applyOrgContext(tenantCode: string, projectCode: string): void {
 }
 
 /**
- * 租户与项目由组织平台在建项目时推过来（`PUT /internal/v1/projects/{code}`，
- * 见 dw-org 的 `ModuleSyncService`），这里不负责落户。
+ * 租户与项目的落户全在服务端的 `TenantInterceptor` 里（它按需去组织拉
+ * `GET /internal/v1/projects/by-code/{code}?tenantCode=...`，见 dw-lineage 的
+ * `OrgProjectPuller`），前端只负责把组织给的编码透传出去。
  *
- * <p>原先此处有个 `ensureOrgProject()`：组织侧还没推到时，前端自己打同一个内部接口自救。
- * 那条路是错的 —— 该接口的调用方是组织（带 module token 的服务间调用），浏览器直打必然
+ * <p>这条链上唯一由前端做的是下面这个 `applyOrgContext()`：把编码存下来、随请求头发出去。
+ * 至于「本地还没同步到」这件事，现在由拦截器在解析之前先拉一次兜住。
+ *
+ * <p>原先此处有个 `ensureOrgProject()`：组织侧还没推到时，前端自己打那个内部接口自救。
+ * 那条路是错的 —— 接口的调用方是服务端（带 module token 的服务间调用），浏览器直打必然
  * 被拒；更糟的是它挂在请求拦截器上、且失败即清缓存，于是每个 API 请求都要陪着多等一次
- * 注定失败的往返。真正兜住同步的一直是组织侧的 fan-out。
+ * 注定失败的往返。它当时想解决的是「组织推不到模块」这个真问题，答案换成了 pull：
+ * 不再需要前端自救，也不需要组织知道模块的地址。
  */
 function persist(): void {
   try {

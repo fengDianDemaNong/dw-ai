@@ -46,12 +46,12 @@ class InternalModuleTokenTest {
         mvc.perform(get("/internal/v1/context")).andExpect(status().isUnauthorized());
     }
 
-    /** 写接口比读更要紧：心跳会往注册表里写东西。 */
+    /** 写接口比读更要紧：代用户续期会轮换 refresh token。 */
     @Test
     void writeEndpointIsClosedWhenTokenIsNotConfigured() throws Exception {
-        mvc.perform(post("/internal/v1/registry/heartbeat")
+        mvc.perform(post("/internal/v1/auth/refresh")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"product\":\"warehouse\",\"version\":\"0.2.0\",\"baseUrl\":\"http://127.0.0.1:1\"}"))
+                        .content("{\"refreshToken\":\"whatever\"}"))
                 .andExpect(status().isUnauthorized());
     }
 

@@ -167,7 +167,7 @@ import { message } from 'ant-design-vue';
 import { api, type OrgUser } from '../api/client';
 import PageHeader from '../components/PageHeader.vue';
 import { ENGINE_OPTIONS, engineLabel } from '../config/knowledge';
-import { isOrgUi, openLineageApp, openWarehouseApp } from '../config/product';
+import { isOrgUi } from '../config/product';
 import type { EngineKind, Project } from '../types';
 import {
   app,
@@ -176,8 +176,10 @@ import {
   enterProject,
   hasModule,
   isTenantAdmin,
+  navReady,
   patchProject,
   removeProject,
+  servicesReady,
   sessionAccount,
   tenantProjects,
 } from '../stores/app';
@@ -297,16 +299,19 @@ async function go(id: string) {
     router.push('/model');
     return;
   }
-  // 两个服务都能进时先给仓建设：它左侧菜单本来就带完整的数据地图菜单组。
-  if (canEnterProduct('warehouse', id)) {
-    openWarehouseApp();
+  // 组织平台自己的壳里「进入项目」= 进**项目壳**（`/org/project/{code}`），
+  // 由它把各服务配进来的项目菜单摆好。不再整页跳到仓建设/数据地图的站点 ——
+  // 那样一来「项目也是个壳」这件事就不存在了，用户看到的还是单个产品的界面。
+  //
+  // 菜单与服务目录都要等（`enterProject` 之后才拿到这个项目的数据）：
+  // 急着跳会在菜单还没落定时被项目壳的默认落地页当成「没有可嵌菜单」而弹回工作台。
+  await Promise.all([servicesReady(), navReady()]);
+  const code = tenantProjects.value.find((p) => p.id === id)?.code;
+  if (!code) {
+    message.error('这个项目没有项目码，进不去项目壳 —— 到项目设置里补一个');
     return;
   }
-  if (canEnterProduct('metadata', id)) {
-    openLineageApp('/lineage/tables');
-    return;
-  }
-  message.error(enterBlockedReasonFor(id) || '这个项目下没有你能进入的服务');
+  router.push(`/org/project/${encodeURIComponent(code)}`);
 }
 
 async function goFromDrawer() {
@@ -363,7 +368,11 @@ async function create() {
 }
 
 onMounted(async () => {
-  if (app.currentTenantId) {
+  // 只给租户管理员拉：这个接口是管理员范围，普通成员问必得 403，而它唯一的用处是
+  // 把 owner 的 id 翻成显示名、以及给「编辑」弹窗填负责人下拉 —— 那两个入口本身就
+  // 只对管理员可见（见模板里的 isTenantAdmin）。成员由此少一次注定失败的请求，
+  // owner 列仍是 ownerName() 的 id 兜底，与今天拉失败时的表现一致。
+  if (app.currentTenantId && isTenantAdmin.value) {
     try {
       users.value = await api.org.users(app.currentTenantId);
     } catch {

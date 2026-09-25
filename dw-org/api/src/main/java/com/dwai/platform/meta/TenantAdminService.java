@@ -60,6 +60,8 @@ public class TenantAdminService {
   private final PasswordEncoder passwords;
   private final LlmCrypto crypto;
   private final ProjectService projectService;
+  /** 派角色时要校验角色码存在（V20），与 {@link ProjectService#putMember} 同一口径。 */
+  private final ProductRoleService productRoles;
 
   public TenantAdminService(
       AccessService access,
@@ -76,7 +78,8 @@ public class TenantAdminService {
       TenantLlmMapper llms,
       PasswordEncoder passwords,
       LlmCrypto crypto,
-      ProjectService projectService) {
+      ProjectService projectService,
+      ProductRoleService productRoles) {
     this.access = access;
     this.auth = auth;
     this.props = props;
@@ -92,6 +95,7 @@ public class TenantAdminService {
     this.passwords = passwords;
     this.crypto = crypto;
     this.projectService = projectService;
+    this.productRoles = productRoles;
   }
 
   public List<ApiModels.OrgUserDto> listUsers(String tenantId) {
@@ -655,8 +659,13 @@ public class TenantAdminService {
       // 与 ProjectService.putMember 同口径：缺产品按仓建设处理。
       String product = blank(item.product()) ? "warehouse" : item.product().trim();
       String role = blank(item.role()) ? "viewer" : item.role();
-      if (!List.of("admin", "modeler", "viewer").contains(role)) {
-        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "非法项目角色");
+      // 角色码问产品角色表（V20），与 ProjectService.putMember 同一处口径。
+      // 两处必须一起改：这里的注释写着「同口径」，只改一处的话，租户管理员在
+      // 「用户管理」页派角色仍被写死三值拦住，而项目页已经放开了 —— 同一件事两个结果。
+      if (!productRoles.exists(product, role)) {
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+            "产品「" + product + "」下没有角色「" + role + "」。可用角色：" + productRoles.codesOf(product)
+                + "（在平台后台的「产品角色」里新增）");
       }
       ProjectMemberEntity exist = members.selectOne(Wrappers.<ProjectMemberEntity>lambdaQuery()
           .eq(ProjectMemberEntity::getProjectId, item.projectId())

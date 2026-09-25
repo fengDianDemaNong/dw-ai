@@ -35,12 +35,18 @@ cd dw-org/api && mvn spring-boot:run
 | `SECURITY_MODE` | `dev` 或 `oidc` | `dev` |
 | `BOOTSTRAP_ADMIN_USER` / `BOOTSTRAP_ADMIN_PASSWORD` | 空库平台用户 | `admin` / `123456` |
 
-## 给智仓的接口
+## 给模块的接口
 
-智仓进程调用（无浏览器）：
+模块进程调用（无浏览器，门禁是 `X-Module-Token`）：
 
 - `GET /internal/v1/authz/check` — 鉴权
-- `POST /internal/v1/registry/heartbeat` — 登记
-- 本服务创建/删除项目时 `PUT`/`DELETE` 已登记模块的 `/internal/v1/projects/{project_code}`
+- `GET /internal/v1/context` — 当前请求的租户 / 项目 / 角色摘要
+- `GET /internal/v1/projects/by-code/{code}?tenantCode=…` — **项目镜像 + 许可，模块来拉**
+- `GET /internal/v1/tenants/{tenantId}/compute` — 仓建设取 DS / 引擎连接
+
+项目同步是**拉**不是推：本服务创建 / 修改 / 删除项目时**不通知**任何模块，
+模块在用户第一次访问某个项目时自己来拉（`tenantCode` 必填，见上）。
+所以本服务只需要知道模块的**页面地址**（`service_registry.frontend_url`，门户嵌入用），
+不需要知道它的后端地址 —— 心跳与推送已删除。
 
 联调前端见 [../ui/README.md](../ui/README.md)。安装包见 [../package.sh](../package.sh)。

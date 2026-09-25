@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
-port="$(yaml_get server port)"; port="${port:-8080}"
+port="$(yaml_get server port)"; port="${port:-18082}"
 
 pids="$(app_pids)"
 

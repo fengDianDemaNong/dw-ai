@@ -50,6 +50,24 @@ access token（默认 15 分钟）到期后，被整合进来的服务会整片�
 
 ---
 
+## 修复状态（2026-09-24 更新：门户集成）
+
+> 本轮做的是「组织当壳、把被嵌服务配进菜单」这件事本身（含项目同步由 push 改 pull）。
+> 路由与协议真源见 `06-0.1.5-routes.md` §7 / §12，此处只记与本文问题清单的对应关系。
+
+| 问题 | 状态 | 落地方式 |
+|---|---|---|
+| P4 拓扑统一 / 运行期地址发现 | 🟡 大半已修 | 组织侧栏不再硬编码：菜单来自 `nav_items` 表（`/api/nav`，消费面不要求平台管理员），产品地址来自服务登记的 `frontend_url`（**页面**地址，不再需要后端地址）。org 现在**能嵌 lineage**（搬来 `ProductEmbed`，`/org/embed/:product/**`）；model 仍走整页跳转（它没有子端接收端） |
+| P4 的剩余部分 | ⏳ 未动 | 三个 UI 各有一份 `ProductEmbed` / `embed.ts` 副本，未抽共享包；`service_registry.base_url` 三列保留但无写入源 |
+| R2 白名单依赖 `document.referrer` | ✅ 已修 | boot 载荷新增 `hostOrigin`（宿主自报 origin），子端白名单 = `hostOrigin` ∪ 运行期推导的组织平台地址 ∪ referrer。**实测**：宿主 origin 配错且带 `referrerpolicy="no-referrer"` 时，有 `hostOrigin` 才收得到 token。（2026-09-25：两个 `VITE_*_ORIGIN` 环境变量已删除，白名单只剩这三项） |
+| R1 打包态 iframe 白屏 | ✅ 已修 | lineage `SecurityConfig` 把 Spring Security 默认的 `X-Frame-Options: DENY` 换成 CSP `frame-ancestors`（源用 `cors.allowed-origins`）；**表达不出来的白名单一律回落 DENY**（fail-closed，见 `EmbedFramePolicyUnsetTest`） |
+| P6 boot 协议三处复制 | ⏳ 变成四处 | 新增 org 副本后，守卫 `CrossServiceDesignGuardTest` 里那两条「两端都接了消息通道」的断言**参数化**成扫描所有 `*/ui/src/components/ProductEmbed.vue` × 所有 `*/ui/src/config/embed.ts`，否则新副本游离在守卫之外 |
+| P6 消息类型字符串重复 | ⏳ 未动 | 同上，抽共享包时一并消除 |
+
+**本轮已知缺口**：iframe 未加 `sandbox`（记录决策，见 §12）；组织删项目后模块侧留孤儿镜像（`dw-lineage/docs/KNOWN_ISSUES.md` 第 9 条）。
+
+---
+
 ## 一、没问题的部分（先确认哪些别动）
 
 | # | 环节 | 现状 |

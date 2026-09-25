@@ -1,8 +1,8 @@
 <template>
-  <div class="shell" :class="menuPos">
-    <AppNav :groups="groups" home="/model" :menu-pos="menuPos" />
+  <div class="shell" :class="[menuPos, { embed }]">
+    <AppNav v-if="!embed" :groups="groups" home="/model" :menu-pos="menuPos" />
     <div class="main">
-      <header class="bar">
+      <header v-if="!embed" class="bar">
         <!-- 点这里回工作台：multi 下那一级在组织平台（跨进程跳转），其余模式在本进程的 `SYS_HOME`。
              判据见 `config/pages.ts` 的 `canBackToWorkbench`。
              文案写成「← 返回工作台」而不是光秃秃的租户名：租户名（如「本环境」）既看不出
@@ -17,11 +17,7 @@
         <ProjectSwitcher />
       </header>
       <div class="content">
-        <router-view v-slot="{ Component }">
-          <keep-alive include="MapEmbed">
-            <component :is="Component" />
-          </keep-alive>
-        </router-view>
+        <router-view />
       </div>
     </div>
   </div>
@@ -48,7 +44,21 @@ import {
 import { appearanceOf } from '../stores/prefs';
 import { isMultiTenant } from '../config/runtime';
 import { canBackToWorkbench } from '../config/pages';
-import { openOrgWorkbench } from '../config/product';
+import { isEmbed, openOrgWorkbench } from '../config/product';
+
+/**
+ * 被组织平台的壳嵌着时，**这里不再画第二条导航栏**。
+ *
+ * <p>嵌进来的那一层壳已经有一套完整导航（还带着「返回工作台」与项目切换器），
+ * 子应用再画一份就是两条并排的侧栏、两个 logo、两个「收起」—— 用户看到的是
+ * 同一套菜单被画了两遍，还会以为是重复的入口。
+ *
+ * <p>判据取自 `config/product.ts` 的 {@link isEmbed}（URL 上的 `?embed=1`，
+ * 由壳拼地址时带上、`consumeBootHash` 记进会话）。dw-lineage 的 AppLayout 一直是
+ * 这么做的（`layout-embed` 只留内容区），这里补齐 —— 同一件事在两个被嵌产品上
+ * 必须是同一个行为，否则「接进来的菜单」长什么样要看接的是谁。
+ */
+const embed = isEmbed();
 
 const router = useRouter();
 const tenant = currentTenant;
@@ -92,6 +102,11 @@ function back() {
 }
 
 .shell.top {
+  flex-direction: column;
+}
+
+/* 被壳嵌入：只剩 `.main` 一个子项，纵向排（见 script 里 `embed` 的说明）。 */
+.shell.embed {
   flex-direction: column;
 }
 

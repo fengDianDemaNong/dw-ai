@@ -26,7 +26,8 @@ COPY --from=build --chown=dwai:dwai /src/dw-model/api/target/dw-model-0.1.3.jar 
 COPY --from=build --chown=dwai:dwai /src/dw-model/api/target/lib /app/libs
 USER dwai
 ENV DW_AI_HOME=/app
-EXPOSE 8080
+# 端口与镜像外一致（组织 18080 / 仓建设 18081 / 数据地图 18082），不搞「容器内 8080」那套。
+EXPOSE 18081
 HEALTHCHECK --interval=15s --timeout=3s --retries=10 \
-  CMD curl -fsS http://127.0.0.1:8080/api/health >/dev/null || exit 1
+  CMD curl -fsS http://127.0.0.1:18081/api/health >/dev/null || exit 1
 ENTRYPOINT ["java", "-cp", "/app/app/dw-model-0.1.3.jar:/app/libs/*", "com.dwai.platform.DwaiApplication"]

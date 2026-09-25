@@ -17,6 +17,8 @@ SERVER_PORT=18081
 LOG_NAME=dw-model
 DW_AI_HOME=
 ORG_BASE_URL=http://127.0.0.1:18080
+# 组织平台的**前端**地址（浏览器跳转用，不是接口地址）。组织装在别的机器上时改成那台的地址。
+ORG_UI_URL=http://127.0.0.1:18080
 SERVICE_BASE_URL=http://127.0.0.1:18081
 PUBLIC_BASE_URL=http://127.0.0.1:18081
 RULES_BASE=http://127.0.0.1:7080

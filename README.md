@@ -6,7 +6,7 @@
 ```
 dw-org/              租户管理     UI 5171 / Compose 8080 · API 18080 · 库 dw_org
 dw-model/            智仓         UI 5172 / Compose 8081 · API 18081 · 规则 7080 · 库 dw_mode
-dw-lineage/          数据地图     UI 5173 · API 18082（独立默认 8080）· 库 dw_lineage
+dw-lineage/          数据地图     UI 5173 · API 18082 · 库 dw_lineage
 packages/engine/     共享规则库（不单独启动）
 docs/product/        可点击原型（不是实现）
 ```
@@ -29,14 +29,17 @@ docs/product/        可点击原型（不是实现）
 前端会调 `/api/auth/config` 跟上；为避免第一屏闪错模式，可同时设 `VITE_RUN_MODE`。
 
 **`multi` 还必须配 `MODULE_TOKEN`（三个模块同一个值）**，`standalone` / `standard` 不需要。
-组织平台创建租户 / 项目时把数据 fan-out 给仓建设与血缘，模块启动后也靠心跳让组织**全量补发**
-（`PUT /internal/v1/projects/{code}`）——这条链路唯一的门禁就是这枚令牌，未配置时
-`/internal/v1/**` 一律 401（见 [ADR-0012](docs/tech/adr/0012-module-token-gate.md)）。
+仓建设的租户与项目**全部从组织取**（multi 下它不建任何本地数据）：用户在模块里第一次访问
+某个项目时，模块自己拿这枚令牌去组织拉一次
+（`GET /internal/v1/projects/by-code/{code}?tenantCode=…`）——这条链路唯一的门禁就是这枚令牌，
+未配置时 `/internal/v1/**` 一律 401（见 [ADR-0012](docs/tech/adr/0012-module-token-gate.md)）。
 
 不配的表现**是静默的**，值得记住：组织里项目建得好好的，仓建设打开却是「还没有可进入的项目」，
-数据地图报「租户编码未同步」，日志里才有一行 401。更要紧的是——仓建设的租户和项目
-**全部靠这条链路灌进来**（multi 下它不建任何本地数据），所以库一旦为空（首次部署、换库、删库）
-就**再也补不回来**，除非把令牌配上让心跳触发全量补发。改完必须**重启进程**才生效。
+数据地图报「租户编码未同步」，日志里才有一行 401。改完必须**重启进程**才生效。
+
+> 旧版本是反过来的：组织在「建项目 / 改许可」时主动推给模块，模块启动后还要心跳上报自己的
+> 后端地址，所以库空了要靠心跳全量补发。现在组织**不需要知道模块的后端地址**（它只需要产品的
+> **页面**地址，用于把页面嵌进自己的壳），推送与心跳都已删除，同步方向是模块来拉。
 
 本地开发需要 **Node 22**、**Java 21**、**Maven**。先在仓库根：
 
@@ -64,7 +67,7 @@ npm run dev:api:org
 # 终端 2  组织前端   http://127.0.0.1:5171/org/login
 npm run dev:org
 
-# 终端 3  仓建设 API  18081（向 18080 心跳）
+# 终端 3  仓建设 API  18081（项目按需从 18080 拉）
 npm run dev:api:model
 
 # 终端 4  仓建设前端  5172（未带会话会跳回 5171）
@@ -85,14 +88,15 @@ npm run dev:api:lineage
 npm run dev:lineage
 ```
 
-这两个脚本是**按 multi 配好的**：`dev:api:lineage` 带 `-Dspring-boot.run.profiles=multi`，
-所以端口落在 `application-multi.yml` 的 **18082**；`dev:lineage` 跑 `dev:multi`，
-5173 的代理也指向 18082，两边对得上。
+这两个脚本是**按 multi 配好的**：`dev:api:lineage` 带 `-Dspring-boot.run.profiles=multi`；
+`dev:lineage` 跑 `dev:multi`，5173 的代理也指向 18082，两边对得上。
+
+**端口与 profile 无关**：三个后端的端口都写成单文件 `${SERVER_PORT:18xxx}`
+（org 18080 / model 18081 / lineage 18082），**没有任何 profile 覆盖它**。
+所以带不带 `multi` 都落在 18082。
 
 **数据地图的默认模式是 `standard`（不是 `multi`）**，与仓建设相反。上面这两个脚本
 是套件（multi）专用入口；单跑血缘见下方「普通 / 独立」两节，用的是显式 `mvn` 命令。
-混用会得到一个很迷惑的现象：后端在 8080、前端代理指向 18082，页面里每个请求都是
-**500**（vite 代理连不上时给的就是 500，不是 502/504），但后端日志干干净净。
 
 ---
 
@@ -116,7 +120,7 @@ LINEAGE_RUN_MODE=standard mvn -f dw-lineage/api/pom.xml spring-boot:run
 npm run dev:standard -w sql-tools
 ```
 
-前端默认 http://127.0.0.1:5173 ，后端默认 8080。
+前端默认 http://127.0.0.1:5173 ，后端默认 18082。
 
 ---
 
@@ -136,7 +140,7 @@ VITE_RUN_MODE=standalone npm run dev:model
 **只跑血缘**（默认是普通模式 standard，带本模块账号）：
 
 ```bash
-# API 默认 LINEAGE_RUN_MODE=standard（本地账号 admin / 123456），端口 8080
+# API 默认 LINEAGE_RUN_MODE=standard（本地账号 admin / 123456），端口 18082
 mvn -f dw-lineage/api/pom.xml spring-boot:run
 
 npm run dev:standard -w sql-tools

@@ -66,6 +66,7 @@ import {
   app,
   isPlatformAdmin,
   logout,
+  navReady,
   resolveTenantHome,
   selectableTenants,
   sessionAccount,
@@ -107,6 +108,8 @@ async function enter() {
   busy.value = true;
   try {
     if (!(await switchTenant(selected.value))) return;
+    // 换租户后落地页可能变（另一个租户的许可下有别的产品页面），等新菜单到位再决定
+    await navReady();
     followHome(resolveTenantHome(), router);
   } finally {
     busy.value = false;

@@ -22,8 +22,17 @@ public class DwaiProperties {
    * 拿它去判权会让全部请求静默变 403。
    */
   private String productCode = "warehouse";
-  /** 仓建设 / 血缘 multi 时组织平台基址。 */
+  /** 仓建设 / 血缘 multi 时组织平台**后端**基址（调 `/internal/v1/**`、`/api/v1/**` 用）。 */
   private String orgBaseUrl = "";
+  /**
+   * 组织平台的**前端**地址（门户 UI 的站点根），给浏览器跳转用。
+   *
+   * <p>与 {@link #orgBaseUrl} 是两回事，别混用：那个拼出来的是接口路径，这个拼出来的是
+   * 页面路径（`${orgUiUrl}/org/login`、`${orgUiUrl}/org/workbench/projects`）。
+   * 开发态两者必然不同（UI 5171 / API 18080）；只有安装包形态下同一个进程既托管前端
+   * 又提供接口，两者才重合。混用的表现是「回门户登录」跳到一个没有这个页面的服务上 —— 404。
+   */
+  private String orgUiUrl = "";
   /** 本进程给别人登记用的浏览器可访问根地址。 */
   private String publicBaseUrl = "";
   /** 本进程给其它服务调用的 API 根地址。空则回落 publicBaseUrl。 */
@@ -81,8 +90,16 @@ public class DwaiProperties {
 
   public String getOrgBaseUrl() { return orgBaseUrl; }
   public void setOrgBaseUrl(String orgBaseUrl) { this.orgBaseUrl = orgBaseUrl; }
+  public String getOrgUiUrl() { return orgUiUrl; }
+  public void setOrgUiUrl(String orgUiUrl) { this.orgUiUrl = orgUiUrl; }
   public String getPublicBaseUrl() { return publicBaseUrl; }
   public void setPublicBaseUrl(String publicBaseUrl) { this.publicBaseUrl = publicBaseUrl; }
+  /**
+   * <b>已停用</b>：这个值当初只为「启动时向组织心跳上报自己的地址」而存在。
+   * 项目同步改成 pull 之后，组织不再需要知道模块的后端地址，心跳已删，
+   * 全仓已无调用方。配置项与字段保留（打包脚本的 {@code application.yml} 仍在写，
+   * 删掉会让老安装包的配置对不上），但不要在新代码里使用。
+   */
   public String getServiceBaseUrl() { return serviceBaseUrl; }
   public void setServiceBaseUrl(String serviceBaseUrl) { this.serviceBaseUrl = serviceBaseUrl; }
   public String serviceBaseUrl() {

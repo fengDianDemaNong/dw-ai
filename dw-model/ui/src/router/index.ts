@@ -1,8 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import type { RouteRecordRaw } from 'vue-router';
 import type { Perm, ProductModule } from '../config/iam';
-import { guestAccess, hasWorkbench, localLoginRequired, otherProductsVisible } from '../config/pages';
-import { LINEAGE_HOME, LOGIN_PATH, MODEL_HOME, NO_PROJECT, SYS_HOME } from '../config/paths';
+import { guestAccess, hasWorkbench, localLoginRequired } from '../config/pages';
+import { LOGIN_PATH, MODEL_HOME, NO_PROJECT, SYS_HOME } from '../config/paths';
 import { isMultiTenant } from '../config/runtime';
 import { consumeBootHash, openOrgLogin } from '../config/product';
 import { authToken, useRemoteApi } from '../api/client';
@@ -21,8 +21,7 @@ declare module 'vue-router' {
     module?: ProductModule;
     /** 与 dw-org/ui 保持同一套声明：布局组件里仍按 admin/sys 分流（本 UI 目前只有 sys 路由）。 */
     shell?: 'admin' | 'sys';
-    lineagePath?: string;
-    owner?: 'model' | 'lineage' | 'org';
+    owner?: 'model' | 'org';
   }
 }
 
@@ -46,19 +45,6 @@ const projectChildren: RouteRecordRaw[] = [
   { path: ':layer/:domain/:tableId', name: 'layer-detail', component: () => import('../pages/model/dwd-detail.vue'), meta: { title: '表详情', module: 'warehouse', perm: 'model:read', owner: 'model' } },
   { path: ':layer/:domain', name: 'layer-tables', component: () => import('../pages/model/dwd-tables.vue'), meta: { title: '表列表', module: 'warehouse', perm: 'model:read', owner: 'model' } },
   { path: ':layer', name: 'layer-overview', component: () => import('../pages/model/dwd-overview.vue'), meta: { title: '建模', module: 'warehouse', perm: 'model:read', owner: 'model' } },
-];
-
-// 每条都挂 module: 'metadata'，让下面的守卫把「租户没开通数据地图」挡在路由层。
-// 只有菜单过滤是不够的：菜单只决定看不看得见，地址栏照样能直达。
-const lineageChildren: RouteRecordRaw[] = [
-  { path: 'search', name: 'map-search', component: () => import('../pages/map/embed.vue'), meta: { title: '全文检索', lineagePath: '/lineage/search', module: 'metadata', owner: 'lineage' } },
-  { path: 'tables', name: 'map-tables', component: () => import('../pages/map/embed.vue'), meta: { title: '血缘', lineagePath: '/lineage/tables', module: 'metadata', owner: 'lineage' } },
-  { path: 'catalogs', name: 'map-catalogs', component: () => import('../pages/map/embed.vue'), meta: { title: '数据目录', lineagePath: '/lineage/catalogs', module: 'metadata', owner: 'lineage' } },
-  { path: 'temp-rules', name: 'map-temp-rules', component: () => import('../pages/map/embed.vue'), meta: { title: '临时表规则', lineagePath: '/lineage/temp-rules', module: 'metadata', owner: 'lineage' } },
-  { path: 'analyze', name: 'map-analyze', component: () => import('../pages/map/embed.vue'), meta: { title: 'SQL 解析', lineagePath: '/lineage/analyze', module: 'metadata', owner: 'lineage' } },
-  { path: 'meta', name: 'map-meta', component: () => import('../pages/map/embed.vue'), meta: { title: '元数据', lineagePath: '/lineage/meta', module: 'metadata', owner: 'lineage' } },
-  { path: 'settings/metadata', name: 'settings-metadata', component: () => import('../pages/map/embed.vue'), meta: { title: '元数据服务', lineagePath: '/lineage/settings/metadata', module: 'metadata', owner: 'lineage' } },
-  { path: 'settings/map', name: 'settings-map', component: () => import('../pages/map/embed.vue'), meta: { title: '数据地图设置', lineagePath: '/lineage/settings/map', module: 'metadata', owner: 'lineage' } },
 ];
 
 const routes: RouteRecordRaw[] = [
@@ -102,16 +88,9 @@ const routes: RouteRecordRaw[] = [
     meta: { project: true, owner: 'model' },
     children: projectChildren,
   },
-  {
-    path: LINEAGE_HOME,
-    component: () => import('../layouts/ProjectLayout.vue'),
-    meta: { project: true, owner: 'lineage' },
-    children: lineageChildren,
-  },
   { path: '/app', redirect: MODEL_HOME },
   { path: '/app/model/:pathMatch(.*)*', redirect: (to) => `${MODEL_HOME}/${to.params.pathMatch}` },
   { path: '/app/spec/:pathMatch(.*)*', redirect: (to) => `${MODEL_HOME}/spec/${to.params.pathMatch}` },
-  { path: '/app/map/:pathMatch(.*)*', redirect: (to) => `${LINEAGE_HOME}/${to.params.pathMatch}` },
   { path: '/app/:pathMatch(.*)*', redirect: (to) => `${MODEL_HOME}/${to.params.pathMatch}` },
   { path: '/w', redirect: MODEL_HOME },
   { path: '/w/:pathMatch(.*)*', redirect: (to) => `${MODEL_HOME}/${to.params.pathMatch}` },
@@ -131,7 +110,6 @@ router.beforeEach((to) => {
   const loggedIn = standalone || (useRemoteApi() ? Boolean(authToken()) : Boolean(app.currentUserId || app.currentUser));
   const home = () => ({ path: resolveTenantHome() });
 
-  if (to.meta.owner === 'lineage' && !otherProductsVisible()) return home();
   if (standalone && (to.name === 'login' || to.path.startsWith('/select-tenant') || to.path.startsWith('/admin'))) {
     return home();
   }

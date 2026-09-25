@@ -277,7 +277,13 @@ public class ProjectService {
     p.setCode(code);
     p.setName(name == null || name.isBlank() ? code : name.trim());
     p.setDescription("");
-    p.setOwner(TenantContext.user());
+    // owner 是 NOT NULL，而**镜像项目根本没有本地建者**：这一行是组织推过来 / 本模块
+    // 拉过来的。上下文里没人时必须给一个标记而不是 null —— 否则 projects.owner 的
+    // NOT NULL 会在 H2/MySQL 上抛 23502，把「拉一个项目」变成 503。
+    // 标记沿用 ensureTenant 给镜像租户用的那一个（:365），两处必须一致：它们描述同一件事。
+    // ⚠️ 拉取路径上必然走这个兜底：OrgProjectPuller 是在 TenantFilter **建立上下文之前**
+    // 被调用的（见该类注释「两条触发路径」），那时 TenantContext 一定为空。
+    p.setOwner(nz(TenantContext.user(), "org"));
     p.setCreatedAt(LocalDate.now());
     p.setStatus("active");
     p.setEngines(Jsons.toJson(List.of()));
@@ -311,14 +317,16 @@ public class ProjectService {
     return ctx == null || ctx.isBlank() ? null : ctx;
   }
 
-  /** 组织 fan-out 时本地可能还没有租户行，按 code / 上下文 id 补一份。 */
   /**
    * 解析（必要时新建）租户，并用组织侧的许可校准本地行。
+   *
+   * <p>从组织拉来项目镜像时本地可能还没有租户行，这里按 code / 上下文 id 补一份。
    *
    * <p><b>许可的权威在组织。</b>这里以前对新租户写死 {@code [warehouse, metadata]}，
    * 后果是「组织里只开通了仓建设」的租户在仓建设里照样看得见数据地图入口，点进去必然报错；
    * 反过来只开通数据地图的租户会被凭空赋予仓建设。现在两项由组织随项目镜像带过来
-   * （见 {@code com.dwai.platform.internal.ModuleSyncService#bodyOf}），这里只负责落库。
+   * （见 {@code com.dwai.platform.internal.OrgProjectPuller}，它拉的是组织侧
+   * {@code GET /internal/v1/projects/by-code/{code}}），这里只负责落库。
    *
    * <p>两个参数都是 null 表示组织没带这项（老版本组织），此时**不动**本地行 ——
    * 与「组织说这个租户一项都没开通」（空数组）必须区分开。
@@ -379,8 +387,8 @@ public class ProjectService {
    * 用组织侧的许可校准本地 {@code tenant_licenses} 行。
    *
    * <p>只写「传了、而且确实不一样」的字段 —— modules 与 aiCaps 各自独立，缺一项不该把另一项抹掉。
-   * 比对用集合语义：这个方法的调用频率跟着心跳走（组织每 120 秒全量补发一次项目），
-   * 顺序不同不该被判成变更、白写一次库。
+   * 比对用集合语义：调用频率跟着项目镜像的拉取走（同一租户 60 秒内最多一次，见
+   * {@code OrgProjectPuller} 的正缓存），顺序不同不该被判成变更、白写一次库。
    */
   private void syncLicense(String tenantId, List<String> modules, List<String> aiCaps) {
     if (tenantId == null || tenantId.isBlank()) return;

@@ -21,8 +21,6 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,24 +29,18 @@ import java.util.Map;
 @RequestMapping("/internal/v1")
 public class InternalController {
   private final DwaiProperties props;
-  private final ServiceRegistry registry;
   private final AccessService access;
   private final ProjectService projects;
-  private final ModuleSyncService moduleSync;
   private final AuthService auth;
 
   public InternalController(
       DwaiProperties props,
-      ServiceRegistry registry,
       AccessService access,
       ProjectService projects,
-      ModuleSyncService moduleSync,
       AuthService auth) {
     this.props = props;
-    this.registry = registry;
     this.access = access;
     this.projects = projects;
-    this.moduleSync = moduleSync;
     this.auth = auth;
   }
 
@@ -72,31 +64,6 @@ public class InternalController {
   public void logout(HttpServletRequest req, @RequestBody(required = false) ApiModels.RefreshReq body) {
     assertInternal(req);
     auth.logout(body == null ? null : body.refreshToken());
-  }
-
-  @PostMapping("/registry/heartbeat")
-  public ServiceRegistry.Entry heartbeat(HttpServletRequest req, @RequestBody Heartbeat body) {
-    assertInternal(req);
-    if (body == null || body.product == null || body.product.isBlank() || body.baseUrl == null || body.baseUrl.isBlank()) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "需要 product 与 baseUrl");
-    }
-    String product = body.product.trim();
-    String baseUrl = body.baseUrl.trim();
-    ServiceRegistry.Entry prev = registry.get(product);
-    boolean catchUp = prev == null
-        || !baseUrl.equals(prev.baseUrl())
-        || Duration.between(prev.seenAt(), Instant.now()).toSeconds() >= 120;
-    ServiceRegistry.Entry entry = registry.put(product, body.version, baseUrl);
-    if (catchUp) {
-      moduleSync.syncProjectsTo(entry, projects.listAllEntities());
-    }
-    return entry;
-  }
-
-  @GetMapping("/registry")
-  public CollectionDto registry(HttpServletRequest req) {
-    assertInternal(req);
-    return new CollectionDto(registry.all());
   }
 
   @GetMapping("/authz/check")
@@ -143,10 +110,35 @@ public class InternalController {
     return out;
   }
 
-  @GetMapping("/projects/{projectId}/bindings")
-  public Map<String, Object> bindings(HttpServletRequest req, @PathVariable String projectId) {
+  /**
+   * 模块主动拉一个项目（项目同步由推送改为拉取后的主通道）。
+   *
+   * <p><b>路径里为什么带 {@code by-code/}</b>：紧挨着的 {@code DELETE /projects/{projectCode}}
+   * 与它同形，而语义上「编码」和「主键」是两种东西 —— 组织侧项目的唯一约束是
+   * {@code UNIQUE (tenant_id, code)}，{@code code} 单独并不唯一。路径里写死 {@code by-code}
+   * 让看 URL 的人不必再去猜这个变量是什么，也避免以后有人按 id 调它。
+   *
+   * <p><b>{@code tenantCode} 必填</b>（缺了 400）：它不能回落到 {@code TenantContext} ——
+   * 这条路径上没有 JWT，回落等于让「谁在问」决定「查哪个租户」，那就是跨租户读。
+   *
+   * <p>返回体里的 {@code modules}/{@code aiCaps} 在「组织没有这行许可」时会<b>缺席</b>：
+   * 组织全局配了 {@code spring.jackson.default-property-inclusion: non_null}，
+   * 所以 {@code LinkedHashMap} 里的 null 值序列化后是键不存在。收方用 {@code Map.get}
+   * 读，缺席与显式 null 完全等价（都走「别动本地那份」分支），空数组才是
+   * 「确实一项都没开通」—— 这个区分不能塌。
+   *
+   * <p>找不到项目回 <b>404</b>：调用方要据此区分「组织明确说没有」与「组织不可用」——
+   * 前者该重试要等，后者该 503 让运维去看 org。
+   */
+  @GetMapping("/projects/by-code/{code}")
+  public Map<String, Object> projectByCode(
+      HttpServletRequest req, @PathVariable String code, @RequestParam(required = false) String tenantCode) {
     assertInternal(req);
-    return Map.of("projectId", projectId, "products", registry.all().stream().map(ServiceRegistry.Entry::product).toList());
+    Map<String, Object> found = projects.projectByCode(tenantCode, code);
+    if (found == null) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "项目不存在");
+    }
+    return found;
   }
 
   @PutMapping("/projects/{projectCode}")
@@ -217,18 +209,10 @@ public class InternalController {
     return null;
   }
 
-  public static class Heartbeat {
-    public String product;
-    public String version;
-    public String baseUrl;
-  }
-
   public static class UpsertProject {
     public String name;
     public String code;
     public String tenantCode;
     public String id;
   }
-
-  public record CollectionDto(java.util.Collection<ServiceRegistry.Entry> services) {}
 }

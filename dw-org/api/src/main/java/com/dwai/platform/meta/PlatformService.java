@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.dwai.platform.auth.AuthService;
 import com.dwai.platform.auth.RefreshTokenService;
 import com.dwai.platform.auth.TenantContext;
-import com.dwai.platform.internal.ModuleSyncService;
 import com.dwai.platform.meta.dto.ApiModels;
 import com.dwai.platform.meta.entity.AppearancePrefEntity;
 import com.dwai.platform.meta.entity.ProjectEntity;
@@ -39,7 +38,6 @@ public class PlatformService {
   private final ProjectMapper projects;
   private final AppearancePrefMapper prefs;
   private final PasswordEncoder passwords;
-  private final ModuleSyncService moduleSync;
   private final RefreshTokenService refreshTokens;
 
   public PlatformService(
@@ -52,7 +50,6 @@ public class PlatformService {
       ProjectMapper projects,
       AppearancePrefMapper prefs,
       PasswordEncoder passwords,
-      ModuleSyncService moduleSync,
       RefreshTokenService refreshTokens) {
     this.access = access;
     this.auth = auth;
@@ -63,7 +60,6 @@ public class PlatformService {
     this.projects = projects;
     this.prefs = prefs;
     this.passwords = passwords;
-    this.moduleSync = moduleSync;
     this.refreshTokens = refreshTokens;
   }
 
@@ -114,12 +110,10 @@ public class PlatformService {
     access.requirePlatform();
     TenantEntity t = tenants.selectById(id);
     if (t == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "租户不存在");
-    boolean modulesChanged = false;
     if (req != null) {
       if (!blank(req.status())) t.setStatus(req.status());
       if (!blank(req.name())) t.setName(req.name().trim());
       if (req.modules() != null) {
-        modulesChanged = true;
         TenantLicenseEntity lic = licenses.selectById(id);
         List<String> modules = req.modules();
         if (lic == null) {
@@ -143,11 +137,12 @@ public class PlatformService {
       }
       tenants.updateById(t);
     }
-    // 许可变了就得让模块知道。改许可本身不产生「项目变更」事件，而模块侧只在收到
-    // 项目镜像时才校准本地许可（见 ModuleSyncService.bodyOf），少了这一步，
-    // 组织里刚开通的数据地图要等到下次有人动项目才在仓建设里出现 ——
-    // 表现为「我明明开了，模块里还是进不去」。
-    if (modulesChanged) resyncTenant(id);
+    // 许可变了<b>不</b>需要主动通知模块 —— 这里就是权威，模块自己会来取：其
+    // TenantFilter / TenantInterceptor 每次拉项目镜像时都用这里返回的 modules/aiCaps
+    // 无条件校准本地许可（见 ProjectService.projectByCode），正缓存 60s 就是
+    // 「组织里开了数据地图，模块多久能进去」的上界。
+    // 改前是在这里 resyncTenant（把该租户每个项目重推一遍），那是「模块只在收到项目镜像时
+    // 才校准许可」时代的补丁，pull 之后连同那个前提一起作废。
     return auth.toTenant(t);
   }
 
@@ -207,14 +202,6 @@ public class PlatformService {
           "该租户有多名管理员，无法确定重置哪一个，请先在「编辑」里指定管理员");
     }
     return matched.get(0);
-  }
-
-  /** 把该租户的所有项目重推一遍，顺带把许可带到各模块。 */
-  private void resyncTenant(String tenantId) {
-    for (ProjectEntity p : projects.selectList(
-        Wrappers.<ProjectEntity>lambdaQuery().eq(ProjectEntity::getTenantId, tenantId))) {
-      moduleSync.syncProject(p);
-    }
   }
 
   public List<ApiModels.OrgUserDto> listAccounts() {

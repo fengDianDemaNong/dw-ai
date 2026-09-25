@@ -113,7 +113,7 @@
           <div v-if="!editForm.memberships.length" class="hint">未派进项目</div>
           <div v-for="(m, i) in editForm.memberships" :key="m.projectId" class="mem-row">
             <span class="mem-name">{{ projectName(m.projectId) }}</span>
-            <span class="mem-product">仓建设</span>
+            <span class="mem-product">数仓建模</span>
             <a-select
               v-model:value="m.warehouse"
               :options="projectRoleOpts"

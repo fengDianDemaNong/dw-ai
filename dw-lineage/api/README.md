@@ -31,9 +31,9 @@ SQL 文本
 
 | 地址 | 说明 |
 |---|---|
-| http://localhost:8080 | 后端（安装包形态下同时托管前端） |
-| http://localhost:8080/swagger-ui.html | 接口文档 |
-| http://localhost:8080/actuator/health | 健康检查 |
+| http://localhost:18082 | 后端（安装包形态下同时托管前端） |
+| http://localhost:18082/swagger-ui.html | 接口文档 |
+| http://localhost:18082/actuator/health | 健康检查 |
 
 命令行等价于：
 
@@ -283,7 +283,7 @@ src/main/java/org/qq/
 
 ## 接口文档
 
-启动后访问 <http://localhost:8080/swagger-ui.html>，文档由代码自动生成。
+启动后访问 <http://localhost:18082/swagger-ui.html>，文档由代码自动生成。
 
 ## 已知限制（上游缺口，非本项目可控）
 

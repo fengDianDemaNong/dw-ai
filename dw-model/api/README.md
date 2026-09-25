@@ -9,11 +9,11 @@ Java 21 · Spring Boot 3.3 · MyBatis-Plus · Flyway。构件 `dw-model`（应�
 ## 启动
 
 ```bash
-# 仓库根 · 默认 multi
+# 仓库根 · 默认 standard（不设 DW_AI_MODE 就是这个）
 npm run dev:api:model
 
-# 普通 / 独立
-DW_AI_MODE=standard npm run dev:api:model
+# 多租户 / 独立
+DW_AI_MODE=multi npm run dev:api:model
 DW_AI_MODE=standalone npm run dev:api:model
 
 # 或
@@ -34,7 +34,7 @@ cd dw-model/api && mvn spring-boot:run
 | `PUBLIC_BASE_URL` | 对外前端 | `http://127.0.0.1:5172` |
 | `JWT_SECRET` | 验组织令牌；须与 org API 一致 | 开发默认值 |
 | `RULES_BASE` | 规则服务 | `http://127.0.0.1:7080` |
-| `DW_AI_MODE` | `multi` / `standard` / `standalone` | `multi` |
+| `DW_AI_MODE` | `multi` / `standard` / `standalone` | `standard` |
 | `SR_ENABLED` | 是否把预览 SQL 打到 StarRocks | `false` |
 
 组织创建项目时会打本服务：`PUT /internal/v1/projects/{project_code}`。  

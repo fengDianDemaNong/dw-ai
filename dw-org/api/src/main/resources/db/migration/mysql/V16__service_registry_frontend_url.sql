@@ -1,0 +1,14 @@
+-- 服务登记从「探活表」退化成「纯配置表」：存产品的**前端页面地址**，不再是后端 API 地址。
+--
+-- 背景：改前这一列存后端地址，由模块心跳每 30s 覆盖写 —— 人工登记的值 30 秒内就被抹掉
+-- （事故记录见 docs/tech/service-registry-address-overwrite.md）。门户集成把项目同步
+-- 从 push 改成 pull 之后，组织不再需要知道模块的后端地址，心跳随之删除，
+-- 人工登记的值这才留得住。
+--
+-- base_url / version / seen_at 三列**保留不删**，本次迁移无损、可回滚：
+-- 它们此后没有写入源，组织的 API 与前端都不再读（见 PlatformController.services）。
+-- 确认稳定后再单独出一次迁移清理。
+--
+-- 不要写 IF NOT EXISTS —— MySQL 8 不认这个扩展语法（H2 认，测试查不出来），
+-- 详见 V8__grant_project_roles.sql 顶部注释。
+ALTER TABLE service_registry ADD COLUMN frontend_url VARCHAR(512) NOT NULL DEFAULT '';

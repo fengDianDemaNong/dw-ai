@@ -11,7 +11,7 @@
       show-icon
       class="cap-alert"
       message="本组织未开通此项"
-      description="未开通建模 AI。请联系平台在仓建设下勾选「建模 AI」。"
+      description="未开通建模 AI。请联系平台在数仓建模下勾选「建模 AI」。"
     />
     <p v-else class="ctx">已带本项目规范：{{ modelContext }}</p>
 

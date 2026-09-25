@@ -3,7 +3,6 @@ package com.dwai.platform.meta;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.dwai.platform.DwaiProperties;
 import com.dwai.platform.auth.AuthService;
-import com.dwai.platform.internal.ModuleSyncService;
 import com.dwai.platform.auth.TenantContext;
 import com.dwai.platform.meta.dto.ApiModels;
 import com.dwai.platform.meta.entity.ProjectEntity;
@@ -24,7 +23,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class ProjectService {
@@ -36,7 +37,8 @@ public class ProjectService {
   private final AccessService access;
   private final DwaiProperties props;
   private final AuthService auth;
-  private final ModuleSyncService moduleSync;
+  /** 派角色时要校验角色码存在（V20），见 {@link #putMember}。 */
+  private final ProductRoleService productRoles;
 
   public ProjectService(
       TenantMapper tenants,
@@ -47,7 +49,7 @@ public class ProjectService {
       AccessService access,
       DwaiProperties props,
       AuthService auth,
-      ModuleSyncService moduleSync) {
+      ProductRoleService productRoles) {
     this.tenants = tenants;
     this.licenses = licenses;
     this.users = users;
@@ -56,7 +58,7 @@ public class ProjectService {
     this.access = access;
     this.props = props;
     this.auth = auth;
-    this.moduleSync = moduleSync;
+    this.productRoles = productRoles;
   }
 
   public ApiModels.Me currentMe() {
@@ -180,6 +182,58 @@ public class ProjectService {
     return toProject(access.requireProject(id));
   }
 
+  /**
+   * 按「租户编码 + 项目编码」查一个项目，供模块侧**主动拉取**用（{@code /internal/v1/projects/by-code/...}）。
+   *
+   * <p><b>为什么不复用 {@link #getProject(String)}</b>：那个走 {@code access.requireProject(id)}，
+   * 而 {@code requireProject} 的租户归属校验是 {@code if (tid != null && ...)} 的形状 ——
+   * 靠 {@code TenantContext} 提供 tid。{@code /internal/v1/**} 上没有 JWT，tid 恒为 null，
+   * 那道校验会**整块跳过**，于是「A 租户的编码」能读到 B 租户的同名项目。这里改成
+   * <b>显式 tenantCode 入参</b>，且查的是 {@code UNIQUE (tenant_id, code)} ——
+   * 注意 {@code code} 单独并不唯一，所以租户是查询的一部分，不是过滤条件。
+   *
+   * <p>同样刻意**不用** {@link #resolveTenantId(String)}：它在 tenantCode 解析不到时会回落
+   * {@code TenantContext.tenantId()}。在这里那就等于「没传租户也能读到某个租户的数据」。
+   *
+   * @return 项目 + 该租户的许可（{@code modules}/{@code aiCaps} 在「组织没有这行许可」时
+   *         是 {@code null}，序列化后会<b>缺席</b> —— 组织全局配了
+   *         {@code default-property-inclusion: non_null}；收方 {@code Map.get} 读到的
+   *         仍是 null，语义是「别动本地」）。项目不存在时返回 {@code null}
+   * @throws ResponseStatusException 400：没带 tenantCode（缺了它就没法确定查哪个租户）
+   */
+  public Map<String, Object> projectByCode(String tenantCode, String projectCode) {
+    if (tenantCode == null || tenantCode.isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "需要 tenantCode");
+    }
+    if (projectCode == null || projectCode.isBlank()) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "需要项目编码");
+    }
+    TenantEntity t = tenants.selectByCode(tenantCode.trim());
+    if (t == null) return null;
+    ProjectEntity p = projects.selectOne(Wrappers.<ProjectEntity>lambdaQuery()
+        .eq(ProjectEntity::getTenantId, t.getId())
+        .eq(ProjectEntity::getCode, projectCode.trim()));
+    if (p == null) return null;
+    // 用 LinkedHashMap 而不是 Map.of：查不到许可行时要发 null，Map.of 不接受 null 值。
+    Map<String, Object> out = new LinkedHashMap<>();
+    out.put("id", p.getId());
+    out.put("code", p.getCode());
+    out.put("name", p.getName());
+    out.put("tenantCode", t.getCode());
+    out.put("tenantName", t.getName() == null ? "" : t.getName());
+    out.put("modules", licenseOf(t.getId(), true));
+    out.put("aiCaps", licenseOf(t.getId(), false));
+    return out;
+  }
+
+  /** @return 该租户的许可项；本地没有这行许可时返回 {@code null}（收方跳过校准） */
+  private List<String> licenseOf(String tenantId, boolean modules) {
+    if (tenantId == null || tenantId.isBlank()) return null;
+    TenantLicenseEntity lic = licenses.selectById(tenantId);
+    if (lic == null) return null;
+    return Jsons.strings(modules ? lic.getModules() : lic.getAiCaps());
+  }
+
   @Transactional
   public ApiModels.ProjectDto upsertInternal(String projectCode, String name, String tenantCode, String preferredId) {
     if (projectCode == null || projectCode.isBlank()) {
@@ -276,7 +330,9 @@ public class ProjectService {
     p.setEngines(Jsons.toJson(AiCaps.normalizeEngines(req.engines())));
     projects.insert(p);
     grantProjectAdmin(p.getId(), tid, adminId);
-    moduleSync.syncProject(p);
+    // 不再向各模块推送这个新项目：模块侧的 TenantFilter / TenantInterceptor 会在
+    // 用户第一次访问时来 GET /internal/v1/projects/by-code/{code} 拉走（见
+    // ProjectService.projectByCode）。这里少一次网络调用，也少一个「模块没起来时怎么办」。
     return toProject(p);
   }
 
@@ -322,7 +378,9 @@ public class ProjectService {
   public void deleteProject(String projectId) {
     access.requireTenantAdmin();
     ProjectEntity p = access.requireProject(projectId);
-    moduleSync.removeProject(p);
+    // 这里<b>没有</b>对应的「通知模块删掉镜像」：pull 改造之后组织不再知道模块的地址。
+    // 代价是模块本地会留一行孤儿镜像，点进去报 403「项目编码未同步」而不是 404 ——
+    // 不越权，只是文案错，已在 KNOWN_ISSUES 记录（模块侧的自愈留待下一版）。
     projects.deleteById(p.getId());
   }
 
@@ -377,8 +435,16 @@ public class ProjectService {
     String product = req.product() == null || req.product().isBlank()
         ? "warehouse" : req.product().trim();
     String role = req.role() == null ? "viewer" : req.role();
-    if (!List.of("admin", "modeler", "viewer").contains(role)) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "非法角色");
+    // 角色码问产品角色表（V20），不再写死 admin/modeler/viewer 三值 ——
+    // 写死那三值意味着产品专属的角色码（管理员在平台上新建的）根本派不下去。
+    //
+    // 这比改动前**严**：以前给「数据质量」这类还没定义角色的产品派 modeler 是能存进去的，
+    // 但那种行判权时谁都不认（Perms 里没有这个产品）—— 存得进去、永远无效，
+    // 正是「假开关」。现在拒掉，并告诉调用方去哪里建角色。
+    if (!productRoles.exists(product, role)) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+          "产品「" + product + "」下没有角色「" + role + "」。可用角色：" + productRoles.codesOf(product)
+              + "（在平台后台的「产品角色」里新增）");
     }
     access.requireTenantUser(req.userId());
     upsertMember(projectId, req.userId(), product, role);

@@ -13,7 +13,7 @@ cd ../.. && npm install                     # 首次，在仓库根
 npm run dev -w sql-tools                    # http://localhost:5173
 ```
 
-开发模式下 `/api` 由 vite 代理到后端（默认 `http://localhost:8080`），因此需要先启动后端。
+开发模式下 `/api` 由 vite 代理到后端（默认 `http://127.0.0.1:18082`），因此需要先启动后端。
 
 以下命令都在**仓库根**执行（`-w sql-tools` 即本目录，包名不是目录名）：
 
@@ -29,11 +29,24 @@ npm run lint -w sql-tools
 
 | 变量 | 作用 | 默认 |
 |---|---|---|
-| `VITE_DEV_PROXY_TARGET` | 开发时 vite 代理目标 | `http://localhost:8080` |
-| `VITE_API_BASE_URL` | 生产环境后端地址；留空表示走相对路径由 nginx 反代 | 空 |
+| `VITE_DEV_PROXY_TARGET` | 开发时 vite 代理目标；`VITE_API_BASE_URL` 填绝对地址时以后者为准 | `http://127.0.0.1:18082` |
+| `VITE_API_BASE_URL` | **我要调的后端**；留空表示走相对路径由 nginx 反代 | 空 |
+| `VITE_BASE_URL` | **我自己的对外地址** | 空 |
 | `VITE_API_TIMEOUT` | 请求超时（毫秒） | 60000 |
 
 生产部署推荐让 nginx 把 `/api` 反代到后端（见 `nginx.conf`），前端只用相对路径。
+
+**打包态可以不重新构建就改后端地址**：容器启动时 `docker-entrypoint.d/25-app-config.sh`
+把 `VITE_API_BASE_URL` / `VITE_BASE_URL` 渲染成 `/usr/share/nginx/html/config.json`，
+前端挂载前读它。优先级 `config.json 非空字段 > 构建期 VITE_* > 内置默认`，
+见 `src/config/appConfig.ts`。
+
+「回门户登录」的地址不走环境变量，而是运行期三级回落：`#boot=` 自报的 `hostOrigin` →
+后端 `/api/runtime` 答的 `orgUiUrl` → 内置默认 `127.0.0.1:5171`。
+
+注意那一项是 `org-ui-url`（组织的**前端**站点根，配 `ORG_UI_URL`），不是 `org-base-url`——
+后者是组织后端接口基址，拿它拼 `/org/login` 会跳到接口服务上的 404。
+
 
 ## 技术栈
 

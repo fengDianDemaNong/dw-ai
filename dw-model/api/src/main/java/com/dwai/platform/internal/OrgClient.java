@@ -13,7 +13,6 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Duration;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -39,28 +38,6 @@ public class OrgClient {
 
   public OrgClient(DwaiProperties props) {
     this.props = props;
-  }
-
-  public void heartbeat() {
-    String org = blankToNull(props.getOrgBaseUrl());
-    String self = blankToNull(props.serviceBaseUrl());
-    if (org == null || self == null || !props.isMulti()) return;
-    try {
-      Map<String, String> body = new LinkedHashMap<>();
-      body.put("product", "warehouse");
-      body.put("version", "0.2.0");
-      body.put("baseUrl", self);
-      client(org).post()
-          .uri("/internal/v1/registry/heartbeat")
-          .contentType(MediaType.APPLICATION_JSON)
-          .headers(h -> token(h))
-          .body(body)
-          .retrieve()
-          .toBodilessEntity();
-      log.info("已向组织平台登记 {}", self);
-    } catch (Exception e) {
-      log.warn("向组织平台登记失败: {}", e.getMessage());
-    }
   }
 
   @SuppressWarnings("unchecked")

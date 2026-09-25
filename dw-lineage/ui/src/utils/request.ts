@@ -3,19 +3,27 @@ import type { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { currentAccessToken, currentAuthHeaders, currentTenantHeaders } from '../stores/tenant';
 import { hasSession, refreshAccess, tokenExpiringSoon } from '../stores/auth';
 import { requestEmbedToken } from '../config/embed';
-import { API_BASE_URL } from '../config/api';
+import { onApiBaseChange } from '../config/api';
 import { LOGIN_PATH, requiresLocalLogin } from '../config/pages';
 import { isEmbed, isMulti, orgOrigin } from '../config/runtime';
-
-/** 后端地址，见 config/api 的说明。 */
-const baseURL = API_BASE_URL;
 
 /** SQL 血缘解析属于计算密集型请求，大脚本耗时可达数十秒。 */
 const TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT) || 60000;
 
 const instance = axios.create({
-  baseURL,
   timeout: TIMEOUT_MS,
+});
+
+/**
+ * 后端地址，见 config/api 的说明。
+ *
+ * <p>不在这里用 `const baseURL = API_BASE_URL` —— 那是**模块加载时快照**，
+ * 而运行时配置要到挂载前才注入，快照下来的旧值改不动（这正是原先的坑）。
+ * 订阅一次，注入后即时同步进来；onApiBaseChange 注册时会先回调一次当前值，
+ * 所以订阅前的构建期配置也不会丢。
+ */
+onApiBaseChange((base) => {
+  instance.defaults.baseURL = base;
 });
 
 type RetriableConfig = InternalAxiosRequestConfig & { __tokenRetried?: boolean };

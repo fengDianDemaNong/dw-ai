@@ -57,7 +57,12 @@ database:
   url: ${DB_URL:}
 
 server:
-  port: ${SERVER_PORT:8080}
+  # 端口只在这一个文件里定义，不按 profile 覆盖 —— 与 dw-org（18080）、dw-model（18081）
+  # 同形态。此前 multi profile 单独覆盖成 18082，于是「不带 profile 起在 8080」这件事
+  # 会在开发、打包、容器三条路径上各表现一次，排查时很难归因。
+  #
+  # 容器里也用同一个端口（compose 显式给 SERVER_PORT），内外一致。
+  port: ${SERVER_PORT:18082}
 
 # 跨域白名单。生产环境前后端应通过 nginx 反向代理同源访问，无需跨域；
 # 此处默认只放开本地开发端口。
@@ -74,6 +79,10 @@ lineage:
   run-mode: ${LINEAGE_RUN_MODE:}
   deploy-mode: ${DW_AI_MODE:}
   org-base-url: ${ORG_BASE_URL:}
+  # 组织平台的**前端**地址，给浏览器跳转用（`/org/login` 等页面路径）。
+  # 基础配置留空：单跑 standard / standalone 时本模块没有门户可回（前端另有内置兜底）。
+  # multi 下由 application-multi.yml 给默认值 —— 与 org-base-url 同一形态。
+  org-ui-url: ${ORG_UI_URL:}
   service-base-url: ${SERVICE_BASE_URL:}
   public-base-url: ${PUBLIC_BASE_URL:}
   # 服务间令牌，保护 /internal/v1/**（组织 fan-out 到数据地图的项目镜像入口）。

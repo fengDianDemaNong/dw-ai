@@ -3,14 +3,12 @@
 declare const __APP_VERSION__: string;
 
 interface ImportMetaEnv {
-  readonly VITE_API_BASE?: string;
+  readonly VITE_API_BASE_URL?: string;
+  readonly VITE_BASE_URL?: string;
   readonly VITE_RULES_BASE?: string;
   readonly VITE_DEPLOY_MODE?: 'standalone' | 'standard' | 'multi';
   readonly VITE_RUN_MODE?: 'standalone' | 'standard' | 'multi';
   readonly VITE_PRODUCT?: 'org' | 'warehouse' | 'suite';
-  readonly VITE_ORG_ORIGIN?: string;
-  readonly VITE_WAREHOUSE_ORIGIN?: string;
-  readonly VITE_LINEAGE_ORIGIN?: string;
   readonly VITE_CASDOOR_ENDPOINT?: string;
   readonly VITE_CASDOOR_CLIENT_ID?: string;
   readonly VITE_CASDOOR_ORG?: string;

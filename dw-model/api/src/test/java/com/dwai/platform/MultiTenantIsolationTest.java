@@ -44,8 +44,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
         "dwai.run-mode=multi",
         "dwai.security.mode=dev",
         "dwai.security.module-token=isolation-module-token",
-        // 心跳目标指向不可达端口：本用例不验证跨服务推送
-        "dwai.service-base-url=http://127.0.0.1:1",
         "dwai.public-base-url=http://127.0.0.1:1"
 })
 @AutoConfigureMockMvc
@@ -62,7 +60,6 @@ class MultiTenantIsolationTest {
             HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
             server.createContext("/internal/v1/authz/check", ex ->
                     respond(ex, 200, "{\"allow\":true,\"role\":\"admin\"}"));
-            server.createContext("/internal/v1/registry/heartbeat", ex -> respond(ex, 200, "{}"));
             server.setExecutor(null);
             server.start();
             Runtime.getRuntime().addShutdownHook(new Thread(() -> server.stop(0)));

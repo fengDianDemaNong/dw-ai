@@ -20,7 +20,8 @@ declare module 'vue-router' {
     member?: boolean;
     perm?: Perm;
     module?: ProductModule;
-    shell?: 'admin' | 'sys';
+    /** 哪套侧栏：平台后台 / 工作台壳 / 项目壳（后两者共用 `SystemLayout`）。 */
+    shell?: 'admin' | 'sys' | 'project';
     owner?: 'org';
   }
 }
@@ -58,6 +59,8 @@ const routes: RouteRecordRaw[] = [
       { path: '', redirect: ADMIN_HOME },
       { path: 'tenants', name: 'admin-tenants', component: () => import('../pages/admin/tenants.vue'), meta: { title: '租户' } },
       { path: 'services', name: 'admin-services', component: () => import('../pages/admin/services.vue'), meta: { title: '服务注册' } },
+      { path: 'nav-items', name: 'admin-nav-items', component: () => import('../pages/admin/nav-items.vue'), meta: { title: '菜单管理' } },
+      { path: 'product-roles', name: 'admin-product-roles', component: () => import('../pages/admin/product-roles.vue'), meta: { title: '产品角色' } },
       { path: 'users', name: 'admin-users', component: () => import('../pages/admin/users.vue'), meta: { title: '平台用户' } },
       { path: 'settings', name: 'admin-settings', component: () => import('../pages/sys/settings.vue'), meta: { title: '外观与布局' } },
     ],
@@ -73,6 +76,50 @@ const routes: RouteRecordRaw[] = [
       { path: 'roles', name: 'sys-roles', component: () => import('../pages/sys/roles.vue'), meta: { title: '角色管理' } },
       { path: 'knowledge', name: 'sys-knowledge', component: () => import('../pages/sys/knowledge.vue'), meta: { title: '知识库' } },
       { path: 'settings', name: 'sys-settings', component: () => import('../pages/sys/settings.vue'), meta: { title: '设置' } },
+    ],
+  },
+  /**
+   * 门户嵌入页：`/org/embed/{产品}{子应用路径}`。
+   *
+   * <p>刻意<b>顶层</b>定义、且<b>不</b>带 `meta.tenant`。带上的话会撞上守卫里的
+   * `to.meta.tenant && !isRealTenantAdmin` —— 那条只放行 `sys-projects`，
+   * 会把<b>普通租户成员</b>静默弹回首页。而「让平台成员用上被嵌入的服务」正是
+   * 门户集成的目的，弹回等于整个功能对多数人不可见。`meta.member` 只要求
+   * 选定了租户，恰好是这里需要的最小门槛。
+   */
+  {
+    path: '/org/embed/:product/:pathMatch(.*)*',
+    component: () => import('../layouts/SystemLayout.vue'),
+    meta: { title: '产品页面', member: true, shell: 'sys', owner: 'org' },
+    children: [{ path: '', name: 'portal-embed', component: () => import('../pages/embed.vue') }],
+  },
+  /**
+   * 项目壳：`/org/project/{项目code}/*` —— 进项目**之后**那一级。
+   *
+   * <p>与上面的门户嵌入页同理，刻意<b>不</b>带 `meta.tenant`：那一条只放行 `sys-projects`，
+   * 会把普通成员（项目壳的主要使用者）静默弹回首页。`meta.member` 只要求选定了租户。
+   *
+   * <p>两条路由<b>平铺</b>而不做嵌套 `pathMatch`：嵌套通配下的子路由匹配顺序在
+   * vue-router 里很容易写出「刷新能进、点侧栏进不去」这类只在一条路径上出问题的 bug。
+   */
+  {
+    path: '/org/project/:code',
+    component: () => import('../layouts/SystemLayout.vue'),
+    meta: { member: true, shell: 'project', owner: 'org' },
+    children: [
+      {
+        path: '',
+        name: 'project-home',
+        // 用组件而不是 redirect：没有配菜单时要**留在原地说明原因**，
+        // 弹回工作台会让刚点「进入项目」的人以为自己点错了（见该组件的说明）。
+        component: () => import('../pages/project-home.vue'),
+      },
+      {
+        path: 'embed/:product/:pathMatch(.*)*',
+        name: 'project-embed',
+        component: () => import('../pages/embed.vue'),
+        meta: { title: '产品页面' },
+      },
     ],
   },
   { path: '/login', redirect: LOGIN_PATH },
@@ -94,6 +141,10 @@ const routes: RouteRecordRaw[] = [
   { path: '/sys/projects', redirect: SYS_HOME },
   { path: '/org/users', redirect: ORG_PAGES.users },
   { path: '/projects', redirect: SYS_HOME },
+  // 下面这几个是**跨进程**跳转（仓建设 / 数据地图各是独立前端）。地址不从环境变量来，
+  // 而是 `GET /api/services` 拿到的服务目录，所以必须是同步 redirect ——
+  // vue-router 的 redirect 不接受 async 函数（返回的 Promise 会被当成路由位置对象）。
+  // 「目录已就绪」由 bootstrapRemote 在挂载前 await servicesReady() 保证。
   {
     path: '/app',
     redirect: () => {

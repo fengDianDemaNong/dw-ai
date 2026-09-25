@@ -12,79 +12,70 @@ export function isWarehouseUi(): boolean {
   return getUiProduct() === 'warehouse';
 }
 
-export function orgOrigin(): string {
-  return (import.meta.env.VITE_ORG_ORIGIN as string | undefined)?.replace(/\/$/, '') || 'http://127.0.0.1:5171';
-}
+/**
+ * 后端 `GET /api/auth/config` 告知的组织平台**前端**地址，见 {@link orgOrigin} 的第 2 级。
+ *
+ * <p>存的是 `orgUiUrl` 而不是 `orgBaseUrl`：后者是组织后端的 API 基址，
+ * 拿它拼 `/org/login` 会跳到接口服务上的 404（开发态 UI 5171 / API 18080，本就不是一个）。
+ */
+export const ORG_UI_KEY = 'dw-ai.orgUiUrl';
+const HOST_ORIGIN_KEY = 'dw-ai.hostOrigin';
+const EMBED_KEY = 'dw-ai.embed';
 
-export function warehouseOrigin(): string {
-  return (import.meta.env.VITE_WAREHOUSE_ORIGIN as string | undefined)?.replace(/\/$/, '')
-    || 'http://127.0.0.1:5172';
+/** 上游壳在 `#boot=` 里自报的 origin（见 {@link consumeBootHash}）。 */
+export function storedHostOrigin(): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return sessionStorage.getItem(HOST_ORIGIN_KEY) || undefined;
 }
-
-export function lineageOrigin(): string {
-  return (import.meta.env.VITE_LINEAGE_ORIGIN as string | undefined)?.replace(/\/$/, '')
-    || 'http://127.0.0.1:5173';
-}
-
-export type EmbedBoot = {
-  token?: string;
-  refreshToken?: string;
-  tokenExp?: string;
-  userId?: string;
-  tenant?: string;
-  project?: string;
-  tenantCode?: string;
-  projectCode?: string;
-  tenantName?: string;
-  projectName?: string;
-  /** 「我在本项目各产品下的角色」，形状是 `{ warehouse: 'admin', metadata: 'viewer' }`。 */
-  roles?: unknown;
-};
 
 /**
- * 读「我在这项目下各产品的角色」。由组织工作台在 `#boot=` 里带进来后存下
- * （见 {@link consumeBootHash}），再原样转发给下游。
+ * 本页是不是被壳 iframe 嵌着。
  *
- * <p>下游只拿它把菜单画对 —— 真正的门禁在各服务后端，它们各自调组织平台的
- * `authz/check` 兜底。所以这一份即便被改，后果也只是看到一个点不进去的入口。
+ * <p>两个来源：URL 上的 `?embed=1`（壳拼地址时带的），以及 {@link consumeBootHash}
+ * 存下来的那份。存下来是必须的 —— 子应用内部一跳转 query 就没了，而这个判断
+ * 要在整个会话里都答得出来（`config/embed.ts` 靠它决定发不发 `EMBED_READY`，
+ * `api/client.ts` 靠它决定 401 之后是问宿主还是回登录页）。
  */
-function bootRoles(): unknown {
-  try {
-    return JSON.parse(sessionStorage.getItem('dw-ai.roles') ?? '{}');
-  } catch {
-    return {};
-  }
+export function isEmbed(): boolean {
+  if (typeof window === 'undefined') return false;
+  return (
+    sessionStorage.getItem(EMBED_KEY) === '1' ||
+    new URLSearchParams(window.location.search).get('embed') === '1'
+  );
 }
 
-function sessionBoot(): EmbedBoot {
-  return {
-    token: sessionStorage.getItem('dw-ai.token') ?? '',
-    refreshToken: sessionStorage.getItem('dw-ai.refreshToken') ?? '',
-    tokenExp: sessionStorage.getItem('dw-ai.tokenExp') ?? '',
-    userId: sessionStorage.getItem('dw-ai.userId') ?? '',
-    tenant: sessionStorage.getItem('dw-ai.tenantId') ?? '',
-    project: sessionStorage.getItem('dw-ai.projectId') ?? '',
-    tenantCode: sessionStorage.getItem('dw-ai.tenantCode') ?? '',
-    projectCode: sessionStorage.getItem('dw-ai.projectCode') ?? '',
-    roles: bootRoles(),
-  };
+/**
+ * 组织平台地址。三级回落，从最可靠到最兜底：
+ *
+ * <ol>
+ *   <li><b>壳在 `#boot=` 里自报的 origin</b>（{@link storedHostOrigin}）—— 整页跳转与
+ *       iframe 两条路都带，跨服务器部署时唯一正确的来源；</li>
+ *   <li><b>后端告知的 `orgUiUrl`</b>（`GET /api/auth/config`，即配置项 `dwai.org-ui-url`）——
+ *       覆盖「地址栏直接打开本页、没有 boot」的情形；</li>
+ *   <li><b>内置默认</b> `127.0.0.1:5171` —— 只在单机开发态是对的。</li>
+ * </ol>
+ *
+ * <p>以前这里只读构建期的 `VITE_ORG_ORIGIN`：每加一个部署就要重新构建前端，
+ * 漏配的表现是<b>静默</b>指向 `127.0.0.1:5171` —— 跨服务器部署时那正是用户自己的机器。
+ */
+export function orgOrigin(): string {
+  const fromBoot = storedHostOrigin();
+  if (fromBoot) return fromBoot.replace(/\/$/, '');
+  const fromApi = typeof window === 'undefined' ? null : sessionStorage.getItem(ORG_UI_KEY);
+  if (fromApi) return fromApi.replace(/\/$/, '');
+  return 'http://127.0.0.1:5171';
 }
 
-function bootPayload(): string {
-  return encodeURIComponent(JSON.stringify(sessionBoot()));
-}
-
-export function lineageEmbedUrl(path: string, extra?: Record<string, string>, boot?: EmbedBoot): string {
-  const p = path.startsWith('/') ? path : `/${path}`;
-  const q = new URLSearchParams({ embed: '1', ...extra });
-  const session = { ...sessionBoot(), ...boot, embed: true };
-  return `${lineageOrigin()}${p}?${q}#boot=${encodeURIComponent(JSON.stringify(session))}`;
-}
-
-export function openWarehouseApp(path = '/model'): void {
-  const suffix = path.startsWith('/') ? path : `/${path}`;
-  window.location.href = `${warehouseOrigin()}${suffix}#boot=${bootPayload()}`;
-}
+/**
+ * 这里原先还有一组「把本进程当壳、往下游产品转发上下文」的函数
+ * （`lineageOrigin` / `originOf` / `EmbedBoot` / `sessionBoot` / `bootPayload` /
+ * `lineageEmbedUrl` / `bootServices`），随数据地图那一组菜单一并删除。
+ *
+ * <p><b>本进程只当子应用，不当壳。</b>要嵌谁、嵌到哪一层，由组织平台的项目壳决定
+ * （它从各服务拉菜单、按 `scope` 摆位置），model 只负责把自己的页面画好 ——
+ * 转发 `#boot=` 这套只在「我们嵌别人」时才需要。收的那一半（{@link consumeBootHash}）
+ * 留着，我们仍然被壳嵌着。
+ */
 
 export function openOrgLogin(): void {
   window.location.href = `${orgOrigin()}/org/login`;
@@ -105,12 +96,12 @@ export function openOrgWorkbench(): void {
   window.location.href = `${orgOrigin()}/org/workbench/projects`;
 }
 
-export function openLineageApp(path = '/lineage'): void {
-  const suffix = path.startsWith('/') ? path : `/${path}`;
-  window.location.href = `${lineageOrigin()}${suffix}#boot=${bootPayload()}`;
-}
-
 export function consumeBootHash(): void {
+  // 嵌进来的标记先记下：URL 上的 `?embed=1` 在子应用内部跳转后就没了，
+  // 而 `isEmbed()` 整个会话都要答得出来（见该函数的说明）。
+  if (new URLSearchParams(window.location.search).get('embed') === '1') {
+    sessionStorage.setItem(EMBED_KEY, '1');
+  }
   const raw = window.location.hash.startsWith('#boot=') ? window.location.hash.slice(6) : '';
   if (!raw) return;
   try {
@@ -124,9 +115,9 @@ export function consumeBootHash(): void {
       projectCode?: string;
       userId?: string;
       roles?: unknown;
+      hostOrigin?: string;
     };
-    // 壳给的「我在本项目各产品的角色」。存下来供侧栏按角色收口，并在跳去数据地图时
-    // 原样转发（见 sessionBoot）。
+    // 壳给的「我在本项目各产品的角色」。存下来供侧栏按角色收口。
     if (boot.roles) sessionStorage.setItem('dw-ai.roles', JSON.stringify(boot.roles));
     if (boot.token) sessionStorage.setItem('dw-ai.token', boot.token);
     if (boot.refreshToken) sessionStorage.setItem('dw-ai.refreshToken', boot.refreshToken);
@@ -136,6 +127,7 @@ export function consumeBootHash(): void {
     if (boot.tenantCode) sessionStorage.setItem('dw-ai.tenantCode', boot.tenantCode);
     if (boot.projectCode) sessionStorage.setItem('dw-ai.projectCode', boot.projectCode);
     if (boot.userId) sessionStorage.setItem('dw-ai.userId', boot.userId);
+    if (boot.hostOrigin) sessionStorage.setItem(HOST_ORIGIN_KEY, boot.hostOrigin);
   } catch {
     /* 忽略损坏的启动参数 */
   }

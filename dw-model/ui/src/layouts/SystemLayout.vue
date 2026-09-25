@@ -1,6 +1,6 @@
 <template>
-  <div class="shell" :class="menuPos">
-    <AppNav :groups="groups" :home="home" :menu-pos="menuPos" />
+  <div class="shell" :class="[menuPos, { embed }]">
+    <AppNav v-if="!embed" :groups="groups" :home="home" :menu-pos="menuPos" />
     <div class="main">
       <router-view />
     </div>
@@ -13,8 +13,12 @@ import { useRoute } from 'vue-router';
 import AppNav from '../components/AppNav.vue';
 import { ADMIN_HOME, SYS_HOME } from '../config/paths';
 import { buildAdminNav, buildSysNav } from '../config/sysNav';
+import { isEmbed } from '../config/product';
 import { app } from '../stores/app';
 import { appearanceOf } from '../stores/prefs';
+
+/** 被壳嵌入时不画第二条导航栏 —— 与 ProjectLayout 同一套理由，见那边的说明。 */
+const embed = isEmbed();
 
 const route = useRoute();
 const adminShell = computed(() => route.matched.some((r) => r.meta.shell === 'admin'));
@@ -34,6 +38,11 @@ const menuPos = computed(() =>
 }
 
 .shell.top {
+  flex-direction: column;
+}
+
+/* 被壳嵌入：只剩 `.main` 一个子项，纵向排。 */
+.shell.embed {
   flex-direction: column;
 }
 

@@ -17,3 +17,12 @@ playwright/.cache/
 release/
 dw-org/release/
 dw-model/release/
+
+# 各服务前端构建时由 scripts/gen-menu.mjs 从 config/navData.ts 生成的菜单候选
+# （组织平台配菜单时按前端地址拉它）。产物，不入库 —— 各 dev/build 入口都会先跑生成。
+dw-lineage/ui/public/menu.json
+dw-model/ui/public/menu.json
+
+# AOCI agent host integration (machine-bound; do not commit)
+.mcp.json
+.mcp.json.backup.*

@@ -2,39 +2,47 @@
   <div class="page">
     <PageHeader
       title="服务注册"
-      subtitle="产品进程启动后向组织平台心跳登记。这里只看建模、元数据等产品地址，调度和数仓引擎是租户自己的计算资源。"
+      subtitle="登记各产品的「页面地址」，门户据此在平台壳子里嵌入它们的界面。这里只管界面上哪儿找；后端地址已不再需要——项目同步由各服务主动来取。"
     >
       <template #actions>
         <a-button @click="load">刷新</a-button>
-        <a-button type="primary" @click="open = true">手工登记</a-button>
+        <a-button type="primary" @click="open = true">登记服务</a-button>
       </template>
     </PageHeader>
 
     <a-table :data-source="rows" :columns="cols" row-key="product" :pagination="false" size="small" class="card card-flush">
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'product'">{{ productLabel(record.product) }}</template>
-        <template v-else-if="column.key === 'status'">
-          <a-tag :color="record.status === 'online' ? 'green' : 'orange'">
-            {{ record.status === 'online' ? '在线' : '已登记（心跳过期）' }}
-          </a-tag>
+        <template v-else-if="column.key === 'frontendUrl'">
+          <span v-if="record.frontendUrl">{{ record.frontendUrl }}</span>
+          <span v-else class="muted">未配置 —— 该产品的菜单点击后无处可去</span>
         </template>
         <template v-else-if="column.key === 'act'">
           <a-button size="small" danger @click="remove(record.product)">移除</a-button>
         </template>
       </template>
     </a-table>
-    <p v-if="!rows.length" class="muted">还没有产品登记。先启动仓建设（18081）和血缘（18082），它们会向本进程心跳。</p>
+    <p v-if="!rows.length" class="muted">
+      还没有产品登记。先在这里填上数仓建模（<code>http://127.0.0.1:5172</code>）或血缘（<code>http://127.0.0.1:5173</code>）的
+      <b>页面</b>地址，再去「菜单管理」把它们的页面配进侧栏。
+    </p>
 
     <a-modal v-model:open="open" title="登记服务" ok-text="登记" :confirm-loading="busy" @ok="submit">
       <a-form layout="vertical">
         <a-form-item label="产品" required>
           <a-select v-model:value="form.product" :options="productOpts" />
+          <p class="muted" style="margin: 4px 0 0">
+            必须与租户许可里的模块名一致，否则菜单会被按许可过滤掉。
+          </p>
         </a-form-item>
-        <a-form-item label="API 基址" required>
-          <a-input v-model:value="form.baseUrl" placeholder="http://127.0.0.1:18081" />
+        <a-form-item label="前端地址" required>
+          <a-input v-model:value="form.frontendUrl" placeholder="http://127.0.0.1:5173" />
+          <p class="muted" style="margin: 4px 0 0">
+            该产品<b>页面</b>的地址（开发态是 Vite 端口，生产是它的站点根），不是后端 API 地址。
+          </p>
         </a-form-item>
         <a-form-item label="版本">
-          <a-input v-model:value="form.version" placeholder="0.1.5" />
+          <a-input v-model:value="form.version" placeholder="选填，仅作登记留痕" />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -45,14 +53,13 @@
 import { onMounted, reactive, ref } from 'vue';
 import { message } from 'ant-design-vue';
 import { api } from '../../api/client';
+import { PRODUCT_OPTIONS, productLabel } from '../../config/products';
 import PageHeader from '../../components/PageHeader.vue';
 
 interface ServiceRow {
   product: string;
   version?: string;
-  baseUrl: string;
-  seenAt?: string;
-  status?: string;
+  frontendUrl: string;
 }
 
 const rows = ref<ServiceRow[]>([]);
@@ -60,29 +67,20 @@ const open = ref(false);
 const busy = ref(false);
 const form = reactive({
   product: 'warehouse',
-  baseUrl: 'http://127.0.0.1:18081',
-  version: '0.1.5',
+  frontendUrl: '',
+  // 版本不再是心跳自报值，改成选填的登记留痕 —— 默认值会让人以为它是必填
+  version: '',
 });
 
-const productOpts = [
-  { value: 'warehouse', label: '仓建设' },
-  { value: 'metadata', label: '元数据 / 血缘' },
-  { value: 'quality', label: '数据质量' },
-  { value: 'serve', label: '数据服务' },
-];
+// 产品码与中文名在 config/products.ts 里统一维护（菜单管理页用的是同一份）
+const productOpts = PRODUCT_OPTIONS;
 
 const cols = [
   { title: '产品', key: 'product', width: 140 },
-  { title: '地址', dataIndex: 'baseUrl' },
-  { title: '版本', dataIndex: 'version', width: 90 },
-  { title: '最近心跳', dataIndex: 'seenAt', width: 220 },
-  { title: '状态', key: 'status', width: 160 },
+  { title: '前端地址', key: 'frontendUrl' },
+  { title: '版本', dataIndex: 'version', width: 120 },
   { title: '', key: 'act', width: 90 },
 ];
-
-function productLabel(code: string) {
-  return productOpts.find((p) => p.value === code)?.label ?? code;
-}
 
 async function load() {
   try {
@@ -93,15 +91,15 @@ async function load() {
 }
 
 async function submit() {
-  if (!form.product.trim() || !form.baseUrl.trim()) {
-    message.warning('请填写产品和地址');
+  if (!form.product.trim() || !form.frontendUrl.trim()) {
+    message.warning('请填写产品和前端地址');
     return;
   }
   busy.value = true;
   try {
     await api.platform.registerService({
       product: form.product.trim(),
-      baseUrl: form.baseUrl.trim(),
+      frontendUrl: form.frontendUrl.trim(),
       version: form.version.trim(),
     });
     open.value = false;

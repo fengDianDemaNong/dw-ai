@@ -30,6 +30,8 @@ import org.springframework.web.server.ResponseStatusException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 @Service
 public class AccessService {
@@ -54,6 +56,8 @@ public class AccessService {
   private final TenantGrantMapper grants;
   private final TenantLicenseMapper licenses;
   private final DwaiProperties props;
+  /** 产品角色表（V20）。判权的第一来源，见 {@link #requirePerm}。 */
+  private final ProductRoleService productRoles;
 
   public AccessService(
       ProjectMapper projects,
@@ -64,7 +68,8 @@ public class AccessService {
       PlatformAccessMapper access,
       TenantGrantMapper grants,
       TenantLicenseMapper licenses,
-      DwaiProperties props) {
+      DwaiProperties props,
+      ProductRoleService productRoles) {
     this.projects = projects;
     this.members = members;
     this.users = users;
@@ -75,6 +80,39 @@ public class AccessService {
     this.licenses = licenses;
     this.props = props;
     this.product = props.productCode();
+    this.productRoles = productRoles;
+  }
+
+  /**
+   * 判权：<b>先查产品角色表，表里没有这个 (产品, 角色码) 才回落 {@link Perms} 的硬编码矩阵。</b>
+   *
+   * <p>这是规范 {@code 06-runtime-modes.md:115}「禁止再写死三套仓建设角色套所有模块」
+   * 的落地点：管理员在平台上新建的角色、改过的权限词，从下一次判权起就生效。
+   *
+   * <h2>为什么是「回落」而不是「替换」</h2>
+   *
+   * <ul>
+   *   <li><b>标准 / 独立模式</b>：{@code dw-model} 的本地判权直接调 {@code Perms}
+   *       （它拿不到组织侧的角色定义），两张表在那里不存在。替换掉 {@code Perms}
+   *       等于让那两种模式下所有角色判否。</li>
+   *   <li><b>历史数据</b>：迁进来之前建的 {@code project_members} 行写着
+   *       {@code admin/modeler/viewer}，而种子数据恰好把它们照原样灌进了表 ——
+   *       回落给了「种子漏了某个产品」一个仍然可用的兜底，不至于把所有人的权限清零。</li>
+   * </ul>
+   *
+   * <p>注意 {@code permsOf} 返回空 {@code Optional}（角色不在表里）与
+   * {@code Optional.of(空集)}（角色在表里但一项权限都没配）是<b>两个意思</b>：
+   * 前者回落，后者直接判否 —— 塌成一个会让刚建好、还没配权限的角色静默拿到硬编码矩阵的权限。
+   */
+  private void requirePerm(String product, String role, String perm) {
+    Optional<Set<String>> words = productRoles.permsOf(product, role);
+    if (words.isPresent()) {
+      if (!words.get().contains(perm)) {
+        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "当前角色无权执行此操作");
+      }
+      return;
+    }
+    Perms.require(product, role, perm);
   }
 
   public UserEntity requireUser() {
@@ -301,7 +339,7 @@ public class AccessService {
       String role = roleOf(
           u.getId(), tenant.getId(), project == null ? null : project.getId(),
           (String) out.get("product"), u);
-      Perms.require((String) out.get("product"), role, (String) out.get("action"));
+      requirePerm((String) out.get("product"), role, (String) out.get("action"));
       out.put("allow", true);
       out.put("role", role);
     } catch (ResponseStatusException e) {
@@ -309,6 +347,45 @@ public class AccessService {
       out.put("reason", e.getReason());
     }
     return out;
+  }
+
+  /**
+   * 当前登录用户在某个产品里的角色码；这个人跟这里没关系时返回空。
+   *
+   * <p><b>给展示链路用</b>（按权限词过滤侧栏，见 {@code NavItemService.menuFor}）。
+   * 与 {@link #checkAuthz} 的区别只有一处：算不出结论时返回空集合，而不是让调用方收 403。
+   * 侧栏是每个页面都要画的东西，让「他没加入这个项目」把整个壳打成 500 不划算 ——
+   * 与 {@code menuFor} 里「拿不到租户就返回空列表」是同一条取舍。
+   *
+   * <p>租户管理员短路成 {@code admin}（与 {@link #roleOf} 同一条规则）；这里额外把
+   * **平台管理员**也算进来：他们可能根本不是这个租户的成员（平台授权进来的），
+   * {@code roleOf} 会判「未加入该组织」—— 对展示链路那等于把整个侧栏清空。
+   */
+  public Optional<String> currentRole(String projectId, String product) {
+    if (props.isStandalone() || TenantContext.tenantAdmin()) return Optional.of("admin");
+    try {
+      UserEntity u = requireUser();
+      return Optional.of(roleOf(u.getId(), TenantContext.tenantId(), projectId, product, u));
+    } catch (ResponseStatusException e) {
+      return Optional.empty();
+    }
+  }
+
+  /**
+   * 这个角色在这个产品里认不认这个权限词 —— 就是 {@link #requirePerm} 的布尔版，
+   * 以产品角色表为准、表里没有该角色则回落硬编码矩阵，<b>口径与判权完全同一处</b>。
+   *
+   * <p>为什么不各写一份：侧栏「看得见」与接口「调得动」必须是同一条规则。分开写迟早漂成
+   * 「菜单看得见、点进去 403」，或者反过来「有权但入口被藏起来」—— 两种都只在真机上才发现。
+   */
+  public boolean roleHas(String product, String role, String perm) {
+    if (role == null || perm == null || perm.isBlank()) return false;
+    try {
+      requirePerm(product, role, perm);
+      return true;
+    } catch (ResponseStatusException e) {
+      return false;
+    }
   }
 
   public void requireMember(String projectId, String perm) {
@@ -328,12 +405,12 @@ public class AccessService {
     if (m == null) {
       String tid = TenantContext.tenantId();
       if (tid != null && grantCoversProject(user, tid, projectId)) {
-        Perms.require(product, grantProjectRole(user, tid, projectId), perm);
+        requirePerm(product, grantProjectRole(user, tid, projectId), perm);
         return;
       }
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "未加入该项目");
     }
-    Perms.require(product, m.getRole(), perm);
+    requirePerm(product, m.getRole(), perm);
   }
 
   public UserEntity requireTenantUser(String userId) {

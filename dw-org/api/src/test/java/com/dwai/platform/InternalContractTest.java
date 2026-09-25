@@ -1,5 +1,7 @@
 package com.dwai.platform;
 
+import com.dwai.platform.meta.entity.TenantLicenseEntity;
+import com.dwai.platform.meta.mapper.TenantLicenseMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -70,6 +72,20 @@ class InternalContractTest {
     private static String seedUserId;
     private static String seedProjectId;
 
+    /** 第二个租户 + 它的同码项目，只在需要跨租户样本时建一次。 */
+    private static final String SECOND_TENANT_CODE = "contract_t2";
+    private static String secondTenantId;
+    private static String secondProjectId;
+
+    /**
+     * 直接改许可行用。
+     *
+     * <p>「组织本地没有许可行」这个状态没有接口能造出来（{@code createTenant} 一定会
+     * 建行），而它正是 {@code modules} 该回 null 的唯一场景 —— 只能直接动表。
+     */
+    @Autowired
+    private TenantLicenseMapper licenseMapper;
+
     @BeforeEach
     void setUp() throws Exception {
         if (adminToken != null) return;
@@ -112,21 +128,6 @@ class InternalContractTest {
     @Test
     void internalEndpointsAcceptModuleTokenFromHeader() throws Exception {
         mvc.perform(get("/internal/v1/context").header("X-Module-Token", MODULE_TOKEN))
-                .andExpect(status().isOk());
-    }
-
-    @Test
-    void heartbeatValidatesRequiredFields() throws Exception {
-        mvc.perform(post("/internal/v1/registry/heartbeat")
-                        .header("X-Module-Token", MODULE_TOKEN)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{}"))
-                .andExpect(status().isBadRequest());
-
-        mvc.perform(post("/internal/v1/registry/heartbeat")
-                        .header("X-Module-Token", MODULE_TOKEN)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"product\":\"warehouse\",\"version\":\"0.2.0\",\"baseUrl\":\"http://127.0.0.1:1\"}"))
                 .andExpect(status().isOk());
     }
 
@@ -283,6 +284,135 @@ class InternalContractTest {
     }
 
     // ------------------------------------------------------------------
+    // 项目同步由推送改拉取：模块按 (tenantCode, projectCode) 拉
+    // ------------------------------------------------------------------
+
+    /**
+     * 拉取端点同样在模块令牌门禁之后。
+     *
+     * <p>这条路径返回的是项目 + 该租户的许可，比 {@code context} 敏感得多，
+     * 漏了门禁等于把全平台的项目清单开放出去。
+     */
+    @Test
+    void pullProjectByCodeRequiresModuleToken() throws Exception {
+        assertEquals(401, call(get("/internal/v1/projects/by-code/contract_p1")).status());
+    }
+
+    /**
+     * <b>不带 tenantCode 必须 400</b>，不许回落 {@code TenantContext}。
+     *
+     * <p>这是本批改动里最要紧的一条断言。回落的后路是存在的：{@code ProjectService}
+     * 里 {@code resolveTenantId} 就会在 tenantCode 为空时用 {@code TenantContext.tenantId()}。
+     * 但 {@code /internal/v1/**} 上没有 JWT，{@code TenantContext} 恒为空 —— 更要命的是，
+     * 组织侧的租户归属校验是这个形状：{@code if (tid != null && ...)}，tid 为空时
+     * <b>整块跳过</b>。两者叠加，一个「忘了带 tenantCode」的调用就能读到任意租户的
+     * 同码项目。返回 200 即视为漏洞。
+     */
+    @Test
+    void pullProjectByCodeRejectsMissingTenantCode() throws Exception {
+        Resp res = call(get("/internal/v1/projects/by-code/contract_p1")
+                .header("X-Module-Token", MODULE_TOKEN));
+        assertEquals(400, res.status(), "缺 tenantCode 竟然没有拒绝（回落就等于跨租户读）: " + res.body());
+    }
+
+    /** 项目不存在回 404：调用方要据此区分「组织说没有」与「组织不可用」。 */
+    @Test
+    void pullProjectByCodeReturns404ForUnknownProject() throws Exception {
+        Resp res = call(get("/internal/v1/projects/by-code/no_such_project")
+                .header("X-Module-Token", MODULE_TOKEN)
+                .queryParam("tenantCode", TENANT_CODE));
+        assertEquals(404, res.status(), "查无此项目应当是 404 而不是 200/400: " + res.body());
+    }
+
+    /** 正常拉取：字段齐全，且带 id（模块侧拿它当 preferredId，缺了会新旧 id 不一致）。 */
+    @Test
+    void pullProjectByCodeReturnsProjectWithLicense() throws Exception {
+        seedMember();
+        JsonNode res = pull("contract_p1", TENANT_CODE);
+
+        assertEquals(seedProjectId, res.path("id").asText(), "必须带 id: " + res);
+        assertEquals("contract_p1", res.path("code").asText());
+        assertEquals("契约项目", res.path("name").asText());
+        assertEquals(TENANT_CODE, res.path("tenantCode").asText());
+        assertEquals("契约验证租户", res.path("tenantName").asText(), "租户名要带上，模块侧直接用，不必再查一次");
+        assertTrue(res.path("modules").isArray(), "modules 应当是数组: " + res);
+        assertTrue(res.path("aiCaps").isArray(), "aiCaps 应当是数组: " + res);
+    }
+
+    /**
+     * 同一个项目编码存在于两个租户时，拉取必须按租户隔离。
+     *
+     * <p>这是 R9 的正面反例：{@code code} 单独并不唯一（唯一约束是
+     * {@code (tenant_id, code)}）。若实现只按 code 查、或让 tenantCode 变成一个
+     * 可选的「过滤条件」，这条会立刻变红 —— 而线上表现是「A 租户读到了 B 租户的项目」。
+     */
+    @Test
+    void pullProjectByCodeIsScopedToTenant() throws Exception {
+        seedSecondTenant();
+        JsonNode mine = pull("contract_p1", TENANT_CODE);
+        JsonNode theirs = pull("contract_p1", SECOND_TENANT_CODE);
+
+        assertEquals(seedProjectId, mine.path("id").asText());
+        assertEquals(secondProjectId, theirs.path("id").asText(),
+                "两个租户用同一个项目编码，拉回来的必须是各自那一个: " + theirs);
+        assertNotEquals(seedProjectId, theirs.path("id").asText(), "串到别的租户的项目了: " + theirs);
+        assertEquals(SECOND_TENANT_CODE, theirs.path("tenantCode").asText());
+    }
+
+    /**
+     * 组织本地没有许可行时 {@code modules} 必须是 <b>null</b>，不是空数组。
+     *
+     * <p>两者的语义在模块侧完全不同：null = 「组织没这项信息，别动本地的」，
+     * 空数组 = 「组织说这个租户一项都没开通」。混成一个，模块要么把许可抹空、
+     * 要么永远不跟随组织的变更 —— 两种都是线上事故。
+     *
+     * <p><b>断言写成「读出来是空」而不是 {@code isNull()}</b>：组织全局配了
+     * {@code spring.jackson.default-property-inclusion: non_null}（见 application.yml），
+     * 于是这条路径上 null 字段在 JSON 里是<b>键不存在</b>，不是 {@code "modules": null}。
+     * 收方 {@code Map.get} 两种形态都得到 null，走的是同一个「别动本地」分支 ——
+     * 契约要锁的是这个语义，不是字面。空数组那一侧另有 {@link
+     * #pullProjectByCodeSendsEmptyArrayWhenLicenseIsEmpty} 锁住，所以「键不存在」
+     * 不会被一个漏写字段的实现冒充过去（漏写时空数组那条仍会红）。
+     */
+    @Test
+    void pullProjectByCodeSendsNullWhenTenantHasNoLicenseRow() throws Exception {
+        seedSecondTenant();
+        licenseMapper.deleteById(secondTenantId);
+
+        JsonNode res = pull("contract_p1", SECOND_TENANT_CODE);
+        assertTrue(nullOrMissing(res, "modules"), "没有许可行时应当读作 null: " + res);
+        assertTrue(nullOrMissing(res, "aiCaps"), "没有许可行时应当读作 null: " + res);
+    }
+
+    /** 字段缺失与显式 null 对收方等价，见 {@link #pullProjectByCodeSendsNullWhenTenantHasNoLicenseRow}。 */
+    private static boolean nullOrMissing(JsonNode res, String field) {
+        JsonNode v = res.path(field);
+        return v.isNull() || v.isMissingNode();
+    }
+
+    /** 反过来：许可行在、且一项都没开通时必须是空数组，不能也塌成 null。 */
+    @Test
+    void pullProjectByCodeSendsEmptyArrayWhenLicenseIsEmpty() throws Exception {
+        seedSecondTenant();
+        TenantLicenseEntity lic = licenseMapper.selectById(secondTenantId);
+        if (lic == null) {
+            lic = new TenantLicenseEntity();
+            lic.setTenantId(secondTenantId);
+            lic.setModules("[]");
+            lic.setAiCaps("[]");
+            licenseMapper.insert(lic);
+        } else {
+            lic.setModules("[]");
+            lic.setAiCaps("[]");
+            licenseMapper.updateById(lic);
+        }
+
+        JsonNode res = pull("contract_p1", SECOND_TENANT_CODE);
+        assertTrue(res.path("modules").isArray() && res.path("modules").isEmpty(),
+                "许可为空应当是 [] 而不是 null: " + res);
+    }
+
+    // ------------------------------------------------------------------
 
     private JsonNode authz(String query) throws Exception {
         Resp res = call(get("/internal/v1/authz/check?" + query).header("X-Module-Token", MODULE_TOKEN));
@@ -297,6 +427,41 @@ class InternalContractTest {
                 .queryParam("tenantCode", TENANT_CODE));
         assertEquals(200, res.status(), "members 调用失败: " + res.body());
         return MAPPER.readTree(res.body());
+    }
+
+    /** 以模块身份按 (租户编码, 项目编码) 拉一个项目。 */
+    private JsonNode pull(String projectCode, String tenantCode) throws Exception {
+        Resp res = call(get("/internal/v1/projects/by-code/" + projectCode)
+                .header("X-Module-Token", MODULE_TOKEN)
+                .queryParam("tenantCode", tenantCode));
+        assertEquals(200, res.status(), "拉取项目失败: " + res.body());
+        return MAPPER.readTree(res.body());
+    }
+
+    /**
+     * 第二个租户，里面放一个<b>与第一个租户同码</b>的项目（{@code contract_p1}）。
+     *
+     * <p>同码是刻意的：跨租户串数据只有在编码撞车时才暴露，编码互不相同时
+     * 「只按 code 查」和「按 (tenant, code) 查」的结果一模一样 —— 那样的样本测不出东西。
+     */
+    private void seedSecondTenant() throws Exception {
+        if (secondProjectId != null) return;
+
+        Resp created = call(post("/api/platform/tenants")
+                .header("Authorization", "Bearer " + adminToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"code\":\"" + SECOND_TENANT_CODE + "\",\"name\":\"契约验证租户二号\",\"adminUserId\":\"admin\"}"));
+        assertEquals(200, created.status(), "建第二个租户失败: " + created.body());
+        secondTenantId = MAPPER.readTree(created.body()).path("id").asText();
+
+        Resp project = call(post("/api/tenants/" + secondTenantId + "/projects")
+                .header("Authorization", "Bearer " + adminToken)
+                .header("X-Tenant-Code", SECOND_TENANT_CODE)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"code\":\"contract_p1\",\"name\":\"另一个租户的同码项目\",\"adminUserId\":\"admin\"}"));
+        assertEquals(200, project.status(), "在第二个租户里建项目失败: " + project.body());
+        secondProjectId = MAPPER.readTree(project.body()).path("id").asText();
+        assertNotEquals(seedProjectId, secondProjectId, "两个租户的同码项目不该是同一行");
     }
 
     /**

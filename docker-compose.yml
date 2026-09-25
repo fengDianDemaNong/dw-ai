@@ -49,7 +49,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      SERVER_PORT: 8080
+      # 容器内外同一个端口（组织 18080 / 仓建设 18081 / 数据地图 18082）。
+      SERVER_PORT: 18080
       DW_AI_HOME: /app
       DB_URL: ${ORG_DB_URL:-}
       DB_USER: ${ORG_DB_USER:-${DB_USER:-}}
@@ -65,11 +66,11 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
       PUBLIC_BASE_URL: ${ORG_PUBLIC_BASE_URL:-http://127.0.0.1:8080}
     ports:
-      - "${ORG_API_PORT:-18080}:8080"
+      - "${ORG_API_PORT:-18080}:18080"
     volumes:
       - dw-org-h2:/app/data
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18080/api/health"]
       interval: 15s
       timeout: 3s
       retries: 10
@@ -79,9 +80,15 @@ services:
       context: .
       dockerfile: dw-org/ui/Dockerfile
       args:
-        VITE_API_BASE: ${VITE_API_BASE:-.}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-.}
         VITE_DEPLOY_MODE: ${DW_AI_MODE:-multi}
     image: dw-org-ui:0.1.3
+    environment:
+      # 运行时配置：容器启动时渲染成 /config.json，与上面的 build args 同名但不是
+      # 同一条通路 —— 这里是启动期生效，改完重启容器即可，不必重新构建。
+      # 留空 = 同源相对路径（nginx 反代 /api），即改动前的默认行为。
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+      VITE_BASE_URL: ${ORG_UI_PUBLIC_URL:-}
     ports:
       - "${ORG_UI_PORT:-8080}:80"
     depends_on:
@@ -97,7 +104,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
-      SERVER_PORT: 8080
+      # 容器内外同一个端口（组织 18080 / 仓建设 18081 / 数据地图 18082）。
+      SERVER_PORT: 18081
       DW_AI_HOME: /app
       DB_URL: ${MODEL_DB_URL:-}
       DB_USER: ${MODEL_DB_USER:-${DB_USER:-}}
@@ -118,7 +126,11 @@ services:
       CASDOOR_ORG_MAP: ${CASDOOR_ORG_MAP:-built-in:t-xinghe,casbin:t-xinghe}
       RULES_BASE: ${RULES_BASE:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
-      ORG_BASE_URL: ${ORG_BASE_URL:-http://org-api:8080}
+      ORG_BASE_URL: ${ORG_BASE_URL:-http://org-api:18080}
+      # 组织平台的**前端**地址，给浏览器跳转用（与上一行的 API 地址不是一回事）。
+      # 必须是**浏览器**够得着的地址，所以填宿主端口而不是容器名 org-ui。
+      # 改了 ORG_UI_PORT 就要跟着改这里。
+      ORG_UI_URL: ${ORG_UI_URL:-http://localhost:8080}
       SR_ENABLED: ${SR_ENABLED:-false}
       SR_URL: ${SR_URL:-jdbc:mysql://host.docker.internal:9030/dwai}
       SR_USER: ${SR_USER:-root}
@@ -128,11 +140,11 @@ services:
       DS_TOKEN: ${DS_TOKEN:-}
       DS_PROJECT_CODE: ${DS_PROJECT_CODE:-0}
     ports:
-      - "${API_PORT:-18081}:8080"
+      - "${API_PORT:-18081}:18081"
     volumes:
       - dw-mode-h2:/app/data
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18081/api/health"]
       interval: 15s
       timeout: 3s
       retries: 10
@@ -144,9 +156,15 @@ services:
       context: .
       dockerfile: dw-model/ui/Dockerfile
       args:
-        VITE_API_BASE: ${VITE_API_BASE:-.}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-.}
         VITE_DEPLOY_MODE: ${DW_AI_MODE:-multi}
     image: dw-model-ui:0.1.3
+    environment:
+      # 运行时配置：容器启动时渲染成 /config.json，与上面的 build args 同名但不是
+      # 同一条通路 —— 这里是启动期生效，改完重启容器即可，不必重新构建。
+      # 留空 = 同源相对路径（nginx 反代 /api），即改动前的默认行为。
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+      VITE_BASE_URL: ${MODEL_UI_PUBLIC_URL:-}
     ports:
       - "${MODEL_UI_PORT:-8081}:80"
     depends_on:

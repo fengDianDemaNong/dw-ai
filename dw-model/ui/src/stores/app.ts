@@ -50,7 +50,7 @@ import { buildSpecPack, type SpecPack } from '../engine/specIo';
 import { api, authToken, setAuthToken, refreshAccess, setIdleTtlSeconds, useRemoteApi, type KnowledgeArticleDto, type Session, type Snapshot } from '../api/client';
 import { clearDeployMode, isMultiTenant, isStandalone, isStandardMode } from '../config/runtime';
 import { hasWorkbench } from '../config/pages';
-import { isWarehouseUi } from '../config/product';
+import { ORG_UI_KEY, isWarehouseUi } from '../config/product';
 import { MODEL_HOME, NO_PROJECT, SYS_HOME } from '../config/paths';
 import { loadPlatformAppearance, loadTenantAppearance, loadTenantLlm } from './prefs';
 
@@ -282,6 +282,11 @@ export async function bootstrapRemote() {
       // 后端答了，但没答出模式（老后端不带 runMode）—— 同样不能留上一次的值
       clearDeployMode();
     }
+    // 组织平台的**前端**地址。模块被「直接打开」（地址栏手打、没有 #boot= 自报宿主）时，
+    // 「回门户登录」这类跳转要靠它；后端答了空的要清旧值，理由同上面的 deployMode。
+    if (cfg.orgUiUrl) sessionStorage.setItem(ORG_UI_KEY, cfg.orgUiUrl);
+    else sessionStorage.removeItem(ORG_UI_KEY);
+
     const standalone = mode === 'standalone' || cfg.allowLogin === false;
     if (cfg.allowLogin !== false && cfg.sessionEpoch) {
       const prev = sessionStorage.getItem(BOOT_KEY);
@@ -737,8 +742,14 @@ export async function createProject(input: {
       engines: input.engines,
     });
     state.projects.push(project);
-    if (!state.members.some((m) => m.projectId === project.id && m.userId === state.currentUser)) {
-      state.members.push({ projectId: project.id, userId: state.currentUser, role: 'admin' });
+    // userId 必须取 id 而不是显示名：判权与快照合并查的都是 `currentUserId || currentUser`
+    // （见 projectRoleOf / applySnapshot），而真机上 currentUser 是「平台管理员」这类
+    // 显示名，补出来的行永远匹配不上 —— 补了等于没补，表现是「刚建完项目，创建者
+    // 在新项目下没有角色」。org 那份同名逻辑见 dw-org/ui/src/stores/app.ts 的
+    // grantSelfProjectAdmin（那边还多一维：产品维要按租户许可逐个补）。
+    const uid = state.currentUserId || state.currentUser;
+    if (!state.members.some((m) => m.projectId === project.id && m.userId === uid)) {
+      state.members.push({ projectId: project.id, userId: uid, role: 'admin' });
     }
     message.success(
       input.bootstrapSpec
@@ -759,7 +770,12 @@ export async function createProject(input: {
     engines: input.engines ?? [],
   };
   state.projects.push(project);
-  state.members.push({ projectId: project.id, userId: state.currentUser, role: 'admin' });
+  // 同上面远端分支：取 id，不取显示名（理由见那处注释）
+  state.members.push({
+    projectId: project.id,
+    userId: state.currentUserId || state.currentUser,
+    role: 'admin',
+  });
   const techTime: WordRoot[] = state.roots
     .filter((r) => r.projectId === 'p-trade' && r.kind !== 'biz')
     .map((r) => ({ ...r, id: `${r.id}-${project.id}`, projectId: project.id }));

@@ -98,9 +98,6 @@
       <DdlPreview v-if="bottomPane === 'sql'" :spec="ddlSpec" :dml-sql="etlSql" title="" />
       <template v-else-if="bottomPane === 'lineage'">
         <p class="muted pane-hint">边来自来源声明和字段加工。点上游/下游表可跳转。</p>
-        <p class="pane-hint">
-          <a-button v-if="showMap" size="small" type="link" @click="goJobLineage">在数据地图中打开</a-button>
-        </p>
         <TableLineage :table="table" :catalog="projectTables" @open="goTable" />
       </template>
       <template v-else>
@@ -194,7 +191,6 @@ import {
   removeTable,
   tableDependents,
 } from '../../stores/app';
-import { otherProductsVisible } from '../../config/pages';
 import { api } from '../../api/client';
 import type { Column, FieldLogicKind, WarehouseTable } from '../../types';
 
@@ -213,7 +209,6 @@ const layer = computed(() => parseLayerParam(route.params.layer));
 const domain = computed(() => String(route.params.domain ?? '_none'));
 const table = computed(() => projectTables.value.find((t) => t.id === route.params.tableId));
 
-const showMap = computed(() => otherProductsVisible());
 const sourceRows = computed(() =>
   resolvedSources(table.value ?? { sources: [], createdFrom: undefined }).map((s) => ({
     ...s,
@@ -272,11 +267,6 @@ async function copyFieldSql() {
 }
 function goTable(t: WarehouseTable) {
   router.push(`${layerHref(t.layer)}/${encodeURIComponent(t.domain || '_none')}/${t.id}`);
-}
-function goJobLineage() {
-  if (!table.value || !otherProductsVisible()) return;
-  const full = `${table.value.layer.toLowerCase()}.${table.value.name}`;
-  router.push({ path: '/lineage/tables', query: { start: full } });
 }
 function back() {
   router.push(`${layerHref(layer.value)}/${domain.value}`);

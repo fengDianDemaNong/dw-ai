@@ -1,6 +1,8 @@
 import { createApp } from 'vue';
 import App from './App.vue';
 import router from './router';
+import { appConfig, loadAppConfig } from './config/appConfig';
+import { configureApiBase } from './config/api';
 import { listenEmbedHost } from './config/embed';
 import { consumeBootHash, isStandardMode, loadRuntime } from './config/runtime';
 import { requiresLocalLogin } from './config/pages';
@@ -36,6 +38,12 @@ async function start() {
   const bootTenantName = sessionStorage.getItem('sql-tools.bootTenantName') ?? '';
   const bootProjectName = sessionStorage.getItem('sql-tools.bootProjectName') ?? '';
   if (bootTenantName || bootProjectName) setNames(bootTenantName, bootProjectName);
+
+  // 必须排在 loadRuntime() 之前：runtime 自己就是一次 /api/runtime 请求，
+  // 用的正是这里注入的基址。见 config/appConfig.ts 的优先级说明。
+  await loadAppConfig();
+  configureApiBase(appConfig().apiBaseUrl);
+
   await loadRuntime();
   // standard 固定单租户：把本地可能残留的租户选择钉回默认值，
   // 否则请求会打到上次选过的租户上。

@@ -1,11 +1,15 @@
 package com.dwai.lineage.conf;
 
 import com.dwai.lineage.auth.LocalTokenEpoch;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configurers.HeadersConfigurer.FrameOptionsConfig;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -19,6 +23,8 @@ import org.springframework.security.web.SecurityFilterChain;
 
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 三种运行模式下的身份认证。
@@ -66,6 +72,18 @@ import java.nio.charset.StandardCharsets;
 @Configuration
 public class SecurityConfig {
 
+    private static final Logger log = LoggerFactory.getLogger(SecurityConfig.class);
+
+    /**
+     * 允许跨域访问本服务的来源，与 {@link WebConfig} 读的是<b>同一个属性</b>。
+     *
+     * <p>门户集成后这份白名单还多一层用途：后端托管前端时（打包态），本服务的页面能不能
+     * 被别的站点 iframe 嵌进来。刻意复用而不是另开一个属性 —— 两份「允许谁」的清单
+     * 迟早会写歪，而写歪的表现是白屏，排查方向完全不同。
+     */
+    @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:3000}")
+    private String allowedOrigins;
+
     /**
      * 无需身份的路径。
      *
@@ -106,8 +124,21 @@ public class SecurityConfig {
 
     @Bean
     SecurityFilterChain filterChain(HttpSecurity http, LineageProperties props) throws Exception {
+        String ancestors = frameAncestors();
         http.csrf(csrf -> csrf.disable())
                 .cors(Customizer.withDefaults())
+                .headers(h -> {
+                    // 默认的 X-Frame-Options: DENY 会让门户里的 iframe 直接白屏，而开发态
+                    // 是 Vite 发的页面、没有这个头 —— 也就是说这个问题只在打包态显形。
+                    // 换成 CSP 的 frame-ancestors：它支持多个来源，正是嵌入门户需要的。
+                    //
+                    // 白名单表达不出来时什么都不动（保持 DENY）：宁可嵌不进去，也不能
+                    // 在配置不完整时静默地允许任何人嵌。
+                    if (ancestors == null) return;
+                    h.frameOptions(FrameOptionsConfig::disable)
+                            .contentSecurityPolicy(csp ->
+                                    csp.policyDirectives("frame-ancestors " + ancestors));
+                })
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(reg -> {
                     reg.requestMatchers(PUBLIC_PATHS).permitAll()
@@ -124,6 +155,39 @@ public class SecurityConfig {
                 })
                 .oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()));
         return http.build();
+    }
+
+    /**
+     * 把 {@code cors.allowed-origins} 翻译成 CSP {@code frame-ancestors} 的取值。
+     *
+     * <p>两套语法<b>不一样</b>，不能直接搬：CORS 那边支持 {@code http://localhost:*} 这种
+     * 端口通配（{@code allowedOriginPatterns}），CSP 的 frame-ancestors 只接受
+     * {@code scheme://host:port} 或一个裸的 {@code *}。把端口通配原样写进去是个<b>非法指令</b>，
+     * 浏览器会整条忽略 —— 表现是「配了白名单，结果谁都能嵌」，比不配还糟。所以带通配的
+     * 条目直接剔除并告警，只保留能精确表达的那些。
+     *
+     * @return 可直接放进指令的来源列表；{@code *} 表示不限来源；
+     *         表达不出来（白名单为空或全是通配）时返回 {@code null}，调用方据此保持 DENY
+     */
+    private String frameAncestors() {
+        List<String> usable = new ArrayList<>();
+        for (String raw : allowedOrigins.split(",")) {
+            String origin = raw.trim().replaceAll("/$", "");
+            if (origin.isEmpty()) continue;
+            if ("*".equals(origin)) return "*";
+            if (origin.contains("*")) {
+                log.warn("cors.allowed-origins 里的 {} 是通配写法，CSP frame-ancestors 表达不了，"
+                        + "已忽略；要让它的页面嵌入本服务，请写明确来源", origin);
+                continue;
+            }
+            usable.add(origin);
+        }
+        if (usable.isEmpty()) {
+            log.warn("cors.allowed-origins 里没有可精确表达的来源，本服务页面不能被他站 iframe 嵌入"
+                    + "（保持 X-Frame-Options: DENY）。门户集成时把它设成门户的页面地址即可");
+            return null;
+        }
+        return String.join(" ", usable);
     }
 
     /**

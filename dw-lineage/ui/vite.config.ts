@@ -59,8 +59,23 @@ function antvPkgRequireShim(): Plugin {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd());
   const { VITE_PUBLIC_PATH } = env;
+  /**
+   * dev 代理目标。三个 UI 用同一段取值逻辑（dw-org / dw-model 的 vite.config.ts 同款）：
+   *
+   *   1. VITE_DEV_PROXY_TARGET   —— 显式指定，优先级最高（另起一套端口做验证时用）
+   *   2. VITE_API_BASE_URL       —— 填的是绝对地址时，它就是后端地址，直接拿来做代理目标
+   *   3. 本模块后端默认端口 18082
+   *
+   * <p>第 3 条以前是 8080 —— 而 8080 从来不是本服务的端口（18082 才是），于是
+   * 不带 VITE_DEV_PROXY_TARGET 起 dev 时，前端会把 /api 代理到空无一物的 8080，
+   * 表现为「接口 401/404 → 静默回落登录页」。这是那次故障的直接根因。
+   */
+  const apiBase = process.env.VITE_API_BASE_URL || env.VITE_API_BASE_URL || '';
   const proxyTarget =
-    process.env.VITE_DEV_PROXY_TARGET || env.VITE_DEV_PROXY_TARGET || 'http://localhost:8080';
+    process.env.VITE_DEV_PROXY_TARGET ||
+    env.VITE_DEV_PROXY_TARGET ||
+    (/^https?:\/\//.test(apiBase) ? apiBase : '') ||
+    'http://127.0.0.1:18082';
 
   return {
     base: VITE_PUBLIC_PATH || '/',
@@ -93,6 +108,11 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: Number(process.env.VITE_DEV_PORT || env.VITE_DEV_PORT) || 5173,
+      // 端口被占时**报错退出**，不顺延到下一个。Vite 默认是「占了就换一个」，
+      // 只在控制台印一行 `Port 5173 is in use, trying another one...` 就继续 ——
+      // 于是「5173 起了没有」这个问题，答案取决于当时谁先占了它。
+      // 端口可经 VITE_DEV_PORT 指定（见 package.json 的 dev:multi），本行不影响。
+      strictPort: true,
       host: true,
       // 前端统一走相对路径 /api，由此处代理到后端，避免跨域与硬编码地址。
       //

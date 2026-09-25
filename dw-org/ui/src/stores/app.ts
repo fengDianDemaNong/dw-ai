@@ -1,4 +1,4 @@
-import { computed, reactive, readonly } from 'vue';
+import { computed, reactive, readonly, ref } from 'vue';
 import { message } from 'ant-design-vue';
 import type {
   AppState,
@@ -48,9 +48,10 @@ import { clusterLogs, scoreCluster } from '../engine/materialize';
 import { checkDuplicate } from '../engine/metrics';
 import { assessImpact, tableDependentsOf } from '@dw-ai/engine';
 import { buildSpecPack, type SpecPack } from '../engine/specIo';
-import { api, authToken, setAuthToken, refreshAccess, setIdleTtlSeconds, useRemoteApi, type KnowledgeArticleDto, type Session, type Snapshot } from '../api/client';
-import { ADMIN_HOME, APP_HOME, NO_PROJECT, SELECT_TENANT, SYS_HOME } from '../config/paths';
-import { isOrgUi } from '../config/product';
+import { api, authToken, setAuthToken, refreshAccess, setIdleTtlSeconds, useRemoteApi, type KnowledgeArticleDto, type NavGroupRow, type ProductMenu, type ProductService, type Session, type Snapshot } from '../api/client';
+import { ADMIN_HOME, APP_HOME, NO_PROJECT, ORG_HOME, SELECT_TENANT, SYS_HOME } from '../config/paths';
+import { isEmbeddable } from '../config/products';
+import { configureProductOrigins, isOrgUi } from '../config/product';
 import { isMultiTenant, isStandalone } from '../config/runtime';
 import { loadPlatformAppearance, loadTenantAppearance, loadTenantLlm } from './prefs';
 
@@ -234,6 +235,13 @@ function applySession(s: Session) {
   const t = state.tenants.find((x) => x.id === state.currentTenantId);
   if (t?.code) sessionStorage.setItem('dw-ai.tenantCode', t.code);
   if (state.currentTenantId) void loadTenantKnowledge(state.currentTenantId);
+  // 菜单跟着租户走：登录、切租户（selectRemoteTenant 也走这里）都在这条路上。
+  // 放在 SystemLayout.onMounted 是错的 —— 切租户时 layout 不重建，会拿到上一个租户的菜单。
+  //
+  // 存下 promise 而不是 `void` 丢掉：成员的落地页由菜单决定（见 `resolveTenantHome`），
+  // 谁来问落地页谁就得先把这一次拉取等掉，否则会按「菜单还没到」回落成工作台。
+  navPending = loadNav();
+  servicesPending = loadServices();
 }
 
 /** 会话里的租户列表应是当前用户全部可用租户，不是只含当前这一家。 */
@@ -291,13 +299,22 @@ export async function bootstrapRemote() {
     }
     if (!authToken() && !isStandalone()) return;
     applySession(await api.session());
+    // 菜单要落地页就位（见 navReady）—— 直接刷新 `/` 时路由守卫马上就会问落地页
+    await navReady();
+    // 服务目录同理，而且这里**必须**等：`/model`、`/lineage` 那几个路径的 redirect
+    // 是 vue-router 的同步 redirect（它不接受 async 函数 —— 返回的 Promise 会被当成
+    // 路由位置对象），所以「地址已就绪」这件事只能在挂载前保证，见 servicesReady。
+    await servicesReady();
     if (!isStandalone()) {
       await refreshMyTenants();
-      await loadPlatformAppearance();
+      // 平台外观只有 admin 壳会读（App.vue 按 meta.shell === 'admin' 取），
+      // 而它的读接口是 requirePlatform 的：非管理员来问必得 403，且是每个页面加载一次。
+      // 与 loadTenantLlmIfAdmin 同一个理由 —— 不问就不会有那条红字。
+      if (state.platformAdmin) await loadPlatformAppearance();
     }
     if (state.currentTenantId) {
       await loadTenantAppearance(state.currentTenantId);
-      await loadTenantLlm(state.currentTenantId);
+      await loadTenantLlmIfAdmin(state.currentTenantId);
     }
     const savedPid = sessionStorage.getItem('dw-ai.projectId');
     if (
@@ -309,7 +326,10 @@ export async function bootstrapRemote() {
     if (state.currentProjectId) {
       const p = state.projects.find((x) => x.id === state.currentProjectId);
       if (p?.code) sessionStorage.setItem('dw-ai.projectCode', p.code);
-      applySnapshot(state.currentProjectId, await api.snapshot(state.currentProjectId));
+      // 组织侧没有 `/projects/{id}/snapshot` 这个路由（ProjectService.snapshot 无人映射），
+      // 而本 UI 也没有任何地方读 snapshot 状态 —— 照调必然 404。下面 enterProject 那处
+      // 早就有同一个 `!isOrgUi()` 判断，这里是漏掉的一份。
+      if (!isOrgUi()) applySnapshot(state.currentProjectId, await api.snapshot(state.currentProjectId));
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -335,7 +355,7 @@ export async function loginDev(username: string, password = '') {
     applySession(await api.session());
     await refreshMyTenants();
     await loadTenantAppearance(out.tenants[0].id);
-    await loadTenantLlm(out.tenants[0].id);
+    await loadTenantLlmIfAdmin(out.tenants[0].id);
   } else if (out.platformAdmin) {
     sessionStorage.removeItem('dw-ai.tenantId');
     state.currentTenantId = '';
@@ -382,8 +402,23 @@ export async function selectRemoteTenant(tenantId: string) {
   applySession(await api.session());
   await refreshMyTenants();
   await loadTenantAppearance(tenantId);
-  await loadTenantLlm(tenantId);
+  await loadTenantLlmIfAdmin(tenantId);
   return me;
+}
+
+/**
+ * 拉租户的 LLM 配置，但只对租户管理员。
+ *
+ * <p>组织侧那个接口是管理员专属（`TenantAdminController.llm`）。成员登录时也会走到
+ * 这几个调用点，不判一下就是一条必然 403 的请求 —— 控制台上是红的，排查别的问题时
+ * 会被当成线索；而且成员本来也用不到 LLM 配置（设置页是管理员专属路由）。
+ *
+ * <p>判在调用方而不是 {@code prefs.ts} 里：那边的 `state` 是它自己的一份，没有
+ * `tenantRole`；在那边判会永远提前返回，把管理员自己的配置页弄坏。
+ */
+async function loadTenantLlmIfAdmin(tenantId: string | null | undefined) {
+  if (state.tenantRole !== 'admin') return;
+  await loadTenantLlm(tenantId);
 }
 
 export function logoutRemote() {
@@ -401,6 +436,8 @@ export function logoutRemote() {
   state.currentProjectId = null;
   state.platformAdmin = false;
   state.tenantRole = null;
+  navItems.value = [];
+  navGroups.value = [];
 }
 
 export function logout() {
@@ -434,6 +471,143 @@ function gradeUsedByTables(pid: string | null, code: string): boolean {
 }
 
 export const app = readonly(state);
+
+/**
+ * 门户菜单（产品页面配进侧栏的那些），服务端已按租户许可过滤。
+ *
+ * <p>刻意<b>不</b>放进持久化的 {@code AppState}：它是服务端配置的投影，
+ * 存进 localStorage 只会让旧值盖住新配置。跟着租户走
+ * （{@code applySession} 里加载、{@code leaveTenant} 里清空）。
+ */
+const navItems = ref<ProductMenu[]>([]);
+
+/** 全部产品菜单，不分壳。落地页判断与「有没有可嵌的产品」用它。 */
+export const productMenus = computed(() => navItems.value);
+
+/**
+ * 按归属壳拆成两套侧栏的数据源。
+ *
+ * <p>归属由平台管理员在「菜单管理」里指定，服务端原样返回 —— 前端只负责分流，
+ * 不猜也不补默认值。同一条路径可以两个壳各挂一份（`nav_items` 的唯一约束是
+ * `(scope, product, path)`），所以两者<b>不是</b>互补关系，各自独立过滤。
+ */
+export const workbenchMenus = computed(() => navItems.value.filter((m) => m.scope === 'workbench'));
+export const projectMenus = computed(() => navItems.value.filter((m) => m.scope === 'project'));
+
+/**
+ * 分组元数据（组间顺序 + 空组策略），服务端配置的投影。
+ *
+ * <p>与 {@link navItems} 一样不持久化、跟着租户走。**与菜单分开存放、分开拉取**：
+ * 它拉不到时侧栏回落成现在的样子（首次出现序、无空组占位），而菜单拉不到是少入口 ——
+ * 两种症状不该互相掩盖（同 {@code productServices} 那条注释的理由）。
+ *
+ * <p>注意它<b>不受租户许可过滤</b>：一个模块没开通时，它的分组元数据照样回来，
+ * 这正是 `emptyPolicy='always'` 能「整组保留、入口置灰说明」的前提。
+ */
+const navGroups = ref<NavGroupRow[]>([]);
+
+/** 按归属壳拆开，供两个壳各自的侧栏用（与 {@link workbenchMenus} 同一套分流）。 */
+export const workbenchNavGroups = computed(() => navGroups.value.filter((g) => g.scope === 'workbench'));
+export const projectNavGroups = computed(() => navGroups.value.filter((g) => g.scope === 'project'));
+
+/**
+ * 产品服务目录（`GET /api/services`）：产品码 → 它自己的站点根。
+ *
+ * <p>与菜单一样是「服务端配置的投影」，同样不持久化、跟着租户走。
+ * 与菜单分开拉是因为两者的失败后果不同：菜单没了只是侧栏少几项，
+ * 目录没了「进入项目」会提示未配置地址 —— 合成一个请求会让这两种症状互相掩盖。
+ */
+const productServices = ref<ProductService[]>([]);
+
+/** 最近一次服务目录拉取；决定跳转前要等它落定，见 {@link servicesReady}。 */
+let servicesPending: Promise<void> = Promise.resolve();
+
+/**
+ * 把服务目录接给 `config/product.ts` —— 跨服务跳转的地址只从这一处来。
+ *
+ * <p>方向必须是 store → config：反过来会成环，因为 config/product.ts 提供
+ * `isOrgUi`，本模块要用它。resolver 每次调用都读最新的 ref，所以注册一次就够。
+ */
+configureProductOrigins(
+  (product) =>
+    (productServices.value.find((s) => s.product === product)?.frontendUrl ?? '').trim().replace(/\/$/, ''),
+  () => productServices.value
+);
+
+/** 最近一次菜单拉取；落地页要等它落定，见 {@link navReady}。 */
+let navPending: Promise<void> = Promise.resolve();
+
+/**
+ * 等最近一次菜单拉取结束。
+ *
+ * <p>给「决定成员去哪儿」的调用点用：落地页要看菜单（第一个能嵌的产品页面），
+ * 而菜单是登录时异步拉的。不等的话会按空菜单回落成工作台 —— 表现是
+ * 「有时候进得去产品壳，有时候进不去」，取决于网络快慢。
+ */
+export function navReady(): Promise<void> {
+  return navPending;
+}
+
+/**
+ * 拉一次菜单与分组元数据。
+ *
+ * <p>失败时留空而<b>不</b>抛：侧栏是每个页面都要画的东西，让「菜单接口不通」
+ * 把整个壳带下水不划算 —— 用户仍能用「系统管理」那一组。留一条 warn 是因为
+ * 这个失败从界面上看与「管理员还没配菜单」完全一样。
+ *
+ * <p>两个请求并行、<b>各自兜底</b>：所以用 {@code allSettled} 而不是 {@code all} ——
+ * 后者一坏俱坏，分组接口挂掉会连带把菜单也丢掉（反之亦然），而这两件事的后果
+ * 完全不同（少入口 vs 组顺序回落）。而且它是两个独立端点、本来就不同源。
+ */
+export async function loadNav() {
+  if (!useRemoteApi() || !authToken()) {
+    navItems.value = [];
+    navGroups.value = [];
+    return;
+  }
+  const [menus, groups] = await Promise.allSettled([api.nav(), api.navGroups()]);
+  if (menus.status === 'fulfilled') {
+    navItems.value = menus.value;
+  } else {
+    console.warn('[dw-ai] 拉取门户菜单失败，侧栏将只显示系统菜单:', menus.reason);
+    navItems.value = [];
+  }
+  if (groups.status === 'fulfilled') {
+    navGroups.value = groups.value;
+  } else {
+    console.warn('[dw-ai] 拉取分组元数据失败，侧栏将按各组首次出现序分组、不显示空组:', groups.reason);
+    navGroups.value = [];
+  }
+}
+
+/**
+ * 等最近一次服务目录拉取结束。
+ *
+ * <p>「进入项目」要用目录里的地址，而目录是登录后才异步拉的。不等的话，
+ * 刷新页面后立刻点「进入项目」会误报「未配置前端地址」—— 与真的没配表现完全一样。
+ */
+export function servicesReady(): Promise<void> {
+  return servicesPending;
+}
+
+/**
+ * 拉一次产品服务目录。
+ *
+ * <p>失败时留空而不抛，理由同 {@link loadNav}：让「目录接口不通」把整个壳带下水
+ * 不划算。留一条 warn 是因为这个失败从界面上看与「管理员还没登记前端地址」一样。
+ */
+export async function loadServices() {
+  if (!useRemoteApi() || !authToken()) {
+    productServices.value = [];
+    return;
+  }
+  try {
+    productServices.value = await api.productServices();
+  } catch (e) {
+    console.warn('[dw-ai] 拉取产品服务目录失败，「进入项目」会提示未配置前端地址:', e);
+    productServices.value = [];
+  }
+}
 
 export const currentTenant = computed(() => state.tenants.find((t) => t.id === state.currentTenantId));
 
@@ -531,6 +705,39 @@ export const canWriteSpec = computed(() => can('warehouse', 'spec:write'));
 export const canWriteModel = computed(() => can('warehouse', 'model:write'));
 export const canPublishModel = computed(() => can('warehouse', 'model:publish'));
 
+/**
+ * 项目壳默认落在哪一页：第一条**能嵌**且**已登记页面地址**的项目菜单。
+ *
+ * <p>不取「第一条项目菜单」：菜单里可能有仓建设这种还没有嵌入接收端的产品，
+ * 选它就只能整页跳走，等于又回到老路。一条都没有（没配项目菜单 / 都没登记页面地址）
+ * 时返回 `null`，由调用方回落工作台 —— 那里至少有「项目管理」可用，比空白页好。
+ */
+export function projectMenuHref(code: string): string | null {
+  const menu = projectMenus.value.find((m) => isEmbeddable(m.product) && m.frontendUrl);
+  if (!menu) return null;
+  const sub = menu.path.startsWith('/') ? menu.path : `/${menu.path}`;
+  return `${ORG_HOME}/project/${encodeURIComponent(code)}/embed/${menu.product}${sub}`;
+}
+
+/**
+ * 普通租户成员进组织平台后的落地页 —— 项目壳。
+ *
+ * <p>落点是<b>项目壳</b>，不是 `APP_HOME`（=`/model`）也不是某一个产品页面：
+ * `/model` 是整页跳到仓建设自己的站点，那样一来「平台提供壳子、把别的服务嵌进去」
+ * 对绝大多数用户（非管理员）根本不可见；而直接落到某个产品页面则绕过了项目这一层，
+ * 需求要的正是「项目也是壳，各服务的菜单挂进项目里」。
+ *
+ * <p>没有项目码、或项目壳里一条能嵌的菜单都没有时回落工作台 —— 工作台的
+ * 「项目管理」至少是可用的落点，比把成员丢进一个空的项目壳好。这与项目壳首页
+ * 对**主动点进来**的人显示「还没配置页面」是两回事：那是明确动作之后的结果，
+ * 这是登录后无处可去。
+ */
+function memberHome(): string {
+  const code = sessionStorage.getItem('dw-ai.projectCode') ?? '';
+  if (!code || !projectMenuHref(code)) return SYS_HOME;
+  return `${ORG_HOME}/project/${encodeURIComponent(code)}`;
+}
+
 export function resolveTenantHome(): string {
   if (state.platformAdmin && !state.currentTenantId) return ADMIN_HOME;
   if (isOrgUi()) {
@@ -546,7 +753,7 @@ export function resolveTenantHome(): string {
     }
     const p = list.find((x) => x.id === id);
     if (p?.code) sessionStorage.setItem('dw-ai.projectCode', p.code);
-    return APP_HOME;
+    return memberHome();
   }
   if (state.tenantRole === 'admin') return SYS_HOME;
   const list = tenantProjects.value;
@@ -756,6 +963,10 @@ export function leaveProject() {
   state.currentProjectId = null;
   sessionStorage.removeItem('dw-ai.projectId');
   sessionStorage.removeItem('dw-ai.projectCode');
+  // 菜单的**结论依赖当前项目**（服务端按这个人在这项目下的角色过滤权限词），
+  // 所以离开项目后必须重拉：留在手上的那份是按上一个项目的角色算的。
+  // 进项目那一侧不用在这里补 —— 项目壳/嵌入页 onMounted 都会 `loadNav()`。
+  navPending = loadNav();
   persist();
 }
 
@@ -764,11 +975,46 @@ export function leaveTenant() {
   state.currentTenantId = '';
   state.currentProjectId = null;
   state.tenantRole = null;
+  // 平台壳的侧栏是 buildAdminNav()，产品菜单与分组元数据都不该跟过去
+  navItems.value = [];
+  navGroups.value = [];
   sessionStorage.removeItem('dw-ai.tenantId');
   sessionStorage.removeItem('dw-ai.projectId');
   sessionStorage.removeItem('dw-ai.tenantCode');
   sessionStorage.removeItem('dw-ai.projectCode');
   persist();
+}
+
+/**
+ * 建完项目，把创建者自己在**本租户已开通的每个产品**下记成管理员。
+ *
+ * <p>这是对组织侧那一份的乐观复刻：组织就是这么派的（`AccessService.licensedProducts`
+ * 逐个循环），拉一次会话就会用权威数据覆盖这里。两条都必须对上，少一条的表现都是
+ * 「刚建完项目，进入项目按钮是灰的，刷新一下才好」（刷新走 `applySession`，拿的正是
+ * 组织那份数据，所以看着像刷新修好了）：
+ *
+ * <ul>
+ *   <li><b>产品维按许可逐个补</b>：只补 `warehouse` 的话，只开通数据地图的租户里，
+ *       创建者在新项目下没有数据地图角色，`canEnterProduct('metadata')` 的第二道门
+ *       （我在本项目有该产品角色）就过不去。</li>
+ *   <li><b>userId 取 id 而不是显示名</b>：`projectRoleOf` 查的是
+ *       `state.currentUserId || state.currentUser`，而真机上 `currentUser` 是显示名
+ *       （「平台管理员」这种），补出来的行永远匹配不上 —— 补了等于没补。</li>
+ * </ul>
+ *
+ * <p>未开通的产品不补：补了也不会让按钮亮（第一道门 `hasModule` 照样是假），
+ * 只会留下一条「看着有权限、点进去被拒」的脏行。
+ */
+function grantSelfProjectAdmin(projectId: string) {
+  const licensed = state.licenses.find((l) => l.tenantId === state.currentTenantId)?.modules ?? [];
+  const uid = state.currentUserId || state.currentUser;
+  for (const product of ['warehouse', 'metadata'] as const) {
+    if (!licensed.includes(product)) continue;
+    const dup = state.members.some(
+      (m) => m.projectId === projectId && m.userId === uid && m.product === product
+    );
+    if (!dup) state.members.push({ projectId, userId: uid, product, role: 'admin' });
+  }
 }
 
 export async function createProject(input: {
@@ -791,17 +1037,7 @@ export async function createProject(input: {
       ? await api.org.createProject(state.currentTenantId, payload)
       : await api.createProject(payload);
     state.projects.push(project);
-    // 判重与写入都必须带 product 那一维：不带的话这行在 projectRoleOf('warehouse')
-    // 里匹配不上，表现是「刚建完项目，创建者自己进不去」
-    if (!state.members.some((m) =>
-      m.projectId === project.id && m.userId === state.currentUser && m.product === 'warehouse')) {
-      state.members.push({
-        projectId: project.id,
-        userId: state.currentUser,
-        product: 'warehouse',
-        role: 'admin',
-      });
-    }
+    grantSelfProjectAdmin(project.id);
     message.success(
       input.bootstrapSpec
         ? `项目「${project.name}」已创建，并导入通用规范（分层 + 四级等级 + 基础词根）`
@@ -821,12 +1057,7 @@ export async function createProject(input: {
     engines: input.engines ?? [],
   };
   state.projects.push(project);
-  state.members.push({
-    projectId: project.id,
-    userId: state.currentUser,
-    product: 'warehouse',
-    role: 'admin',
-  });
+  grantSelfProjectAdmin(project.id);
   const techTime: WordRoot[] = state.roots
     .filter((r) => r.projectId === 'p-trade' && r.kind !== 'biz')
     .map((r) => ({ ...r, id: `${r.id}-${project.id}`, projectId: project.id }));

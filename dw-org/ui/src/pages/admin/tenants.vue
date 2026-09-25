@@ -115,7 +115,7 @@ import PageHeader from '../../components/PageHeader.vue';
 import { MODULE_OPTIONS } from '../../config/iam';
 import type { ProductModule, Tenant } from '../../types';
 import { followHome } from '../../config/product';
-import { resolveTenantHome, switchTenant } from '../../stores/app';
+import { navReady, resolveTenantHome, switchTenant } from '../../stores/app';
 
 const router = useRouter();
 const tenants = ref<Tenant[]>([]);
@@ -201,6 +201,8 @@ async function submitRedeem() {
     await api.enterTenant(redeeming.value.id, redeemCode.value.trim());
     if (!(await switchTenant(redeeming.value.id))) return;
     openRedeem.value = false;
+    // 落地页取决于该租户的门户菜单，等它到位再决定
+    await navReady();
     followHome(resolveTenantHome(), router);
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));

@@ -86,7 +86,7 @@ pack_ui() {
 数据地图 ${VERSION} 前端包
 
 html/       静态页（放到 Nginx root）
-nginx.conf  反代 /api 到 lineage-api:8080
+nginx.conf  反代 /api 到后端（${BACKEND_HOST}:${BACKEND_PORT}，默认 backend:18082）
 
 Docker：仓库根 docker compose -f dw-lineage/docker-compose.yml up -d --build frontend
 或：在仓库根执行 docker build -f dw-lineage/ui/Dockerfile .
@@ -111,7 +111,7 @@ pack_api() {
   cat >"$api_stage/README.txt" <<EOF
 数据地图 ${VERSION} 后端安装包（不含控制台）
 
-解压后 ./bin/start.sh → http://127.0.0.1:8080/
+解压后 ./bin/start.sh → http://127.0.0.1:18082/
 前端请另用 ${NAME}-ui.tar.gz 或本服务 docker compose。
 EOF
   tar -C "$HERE/release" -czf "$HERE/release/${api_name}.tar.gz" "$api_name"

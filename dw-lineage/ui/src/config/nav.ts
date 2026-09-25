@@ -1,13 +1,7 @@
 import { authState } from '../stores/auth';
 import { can, type Perm } from './iam';
-import {
-  LINEAGE_HOME,
-  LINEAGE_PAGES,
-  PROJECT_SETTINGS_PAGES,
-  WORKBENCH_PAGES,
-  hasLocalAccounts,
-  isWorkbenchPath,
-} from './pages';
+import { PROJECT_GROUPS, WORKBENCH_GROUPS } from './navData';
+import { LINEAGE_HOME, WORKBENCH_PAGES, hasLocalAccounts, isWorkbenchPath } from './pages';
 
 /**
  * 导航结构。两套菜单（工作台级 / 项目级），按当前路径二选一。
@@ -69,23 +63,12 @@ export interface NavGroup {
  * 设置收着全局的那几项 —— 元数据服务所有项目共用一份，账号与外观偏好
  * 也不跟着项目走，所以它们归工作台而不是项目。
  */
-export const workbenchNavGroups: NavGroup[] = [
-  {
-    title: '',
-    items: [
-      { path: WORKBENCH_PAGES.home, label: '概况', icon: 'DashboardOutlined', ready: true },
-      { path: WORKBENCH_PAGES.projects, label: '项目', icon: 'ProjectOutlined', ready: true },
-    ],
-  },
-  {
-    title: '设置',
-    items: [
-      { path: WORKBENCH_PAGES.metadata, label: '元数据服务', icon: 'ApiOutlined', ready: true },
-      { path: WORKBENCH_PAGES.users, label: '账号管理', icon: 'UserOutlined', ready: true, adminOnly: true },
-      { path: WORKBENCH_PAGES.preferences, label: '基本信息', icon: 'SettingOutlined', ready: true },
-    ],
-  },
-];
+/**
+ * 数据本体在 `navData.ts` —— 组织平台要「从各服务获取菜单」，得有一个能脱离浏览器
+ * 环境被 Node import 的纯数据文件（见那边的说明）。这里保持名字与类型不变，
+ * 调用方（`visibleNavGroups` 与用它的侧栏/面包屑）一行不用改。
+ */
+export const workbenchNavGroups: NavGroup[] = WORKBENCH_GROUPS;
 
 /**
  * 项目级菜单：进了某个项目之后的那一级。
@@ -99,33 +82,7 @@ export const workbenchNavGroups: NavGroup[] = [
  * <p>工作台那一级的设置（元数据服务、账号、外观）仍然归工作台 —— 那几个是
  * 全租户一份的，不跟着项目走。
  */
-export const projectNavGroups: NavGroup[] = [
-  {
-    // 概况不配 perm：进得来这个前端就该看得见自己项目的总览。
-    title: '',
-    items: [{ path: LINEAGE_PAGES.home, label: '概况', icon: 'DashboardOutlined', ready: true }],
-  },
-  {
-    title: '数据地图',
-    items: [
-      { path: LINEAGE_PAGES.search, label: '全文检索', icon: 'SearchOutlined', ready: true, perm: 'catalog:read' },
-      { path: LINEAGE_PAGES.tables, label: '血缘', icon: 'PartitionOutlined', ready: true, perm: 'lineage:read' },
-      // 「数据目录」与「临时表规则」是管理页，只有目录管理员进得去 —— 注意它们
-      // 不蕴含 catalog:read（见 Perms.java 的注释），两件事。
-      { path: LINEAGE_PAGES.catalogs, label: '数据目录', icon: 'FolderOutlined', ready: true, perm: 'catalog:admin' },
-      { path: LINEAGE_PAGES.tempRules, label: '临时表规则', icon: 'FilterOutlined', ready: true, perm: 'catalog:admin' },
-      // SQL 解析：能看要读血缘，页面里的「保存」另外要 lineage:write（那在页面内判）。
-      { path: LINEAGE_PAGES.analyze, label: 'SQL 解析', icon: 'CodeOutlined', ready: true, perm: 'lineage:read' },
-      { path: LINEAGE_PAGES.meta, label: '元数据', icon: 'TableOutlined', ready: true, perm: 'catalog:read' },
-    ],
-  },
-  {
-    title: '设置',
-    items: [
-      { path: PROJECT_SETTINGS_PAGES.map, label: '数据地图设置', icon: 'SettingOutlined', ready: true, perm: 'catalog:admin' },
-    ],
-  },
-];
+export const projectNavGroups: NavGroup[] = PROJECT_GROUPS;
 
 /**
  * 按当前路径选出该显示哪一套菜单，再按运行模式与身份过滤。

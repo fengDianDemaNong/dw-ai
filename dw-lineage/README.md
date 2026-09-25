@@ -42,11 +42,11 @@ dw-lineage/
 MODULE_TOKEN=<与 org 相同的值> npm run dev:api:lineage     # sql-tools
 npm run dev:lineage         # multi 模式，等价于 npm run dev:multi -w sql-tools
 
-# —— 普通 standard（默认，本模块账号，端口 8080 / 5173）
+# —— 普通 standard（默认，本模块账号，端口 18082 / 5173）
 mvn -f dw-lineage/api/pom.xml spring-boot:run
 npm run dev:standard -w sql-tools
 
-# —— 独立 standalone（不管登录，端口 8080 / 5173）
+# —— 独立 standalone（不管登录，端口 18082 / 5173）
 # 注意两边都要指定：后端不设模式变量时默认是 standard。
 # 两个变量都认，LINEAGE_RUN_MODE 更具体、优先；跟着 org / model 统一设 DW_AI_MODE 也可以。
 LINEAGE_RUN_MODE=standalone mvn -f dw-lineage/api/pom.xml spring-boot:run
@@ -83,8 +83,8 @@ npm run dev:standalone -w sql-tools
 | 地址 | 说明 |
 |---|---|
 | <http://localhost:5173> | 前端（vite dev server，`/api` 已代理到后端） |
-| <http://localhost:8080/swagger-ui.html> | 接口文档 |
-| <http://localhost:8080/actuator/health> | 健康检查 |
+| <http://localhost:18082/swagger-ui.html> | 接口文档 |
+| <http://localhost:18082/actuator/health> | 健康检查 |
 
 ### 校验（`ci.sh`）
 
@@ -131,7 +131,7 @@ bin/start.sh        # 默认内嵌 H2，空库启动时 Flyway 自动建表，�
 docker compose up -d
 ```
 
-前端 <http://localhost/lineage/>，后端 8080。nginx 已把 `/api` 反代到后端，因此前端产物不含任何硬编码地址。
+前端 <http://localhost/lineage/>，后端 18082。nginx 已把 `/api` 反代到后端，因此前端产物不含任何硬编码地址。
 
 ---
 
@@ -178,7 +178,7 @@ SEED_SECOND_TENANT=1 bin/seed-demo.sh # 顺带建第二个项目与演示租户�
 ### 直接调接口
 
 ```bash
-curl -X POST http://localhost:8080/api/lineage/analyze \
+curl -X POST http://localhost:18082/api/lineage/analyze \
   -H 'Content-Type: application/json' \
   -d '{
     "dbType": "hive",

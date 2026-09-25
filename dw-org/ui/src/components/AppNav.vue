@@ -11,14 +11,23 @@
       <div v-for="(group, i) in groups" :key="group.title || i" class="group">
         <div v-if="group.title && !collapsed" class="gtitle">{{ group.title }}</div>
         <a-tooltip
-          v-for="item in group.items"
-          :key="item.path"
+          v-for="(item, k) in group.items"
+          :key="itemKey(item, k)"
           :title="item.disabled ? item.disabledReason : collapsed ? item.label : ''"
         >
           <span v-if="item.disabled" class="item off">
             <component :is="icons[item.icon]" class="ico" />
             <span v-if="!collapsed">{{ item.label }}</span>
           </span>
+          <!--
+            没有子端、不能嵌进壳的产品走整页跳转（见 config/sysNav.ts 的 EMBEDDABLE）。
+            新标签页打开：它是「去别的站点」，不是本站的一次导航 —— 在同一标签打开
+            会把当前壳（含已选租户/项目）整页带走，用户回退才能回来。
+          -->
+          <a v-else-if="item.external && item.href" :href="item.href" target="_blank" rel="noreferrer" class="item">
+            <component :is="icons[item.icon]" class="ico" />
+            <span v-if="!collapsed">{{ item.label }}</span>
+          </a>
           <router-link v-else :to="item.path" class="item" :class="{ active: active === item.path }">
             <component :is="icons[item.icon]" class="ico" />
             <span v-if="!collapsed">{{ item.label }}</span>
@@ -47,11 +56,19 @@
         </span>
         <template #overlay>
           <div class="sub">
-            <a-tooltip v-for="item in group.items" :key="item.path" :title="item.disabled ? item.disabledReason : ''">
+            <a-tooltip
+              v-for="(item, k) in group.items"
+              :key="itemKey(item, k)"
+              :title="item.disabled ? item.disabledReason : ''"
+            >
               <span v-if="item.disabled" class="item off">
                 <component :is="icons[item.icon]" class="ico" />
                 <span>{{ item.label }}</span>
               </span>
+              <a v-else-if="item.external && item.href" :href="item.href" target="_blank" rel="noreferrer" class="item">
+                <component :is="icons[item.icon]" class="ico" />
+                <span>{{ item.label }}</span>
+              </a>
               <router-link v-else :to="item.path" class="item" :class="{ active: active === item.path }">
                 <component :is="icons[item.icon]" class="ico" />
                 <span>{{ item.label }}</span>
@@ -107,14 +124,26 @@
       </div>
       <div v-if="hoverGroup && !isLeaf(hoverGroup)" class="panel" :style="panelStyle">
         <a-tooltip
-          v-for="item in hoverGroup.items"
-          :key="item.path"
+          v-for="(item, k) in hoverGroup.items"
+          :key="itemKey(item, k)"
           :title="item.disabled ? item.disabledReason : ''"
         >
           <span v-if="item.disabled" class="item off light">
             <component :is="icons[item.icon]" class="ico" />
             <span>{{ item.label }}</span>
           </span>
+          <a
+            v-else-if="item.external && item.href"
+            :href="item.href"
+            target="_blank"
+            rel="noreferrer"
+            class="item light"
+            @click="open = false"
+          >
+            <component :is="icons[item.icon]" class="ico" />
+            <span>{{ item.label }}</span>
+            <RightOutlined class="go" />
+          </a>
           <router-link
             v-else
             :to="item.path"
@@ -137,7 +166,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { CloseOutlined, DownOutlined, MenuFoldOutlined, MenuOutlined, MenuUnfoldOutlined, RightOutlined } from '@ant-design/icons-vue';
 import type { MenuPos } from '../stores/prefs';
-import type { NavGroup } from '../config/nav';
+import type { NavGroup, NavItem } from '../config/nav';
 import { activeNavPath } from '../config/nav';
 import { navIcons } from '../config/navIcons';
 import UserPanel from './UserPanel.vue';
@@ -166,6 +195,15 @@ const active = computed(() => activeNavPath(route.path, props.groups));
 
 function keyOf(group: NavGroup, i: number) {
   return group.title || `leaf-${i}`;
+}
+
+/**
+ * 菜单项在同一个分组内必须唯一。单用 `item.path` 会撞：`always` 空分组的占位项
+ * `path` 是空串，两个这样的分组各有一条时两处 key 都是 `''`，Vue 会复用错节点。
+ * 所以退回 label，再补上序号。
+ */
+function itemKey(item: NavItem, k: number) {
+  return `${item.path || item.label}@${k}`;
 }
 
 function isLeaf(group: NavGroup) {

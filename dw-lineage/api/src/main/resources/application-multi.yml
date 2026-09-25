@@ -1,9 +1,11 @@
-server:
-  port: ${SERVER_PORT:18082}
+# 端口不在这里定义：三个服务统一在 application.yml 里给默认值 18082，
+# 不再按 profile 覆盖（见该文件 server.port 处的说明）。
 
 # 空库由 Flyway 自动建表（application.yml 已开启），无需 auto-init
 lineage:
   run-mode: multi
   org-base-url: ${ORG_BASE_URL:http://127.0.0.1:18080}
+  # 门户 UI 的地址（**不是**上一行那个 API 地址）。开发态组织前端在 5171。
+  org-ui-url: ${ORG_UI_URL:http://127.0.0.1:5171}
   service-base-url: ${SERVICE_BASE_URL:http://127.0.0.1:18082}
   public-base-url: ${PUBLIC_BASE_URL:http://127.0.0.1:5173}

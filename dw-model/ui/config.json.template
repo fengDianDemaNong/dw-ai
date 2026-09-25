@@ -1,0 +1,4 @@
+{
+  "apiBaseUrl": "${VITE_API_BASE_URL}",
+  "baseUrl": "${VITE_BASE_URL}"
+}

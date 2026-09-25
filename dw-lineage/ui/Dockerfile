@@ -32,7 +32,7 @@ FROM nginx:stable-alpine
 
 # 后端地址，由 nginx 官方 entrypoint 的 envsubst 注入 default.conf.template
 ENV BACKEND_HOST=backend
-ENV BACKEND_PORT=8080
+ENV BACKEND_PORT=18082
 
 # 挂根路径，见 nginx.conf 的说明。产物里的资源是 /assets/...，与 nginx 的 location / 对齐。
 # 不要给这里加 VITE_PUBLIC_PATH=/lineage/ —— base 与路由前缀会叠成 /lineage/lineage/...。
@@ -40,6 +40,16 @@ COPY --from=builder /app/dw-lineage/ui/dist /usr/share/nginx/html
 
 # 放到 templates 下，容器启动时会自动做变量替换并输出到 /etc/nginx/conf.d/
 COPY dw-lineage/ui/nginx.conf /etc/nginx/templates/default.conf.template
+
+# ---- 运行时配置 ----
+# 容器启动时用环境变量渲染 /usr/share/nginx/html/config.json，
+# 于是「前端和后端不在同一台服务器」这种只有部署期才知道的事，
+# 改一个环境变量重启容器即可，不必重新构建镜像。
+# 模板放 /etc/nginx 下而不是 html 里，避免它被当成静态资源对外暴露。
+# 见 config.json.template 与 docker-entrypoint.d/25-app-config.sh 内的说明。
+COPY dw-lineage/ui/config.json.template /etc/nginx/config.json.template
+COPY dw-lineage/ui/docker-entrypoint.d/25-app-config.sh /docker-entrypoint.d/25-app-config.sh
+RUN chmod +x /docker-entrypoint.d/25-app-config.sh
 
 EXPOSE 80
 

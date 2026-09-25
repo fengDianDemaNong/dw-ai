@@ -37,6 +37,9 @@ dwai:
   # 设 DW_AI_RUN_MODE=y → y（更具体者胜）。dw-org 的同一行也是留空的，别再改回去。
   run-mode: ${DW_AI_RUN_MODE:}
   org-base-url: ${ORG_BASE_URL:http://127.0.0.1:18080}
+  # 组织平台的**前端**地址，给浏览器跳转用（`/org/login` 等页面路径）。
+  # 与上一行的 API 基址不是一回事：开发态 UI 在 5171、API 在 18080。
+  org-ui-url: ${ORG_UI_URL:http://127.0.0.1:5171}
   service-base-url: ${SERVICE_BASE_URL:http://127.0.0.1:18081}
   public-base-url: ${PUBLIC_BASE_URL:http://127.0.0.1:5172}
   llm-secret: ${DW_AI_LLM_SECRET:dw-ai-llm-dev-secret-change-me-32b}
@@ -77,4 +80,7 @@ dwai:
     project-code: ${DS_PROJECT_CODE:0}
   web:
     static-dir: ${WEB_STATIC_DIR:}
+    # 这个值有第二个作用：本服务页面被 iframe 嵌入时，它就是允许嵌的来源
+    # （见 SecurityConfig.frameAncestors）。门户集成时把它设成门户的页面地址；
+    # 留成 * 等于谁都能嵌。注意包部署下页面由 nginx 发，那时这个值不管用。
     cors-origins: ${CORS_ORIGINS:*}

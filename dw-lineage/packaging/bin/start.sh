@@ -14,7 +14,7 @@ fi
 # 端口被别的进程占用时必须直接失败。
 # 否则健康检查会连上那个进程并误判为「启动成功」，
 # 而实际访问到的是别人的服务（历史上因此排查了很久的空白页问题）。
-port="$(yaml_get server port)"; port="${port:-8080}"
+port="$(yaml_get server port)"; port="${port:-18082}"
 if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
   echo "错误: 端口 $port 已被占用，占用者：" >&2
   lsof -nP -iTCP:"$port" -sTCP:LISTEN | tail -n +1 >&2
