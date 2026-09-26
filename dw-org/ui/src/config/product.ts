@@ -211,6 +211,55 @@ export function openLineageApp(path = '/lineage'): void {
   window.location.href = `${origin}${suffix}#boot=${bootPayload()}`;
 }
 
+/**
+ * 「登录后回哪」这个跨站目标可不可信 —— 可信就拆成 `{ origin, path }`，否则 undefined。
+ *
+ * <p><b>它来自 URL query，是用户可控的输入。</b>直接拿去跳就是一个开放重定向：
+ * 攻击者把登录链接做成 `…/org/login?return=https://钓鱼站`，用户看到的是自家门户的
+ * 登录页、登录后却被送去别处。所以判据必须硬：
+ *
+ * <ul>
+ *   <li>必须是绝对的 http(s) 地址（`javascript:` / `data:` 一律不认）；</li>
+ *   <li>必须落在**服务注册表**里某个产品登记的前端地址之下 —— 同址或以它 + `/` 开头。
+ *       加那道 `/` 是必须的：不带的话 `http://host:5181.evil.com` 也能通过
+ *       「以 `http://host:5181` 开头」这条前缀判断。</li>
+ * </ul>
+ *
+ * <p>不认识的地址一律当「没带」，调用方回落自己的默认落地页 —— 宁可不回跳，
+ * 也不要把用户送去一个我们没配过的站。
+ *
+ * <p>返回 `{ origin, path }` 而不是原样的 URL：跳转地址由这两段拼出来，原串里的
+ * hash 与 query 都不带过去（`#boot=` 是我们自己拼的，原串若带 hash 必须丢掉）。
+ */
+export function serviceReturn(raw: unknown): { origin: string; path: string } | undefined {
+  const s = typeof raw === 'string' ? raw.trim() : '';
+  if (!s) return undefined;
+  let url: URL;
+  try {
+    url = new URL(s);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
+  // 用规范化后的 href 去比：注册表里填的地址可能带尾斜杠，用户给的地址可能带默认端口
+  const href = url.href;
+  const hit = productServicesSnapshot()
+    .map((x) => (x.frontendUrl ?? '').trim().replace(/\/$/, ''))
+    .filter(Boolean)
+    .find((base) => href === base || href.startsWith(`${base}/`));
+  if (!hit) return undefined;
+  return { origin: new URL(hit).origin, path: `${url.pathname}${url.search}` };
+}
+
+/**
+ * 带着登录身份（`#boot=`）整页跳到服务页面 —— {@link serviceReturn} 的配套出口。
+ *
+ * <p>地址必须是那边校验过的产物，这里不再校验一遍（校验只该有一处）。
+ */
+export function openServiceReturn(target: { origin: string; path: string }): void {
+  window.location.href = `${target.origin}${target.path}#boot=${bootPayload()}`;
+}
+
 /** 组织进程里的仓建设 / 数据地图首页走外链，不在本 UI 渲染。 */
 export function followHome(path: string, router: Router): void {
   if (path === APP_HOME || path.startsWith('/model')) {

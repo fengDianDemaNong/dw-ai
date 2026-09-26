@@ -58,10 +58,10 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { api, useRemoteApi } from '../api/client';
 import { ADMIN_HOME, LOGIN_PATH, NO_PROJECT, SYS_HOME } from '../config/paths';
-import { followHome } from '../config/product';
+import { followHome, openServiceReturn, serviceReturn } from '../config/product';
 import {
   app,
   isPlatformAdmin,
@@ -69,12 +69,14 @@ import {
   navReady,
   resolveTenantHome,
   selectableTenants,
+  servicesReady,
   sessionAccount,
   switchTenant,
 } from '../stores/app';
 import type { Tenant } from '../types';
 
 const router = useRouter();
+const route = useRoute();
 const remote = useRemoteApi();
 const remoteList = ref<Tenant[]>([]);
 const keyword = ref('');
@@ -108,6 +110,18 @@ async function enter() {
   busy.value = true;
   try {
     if (!(await switchTenant(selected.value))) return;
+    // 有人是「要回服务页面、但得先选租户」才来的（登录页把 return 一起带了过来）——
+    // 租户定了就把他送回去，别再按本门户的落地页算。
+    const back = serviceReturn(route.query.return);
+    if (back) {
+      // 与登录页同一套前戏，两件事都不能省（理由见 `pages/login.vue` 里那段注释）：
+      // 服务目录决定 `serviceReturn` 的白名单，`resolveTenantHome()` 的副作用决定
+      // `#boot=` 里的 projectId / projectCode。
+      await Promise.all([servicesReady(), navReady()]);
+      resolveTenantHome();
+      openServiceReturn(back);
+      return;
+    }
     // 换租户后落地页可能变（另一个租户的许可下有别的产品页面），等新菜单到位再决定
     await navReady();
     followHome(resolveTenantHome(), router);

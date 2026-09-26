@@ -88,6 +88,35 @@ export function orgOrigin(): string {
   return 'http://127.0.0.1:5171';
 }
 
+/** 当前页面的地址（本进程内，不含 hash）—— 交给组织平台作为登录回跳的目标。 */
+export function currentLocation(): string {
+  return `${window.location.pathname}${window.location.search}`;
+}
+
+/**
+ * 回组织平台登录（只有 multi 走这条：standard 是本进程登录、standalone 根本没有身份）。
+ *
+ * <p>`returnTo` 是本进程内的一个地址（如 `/lineage/tables`）。传了它，组织平台会在
+ * 登录（以及必要的选租户）之后把身份连同这个地址一起送回来，用户落回他本来要看的那一页，
+ * 而不是被丢在门户首页 —— 与统一认证的回跳是同一件事。整页跳转带不过去任何内存状态，
+ * 所以只能走 query。
+ *
+ * <p>地址在这里拼成**绝对的**：组织平台要跳回来，必须知道往哪台机器跳 ——
+ * 服务可能在另一个域名/端口下（开发态 5182 与 5171 就不是一个）。不以单个 `/` 开头的值
+ * 直接丢弃：那种串拼出来不是本进程的地址（`//evil.com` 更是协议相对 URL），宁可不带参数。
+ *
+ * <p><b>嵌在门户 iframe 里时不要调它</b> —— 那会把壳里的画面变成一整页门户登录页。
+ * 嵌入态的续期是向宿主求令牌（见 `config/embed.ts` 的 `requestEmbedToken`），
+ * 调用点（`utils/request.ts`）已经先判过 `isEmbed()`。
+ */
+export function openOrgLogin(returnTo?: string): void {
+  const path = returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '';
+  const back = path
+    ? `?return=${encodeURIComponent(`${window.location.origin}${path}`)}`
+    : '';
+  window.location.assign(`${orgOrigin()}/org/login${back}`);
+}
+
 /**
  * 作废「上次问后端问到的模式」。
  *

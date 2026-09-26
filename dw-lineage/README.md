@@ -33,30 +33,64 @@ dw-lineage/
 └── ci.sh                  应用层校验
 ```
 
-在仓库根目录也可按模式启动（三种模式说明见仓库根 [README.md](../README.md)）：
-
-```bash
-# —— 多租户 multi（嵌入组织 / 仓建设，端口 18082 / 5173）
-# multi 必须与组织、仓建设配**同一个** MODULE_TOKEN，否则 /internal/v1/** 一律 401，
-# 项目镜像同步不过来，页面表现是「租户编码未同步」。
-MODULE_TOKEN=<与 org 相同的值> npm run dev:api:lineage     # sql-tools
-npm run dev:lineage         # multi 模式，等价于 npm run dev:multi -w sql-tools
-
-# —— 普通 standard（默认，本模块账号，端口 18082 / 5173）
-mvn -f dw-lineage/api/pom.xml spring-boot:run
-npm run dev:standard -w sql-tools
-
-# —— 独立 standalone（不管登录，端口 18082 / 5173）
-# 注意两边都要指定：后端不设模式变量时默认是 standard。
-# 两个变量都认，LINEAGE_RUN_MODE 更具体、优先；跟着 org / model 统一设 DW_AI_MODE 也可以。
-LINEAGE_RUN_MODE=standalone mvn -f dw-lineage/api/pom.xml spring-boot:run
-npm run dev:standalone -w sql-tools
-```
-
 解析与列级血缘不在本仓库内，通过 Maven 依赖引用：
 
 - https://gitee.com/songbaibuxiu/superior-sql-parser.git
 - https://gitee.com/songbaibuxiu/sqlflow.git
+
+---
+
+## 启动（仓库根目录）
+
+需要 **Node 22**、**Java 21**、**Maven**。先 `npm install`。
+`npm run dev:api:lineage` = `mvn -f dw-lineage/api/pom.xml spring-boot:run -Dspring-boot.run.profiles=multi`。
+模式开关：`LINEAGE_RUN_MODE` > `DW_AI_MODE` > 兜底 `standard` —— 本模块是三个模块里口径最细的一个
+（另两个只认 `DW_AI_MODE`），原因写在 [application.yml](api/src/main/resources/application.yml) 里那段注释上。
+**不设时就是 `standard`**，所以下面三节里只有 `multi` 那节必须显式带模式；另两节的脚本各自把变量写死，
+环境里有个别的 `DW_AI_MODE` 也压不过它。
+
+> `multi` 走的是 Spring profile `application-multi.yml`，**不只是**把模式设成 multi：那份文件还带着
+> 组织 API（18080）、组织前端（5171）、本服务（18082）、门户（5173）四个地址的默认值，而这几个在
+> `application.yml` 里是**故意留空**的（单跑 standard / standalone 时本模块没有门户可回）。
+> 所以 multi 这一节不能改写成 `LINEAGE_RUN_MODE=multi` —— 那条路给不出这几个地址。
+
+### 多租户 `multi`
+
+嵌入组织平台与仓建设，本模块**没有登录页**。先起组织（18080 / 5171），再从组织点「进入数据地图」；
+直接访问 5173 会被送回组织登录页，登录完回到原来那一页。
+
+`MODULE_TOKEN` 必须与组织、仓建设配**同一个**值 —— 否则 `/internal/v1/**` 一律 401，项目镜像
+同步不过来，页面表现是「租户编码未同步」（**不报错**，且要重启进程才生效）。
+
+```bash
+MODULE_TOKEN=<与 org / model 相同的值> npm run dev:api:lineage   # 18082
+npm run dev:lineage                                              # 5173
+```
+
+### 普通 `standard`（默认）
+
+本模块本地账号，不启组织。打开 <http://127.0.0.1:5173/lineage/login> 。
+
+```bash
+npm run dev:api:lineage:standard   # 18082
+npm run dev:lineage:standard       # 5173
+```
+
+### 独立 `standalone`
+
+无登录、无租户切换。打开 <http://127.0.0.1:5173/lineage> 。
+
+```bash
+npm run dev:api:lineage:standalone   # 18082
+npm run dev:lineage:standalone       # 5173
+```
+
+后端端口固定 18082（`SERVER_PORT` 可改；三个模块统一写在 `application.yml`，没有任何 profile 覆盖它），
+前端 5173 的 `/api` 默认就代理到 18082。
+H2 文件：`dw-lineage/api/data/dw_lineage`（设了 `DW_AI_HOME` 时与 org / model 落进同一个 `data/`）。
+健康检查：`GET http://127.0.0.1:18082/actuator/health`。
+
+不打 npm 脚本、想从模块内手工起（打 jar 再 `java -jar`）见下面[快速开始](#快速开始)的「构建与启动」。
 
 ---
 

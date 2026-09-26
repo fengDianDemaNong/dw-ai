@@ -126,7 +126,9 @@ router.beforeEach((to) => {
   }
   if (!loggedIn && to.name !== 'auth-callback') {
     if (multi) {
-      openOrgLogin();
+      // 把「他本来要去哪」一起带过去：登录（以及必要的选租户）之后组织平台会把他送回
+      // 这一页，而不是丢在门户首页 —— 与统一认证的回跳是同一件事（见 openOrgLogin）。
+      openOrgLogin(to.fullPath);
       return false;
     }
     if (standard) return { path: LOGIN_PATH };
@@ -136,7 +138,8 @@ router.beforeEach((to) => {
     // platformAdmin 进 SYS_HOME（工作台）不需要 tenantId —— 工作台本身就是"没选租户"的管理员入口。
     if (app.platformAdmin && to.path.startsWith(SYS_HOME)) return true;
     if (multi) {
-      openOrgLogin();
+      // 同一件事：登录页会先让他选租户，再把身份连同这一页送回来。
+      openOrgLogin(to.fullPath);
       return false;
     }
     return { path: LOGIN_PATH };
@@ -144,7 +147,12 @@ router.beforeEach((to) => {
   // 工作台只有 multi 没有（见 `config/pages.ts` 的 `hasWorkbench`）。原先这里写的是
   // `!standard`，把 standalone 也一起挡在外面 —— 但 standalone 的口径是
   // 「standard 去掉用户/登录」，工作台那一级它照样有。
-  if (to.path.startsWith(SYS_HOME) && !hasWorkbench()) return home();
+  //
+  // multi 下仍放行「设置」（`sys-settings`）：它管的是**租户级**的外观 / 大模型 /
+  // AI 提示词，挂在工作台路径下只是因为工作台曾是它的入口，而组织平台的工作台壳
+  // 正需要它（见 `config/navData.ts` 的工作台候选）。其余几页照旧打回 ——
+  // 项目管理在 multi 下由组织平台自己提供，用户/角色管理的账号也在组织那边。
+  if (to.path.startsWith(SYS_HOME) && !hasWorkbench() && to.name !== 'sys-settings') return home();
   if (to.name === 'no-project') {
     const next = resolveTenantHome();
     if (next !== NO_PROJECT) return { path: next };

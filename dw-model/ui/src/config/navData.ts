@@ -1,7 +1,7 @@
 import { layerHref, layerIcon } from './layers';
 import type { NavGroup } from './nav';
 import { MODEL_PAGES } from './pages';
-import { MODEL_HOME } from './paths';
+import { MODEL_HOME, SYS_HOME } from './paths';
 
 /**
  * 导航的**纯数据**（`nav.ts` 只剩组装与过滤逻辑）。
@@ -222,17 +222,33 @@ const MODELING_CANDIDATES: NavGroup = {
  * <p>只报本进程自己的、且在 multi（被组织平台嵌入时的形态）下真实存在的页面：
  *
  * <ul>
- *   <li><b>建模中心报「内置分层入口 + 三个工具页」</b>（ODS/DWD/DWS/ADS/DIM/STG 与
- *       规范校验 / 从 ODS 生成 / 从 DWD 生成，见 {@link MODELING_CANDIDATES}）——
- *       自建的层码报不了，理由写在那边的注释里。</li>
- *   <li><b>不报工作台级项。</b>本进程的工作台挂在 `/model/projects`，而 multi 下
- *       没有工作台 —— `router/index.ts` 会把它重定向回家。报给平台等于给出一个
- *       点进去就跳走的入口。</li>
+ *   <li><b>项目壳</b>：顶层三项 + 规范中心七项 + 建模中心（内置分层入口与三个工具页，
+ *       见 {@link MODELING_CANDIDATES}）—— 自建的层码报不了，理由写在那边的注释里。</li>
+ *   <li><b>工作台壳</b>：只报「数仓建模 / 设置」一页。它管的是**租户级**的外观 / 大模型 / AI 提示词，
+ *       与「这个部署有没有工作台」无关，而组织平台的工作台壳正需要它 ——
+ *       数据地图的「元数据服务」用的是同一个做法（`dw-lineage/ui/src/config/navData.ts`）。
+ *       为此 `router/index.ts` 在 multi 下对它单独放行。</li>
  * </ul>
+ *
+ * <p><b>工作台的其余几页不报</b>：项目管理在 multi 下由组织平台 fan-out、与平台自己的
+ * 项目管理重复；知识库与用户/角色管理的归属也在组织那边（见 `config/sysNav.ts`）。
+ * 它们挂在 `/model/projects` 下，而 multi 没有工作台，`router/index.ts` 会把它们
+ * 重定向回家 —— 报给平台等于给出一个点进去就跳走的入口。
  *
  * <p>`scope` 只是建议值，平台管理员在菜单管理页可以改。
  */
 export const MENU_CANDIDATES: MenuCandidateSource[] = [
+  {
+    scope: 'workbench',
+    groups: [
+      {
+        // 组名用产品名而不是「设置」：组织平台的工作台壳里已经有一组「系统管理 / 设置」，
+        // 再挂一组同名的，侧栏上就是两个「设置」并排，用户分不清哪个是哪个。
+        title: '数仓建模',
+        items: [{ path: `${SYS_HOME}/settings`, label: '设置', icon: 'SettingOutlined' }],
+      },
+    ],
+  },
   {
     scope: 'project',
     groups: inheritGroupPerm([...GROUPS_TOP, GROUP_SPEC, MODELING_CANDIDATES]),

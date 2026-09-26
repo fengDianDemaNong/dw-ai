@@ -47,7 +47,7 @@ docs/product/        可点击原型（不是实现）
 npm install
 ```
 
-每个 API / 前端各开一个终端（`&&` 写在同一行会卡住）。改过表结构后删掉 `dw-org/api/data/`、`dw-model/api/data/` 再启动。
+每个 API / 前端各开一个终端（`&&` 写在同一行会卡住）。改过表结构后删掉 `dw-org/api/data/`、`dw-model/api/data/`、`dw-lineage/api/data/` 再启动。
 
 ---
 
@@ -96,7 +96,8 @@ npm run dev:lineage
 所以带不带 `multi` 都落在 18082。
 
 **数据地图的默认模式是 `standard`（不是 `multi`）**，与仓建设相反。上面这两个脚本
-是套件（multi）专用入口；单跑血缘见下方「普通 / 独立」两节，用的是显式 `mvn` 命令。
+是套件（multi）专用入口；单跑血缘见下方「普通 / 独立」两节，用 `dev:api:lineage:standard` /
+`dev:api:lineage:standalone` 两个具名脚本 —— **脚本名即模式**，不用自己带变量。
 
 ---
 
@@ -116,11 +117,11 @@ VITE_RUN_MODE=standard npm run dev:model
 **只跑血缘**（自带租户/项目壳）：
 
 ```bash
-LINEAGE_RUN_MODE=standard mvn -f dw-lineage/api/pom.xml spring-boot:run
-npm run dev:standard -w sql-tools
+npm run dev:api:lineage:standard   # 18082
+npm run dev:lineage:standard       # 5173
 ```
 
-前端默认 http://127.0.0.1:5173 ，后端默认 18082。
+打开 http://127.0.0.1:5173/lineage/login ，用本模块账号 `admin` / `123456` 。
 
 ---
 
@@ -137,26 +138,20 @@ VITE_RUN_MODE=standalone npm run dev:model
 
 打开 http://127.0.0.1:5172/model 。
 
-**只跑血缘**（默认是普通模式 standard，带本模块账号）：
+**只跑血缘**（无登录，起来就能用）：
 
 ```bash
-# API 默认 LINEAGE_RUN_MODE=standard（本地账号 admin / 123456），端口 18082
-mvn -f dw-lineage/api/pom.xml spring-boot:run
-
-npm run dev:standard -w sql-tools
+npm run dev:api:lineage:standalone   # 18082
+npm run dev:lineage:standalone       # 5173
 ```
 
 打开 http://127.0.0.1:5173/lineage 。
 
-要**独立模式**（无登录，起来就能用）就把两边都换成 standalone —— 只改前端是不够的，
-后端不设模式变量时仍是 standard（血缘认两个变量：`LINEAGE_RUN_MODE` 优先，跟仓建设统一设
-`DW_AI_MODE` 也行）：
-
-```bash
-LINEAGE_RUN_MODE=standalone mvn -f dw-lineage/api/pom.xml spring-boot:run
-
-npm run dev:standalone -w sql-tools
-```
+血缘认的模式变量比另两个模块多一层：`LINEAGE_RUN_MODE` > `DW_AI_MODE` > 兜底 `standard`，
+所以上面两个脚本把 `LINEAGE_RUN_MODE` 写死在脚本里 —— 只改前端是不够的，后端不设模式变量
+时仍是 standard。而 multi 那一节**必须**走 profile（`application-multi.yml` 还提供组织 API /
+组织前端 / 本服务 / 门户四个地址的默认值），**不能**用 `LINEAGE_RUN_MODE=multi` 代替；
+两种写法的取舍见 [dw-lineage/README.md](dw-lineage/README.md)。
 
 ---
 

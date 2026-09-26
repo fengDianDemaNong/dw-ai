@@ -287,7 +287,14 @@ export async function bootstrapRemote() {
     if (cfg.orgUiUrl) sessionStorage.setItem(ORG_UI_KEY, cfg.orgUiUrl);
     else sessionStorage.removeItem(ORG_UI_KEY);
 
-    const standalone = mode === 'standalone' || cfg.allowLogin === false;
+    // `allowLogin === false` 在 multi 下也为真 —— 后端对 warehouse + multi 就是这么报的
+    // （见 dw-model/api 的 AuthController：那种部署的登录在组织平台，本进程不出登录页）。
+    // 直接把它当成 standalone，会让本函数在「multi 且手上没令牌」时继续往下走、拿到一个
+    // 401；而 401 的兜底（下面的 catch）会把运行模式作废，前端于是回落成 standard、
+    // 被守卫送去**本进程**的登录页，还要整页刷新一次才轮到组织平台登录 ——
+    // 用户原本要去的地址也在这条绕路上丢掉了。multi 要的是当场跳组织平台、并且带上
+    // 那个地址（见 router/index.ts 的 openOrgLogin）。
+    const standalone = mode === 'standalone' || (cfg.allowLogin === false && mode !== 'multi');
     if (cfg.allowLogin !== false && cfg.sessionEpoch) {
       const prev = sessionStorage.getItem(BOOT_KEY);
       if (prev && prev !== cfg.sessionEpoch) {
@@ -316,14 +323,18 @@ export async function bootstrapRemote() {
       applySnapshot(state.currentProjectId, await api.snapshot(state.currentProjectId));
     }
   } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const unauthorized = /401|unauthorized|session expired|登录已过期|未登录|没有登录/i.test(msg);
     // 后端没答上来（没起来 / 网络不通）—— 把上次问到的模式作废。
     // 留着它最典型的翻车：上次后端跑 standard，这次只起了独立模式的前端，
     // 前端照着残留的 standard 出登录页，而这次根本没有后端可以登录。
-    clearDeployMode();
-    const msg = e instanceof Error ? e.message : String(e);
-    if (/401|unauthorized|session expired|登录已过期|未登录|没有登录/i.test(msg)) {
-      setAuthToken(null);
-    }
+    //
+    // 但 401 不算「没答上来」：后端刚答过模式，只是这次手上没有（或只剩过期的）身份。
+    // 把模式作废了，前端会回落成 standard，multi 部署的用户于是被送去本进程的登录页
+    // （那儿根本登不了），还要整页刷新一次才轮到组织平台。留着模式，守卫当场就能
+    // 把他送去组织平台，并带上他本来要去的那一页。
+    if (!unauthorized) clearDeployMode();
+    if (unauthorized) setAuthToken(null);
   }
 }
 

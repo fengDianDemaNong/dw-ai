@@ -56,8 +56,17 @@ async function login(page: Page, username: string, password: string) {
   }
 }
 
-async function openNav(page: Page, label: string) {
-  const side = page.locator('aside nav').getByText(label, { exact: true }).first();
+/**
+ * 点侧栏里的一项。
+ *
+ * <p>传了 `href` 就按链接地址定位：产品菜单是管理员配的，组名与项名都能叫任何东西
+ * （「数仓建模 / 设置」就是一个），只按文本找会先撞上门户自己的同名菜单。
+ */
+async function openNav(page: Page, label: string, href?: string) {
+  const nav = page.locator('aside nav');
+  const side = href
+    ? nav.locator(`a[href="${href}"]`).first()
+    : nav.getByText(label, { exact: true }).first();
   if (await side.isVisible().catch(() => false)) {
     await side.click();
     return;
@@ -540,7 +549,7 @@ test.describe.serial('工作台前端流程', () => {
     await expect(page.getByRole('heading', { name: '租户管理员' })).toBeVisible();
     await expect(page.getByRole('heading', { name: '项目管理员' })).toBeVisible();
 
-    await openNav(page, '设置');
+    await openNav(page, '设置', '/org/workbench/settings');
     await expect(page.getByRole('heading', { name: '设置' })).toBeVisible();
     await expect(page.getByRole('heading', { name: '主题' })).toBeVisible();
     await expect(page.getByRole('heading', { name: '菜单栏颜色' })).toBeVisible();

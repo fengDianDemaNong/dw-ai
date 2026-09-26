@@ -81,7 +81,7 @@
       v-model:open="fetchOpen"
       title="从服务拉取菜单"
       placement="right"
-      :width="880"
+      :width="1120"
       :body-style="{ paddingBottom: '80px' }"
     >
       <p class="muted">
@@ -99,67 +99,87 @@
           style="margin-bottom: 12px"
         />
 
-        <div v-for="group in candidates" :key="group.product" class="cand-group">
-          <div class="cand-head">
-            <b>{{ productLabel(group.product) }}</b>
-            <a-tag v-if="group.ok" color="green">{{ group.menus.length }} 项</a-tag>
-            <a-tag v-else color="red">拉取失败</a-tag>
-          </div>
-          <p v-if="group.url" class="muted cand-url">请求地址：<code>{{ group.url }}</code></p>
-          <a-alert v-if="!group.ok" type="error" show-icon :message="group.error" style="margin-bottom: 8px" />
+        <!-- 左树右选：左边是服务上报的菜单树（产品 → 壳·分组 → 菜单项），右边是即将导入的清单。
+             勾一个分组 = 整组导入。 -->
+        <div class="pick-split">
+          <div class="pick-left">
+            <div v-for="group in failedCandidates" :key="group.product" class="cand-fail">
+              <div class="cand-head">
+                <b>{{ productLabel(group.product) }}</b>
+                <a-tag color="red">拉取失败</a-tag>
+              </div>
+              <p v-if="group.url" class="muted cand-url">请求地址：<code>{{ group.url }}</code></p>
+              <a-alert type="error" show-icon :message="group.error" style="margin-bottom: 8px" />
+            </div>
 
-          <a-table
-            v-else
-            :data-source="group.menus"
-            :columns="candCols"
-            row-key="id"
-            size="small"
-            :pagination="false"
-          >
-            <template #bodyCell="{ column, record }">
-              <template v-if="column.key === 'pick'">
-                <a-checkbox
-                  :checked="picked.has(record.id)"
-                  :disabled="isConfigured(group.product, record)"
-                  @change="onCheck(record, $event)"
-                />
+            <a-tree
+              v-if="candTree.length"
+              checkable
+              :selectable="false"
+              default-expand-all
+              :tree-data="candTree"
+              :checked-keys="checkedKeys"
+              @check="onTreeCheck"
+            />
+            <p v-else-if="!fetching && !failedCandidates.length" class="muted">没有可导入的候选。</p>
+          </div>
+
+          <div class="pick-right">
+            <div class="pick-head">
+              <b>将导入 {{ pickedRows.length }} 项</b>
+              <span v-if="pickedRows.length" class="muted">归属壳、分组、菜单名、权限词、排序都能改了再保存</span>
+            </div>
+
+            <a-table
+              v-if="pickedRows.length"
+              :data-source="pickedRows"
+              :columns="pickedCols"
+              row-key="id"
+              size="small"
+              :pagination="false"
+            >
+              <template #bodyCell="{ column, record }">
+                <template v-if="column.key === 'scope'">
+                  <a-select
+                    v-model:value="draft[record.id].scope"
+                    size="small"
+                    style="width: 108px"
+                    :options="scopeChoices"
+                  />
+                </template>
+                <template v-else-if="column.key === 'group'">
+                  <a-auto-complete
+                    v-model:value="draft[record.id].group"
+                    size="small"
+                    placeholder="不分组"
+                    :options="groupOptions(draft[record.id].scope, record.product)"
+                  />
+                </template>
+                <template v-else-if="column.key === 'label'">
+                  <a-input v-model:value="draft[record.id].label" size="small" />
+                </template>
+                <template v-else-if="column.key === 'perm'">
+                  <!-- 与手填表单用的是同一个控件：两处各写一遍必然会漂成「同一件事能填的词不一样」 -->
+                  <PermSelect
+                    v-model:value="draft[record.id].perm"
+                    :options="optionsOf(record.product)"
+                    placeholder="不判权"
+                  />
+                </template>
+                <template v-else-if="column.key === 'sort'">
+                  <a-input-number v-model:value="draft[record.id].sortOrder" size="small" :min="0" style="width: 72px" />
+                </template>
+                <template v-else-if="column.key === 'act'">
+                  <a-button size="small" @click="unpick(record)">移除</a-button>
+                </template>
               </template>
-              <template v-else-if="column.key === 'scope'">
-                <a-select
-                  v-model:value="draft[record.id].scope"
-                  size="small"
-                  style="width: 108px"
-                  :options="scopeChoices"
-                  :disabled="!picked.has(record.id)"
-                />
-              </template>
-              <template v-else-if="column.key === 'group'">
-                <a-auto-complete
-                  v-model:value="draft[record.id].group"
-                  size="small"
-                  placeholder="不分组"
-                  :options="groupOptions(draft[record.id].scope, group.product)"
-                />
-              </template>
-              <template v-else-if="column.key === 'label'">
-                <a-input v-model:value="draft[record.id].label" size="small" />
-              </template>
-              <template v-else-if="column.key === 'perm'">
-                <!-- 与手填表单用的是同一个控件：两处各写一遍必然会漂成「同一件事能填的词不一样」 -->
-                <PermSelect
-                  v-model:value="draft[record.id].perm"
-                  :options="optionsOf(group.product)"
-                  placeholder="不判权"
-                />
-              </template>
-              <template v-else-if="column.key === 'sort'">
-                <a-input-number v-model:value="draft[record.id].sortOrder" size="small" :min="0" style="width: 72px" />
-              </template>
-              <template v-else-if="column.key === 'state'">
-                <a-tag v-if="isConfigured(group.product, record)" color="default">已配置</a-tag>
-              </template>
-            </template>
-          </a-table>
+            </a-table>
+
+            <p v-else class="muted empty-pick">
+              在左边勾选要挂上来的菜单。勾<b>一个分组</b>（主菜单）会把这一组下面的菜单一起选进来 ——
+              像数仓建模的「建模中心」，它下面的分层是按项目动态生成的，逐条勾太碎。
+            </p>
+          </div>
         </div>
       </a-spin>
 
@@ -691,18 +711,108 @@ const candidates = ref<{ product: string; url?: string; ok: boolean; error: stri
 const draft = reactive<Record<string, { scope: NavScope; group: string; label: string; perm: string; sortOrder: number }>>({});
 const picked = ref(new Set<string>());
 
-const candCols = [
-  { title: '', key: 'pick', width: 44 },
-  { title: '归属壳', key: 'scope', width: 120 },
-  { title: '分组', key: 'group', width: 130 },
-  { title: '菜单名', key: 'label', width: 160 },
+/** 右侧清单的列。归属壳往下都能改；路径只读（它必须与子应用的路由一致）。 */
+const pickedCols = [
+  { title: '归属壳', key: 'scope', width: 116 },
+  { title: '分组', key: 'group', width: 132 },
+  { title: '菜单名', key: 'label', width: 150 },
   { title: '子应用路径', dataIndex: 'path' },
-  { title: '权限词', key: 'perm', width: 130 },
-  { title: '排序', key: 'sort', width: 88 },
-  { title: '', key: 'state', width: 76 },
+  { title: '权限词', key: 'perm', width: 128 },
+  { title: '排序', key: 'sort', width: 84 },
+  { title: '', key: 'act', width: 68 },
 ];
 
 const fetchableCount = computed(() => candidates.value.filter((c) => c.ok && c.menus.length).length);
+
+/** 候选的扁平表，带上它属于哪个产品。树、右侧清单、批量提交都从它派生。 */
+const allCandidates = computed(() => candidates.value.flatMap((g) => g.menus.map((m) => ({ product: g.product, m }))));
+
+/** 拉取失败的产品：进不了树，在树上方单独说明原因（带着实际请求的地址）。 */
+const failedCandidates = computed(() => candidates.value.filter((c) => !c.ok));
+
+type CandNode = {
+  key: string;
+  title: string;
+  selectable?: boolean;
+  disabled?: boolean;
+  isLeaf?: boolean;
+  children?: CandNode[];
+};
+
+function leafKey(m: MenuCandidate) {
+  return `m:${m.id}`;
+}
+
+/**
+ * 左侧菜单树 = 产品 → 壳 · 分组 → 菜单项。
+ *
+ * <p>分组这一层刻意**不读草稿值**：右侧能把归属壳与分组名改掉，树若跟着重排，
+ * 改一个字整棵树就跳一下、勾选位置找不着。树只表达「服务报上来的样子」。
+ *
+ * <p>已经配过的菜单在树上禁用 —— 同一个壳下同产品同路径只该有一条。
+ */
+const candTree = computed<CandNode[]>(() =>
+  candidates.value
+    .filter((g) => g.menus.length)
+    .map((g) => {
+      const buckets = new Map<string, { scope: NavScope; group: string; menus: MenuCandidate[] }>();
+      for (const m of g.menus) {
+        const k = `${m.scope}\u0000${m.group}`;
+        const b = buckets.get(k) ?? { scope: m.scope, group: m.group, menus: [] };
+        b.menus.push(m);
+        buckets.set(k, b);
+      }
+      return {
+        key: `p:${g.product}`,
+        title: `${productLabel(g.product)}（${g.menus.length} 项）`,
+        selectable: false,
+        children: [...buckets.values()].map((b) => ({
+          key: `g:${g.product}\u0000${b.scope}\u0000${b.group}`,
+          title: `${scopeLabel(b.scope)} · ${b.group || '未分组'}`,
+          selectable: false,
+          children: b.menus.map((m) => ({
+            key: leafKey(m),
+            title: isConfigured(g.product, m) ? `${m.label}（已配置）` : m.label,
+            isLeaf: true,
+            disabled: isConfigured(g.product, m),
+          })),
+        })),
+      };
+    })
+);
+
+/**
+ * 树上的勾选态由**已选集合**推出来，不另存一份。
+ *
+ * <p>只给叶子 key：rc-tree 在非严格模式下会自己把父节点的全选/半选算出来，
+ * 所以「建模中心」这种分组的对勾不必我们维护 —— 组里勾了一半，它自己就是半选。
+ */
+const checkedKeys = computed(() => [...picked.value].map((id) => `m:${id}`));
+
+/**
+ * 树上勾/取消 → 重算已选集合。
+ *
+ * <p>不读「这一次改了哪个节点」，而是拿勾选后的**全量 key** 重算：勾分组会连带一整片、
+ * 勾叶子只影响自己，两种情形用同一条规则就都对，不必再区分节点是不是叶子。
+ *
+ * <p>参数类型按 `unknown` 收 —— antd 的 `check` 事件在严格/非严格模式下签名不同，
+ * 写死一种会让另一个模式编译不过（与 `product-roles.vue` 同一处理）。
+ */
+function onTreeCheck(raw: unknown) {
+  const checked = new Set((Array.isArray(raw) ? raw : []).map(String));
+  const next = new Set<string>();
+  for (const { product, m } of allCandidates.value) {
+    // 已配置的在树上禁用；万一 rc-tree 把它一并报进来，这里再挡一道 ——
+    // 放进右侧会让保存时整条被后端跳过，看起来像「保存没生效」
+    if (checked.has(leafKey(m)) && !isConfigured(product, m)) next.add(m.id);
+  }
+  picked.value = next;
+}
+
+/** 右侧清单 = 已选项，按候选顺序（也就是树上的顺序），并带上产品码供下拉用。 */
+const pickedRows = computed(() =>
+  allCandidates.value.filter(({ m }) => picked.value.has(m.id)).map(({ product, m }) => ({ ...m, product }))
+);
 
 /**
  * 该候选是否已经配过（同一个壳下同产品同路径）。已配置的默认不勾。
@@ -716,16 +826,11 @@ function isConfigured(product: string, record: MenuCandidate) {
   return rows.value.some((r) => r.scope === scope && r.product === product && r.path === record.path);
 }
 
-function toggle(record: MenuCandidate, checked: boolean) {
+/** 右侧清单里移除一项（右侧是「取消勾选」的另一个入口，删完树上的勾也跟着灭）。 */
+function unpick(record: MenuCandidate) {
   const next = new Set(picked.value);
-  if (checked) next.add(record.id);
-  else next.delete(record.id);
+  next.delete(record.id);
   picked.value = next;
-}
-
-/** 勾选框的 change 事件只用到 `target.checked`，按结构取而不是 import antd 的事件类型。 */
-function onCheck(record: MenuCandidate, e: { target: { checked: boolean } }) {
-  toggle(record, e.target.checked);
 }
 
 async function openFetch() {
@@ -750,8 +855,7 @@ async function openFetch() {
 }
 
 async function submitBatch() {
-  const items = candidates.value
-    .flatMap((g) => g.menus.map((m) => ({ product: g.product, m })))
+  const items = allCandidates.value
     .filter(({ m }) => picked.value.has(m.id))
     .map(({ product, m }) => ({
       product,
@@ -1179,8 +1283,41 @@ onMounted(load);
 .node-branch {
   color: rgba(0, 0, 0, 0.72);
 }
-.cand-group {
-  margin-bottom: 20px;
+/* 左树右选：左边固定宽（树的名字都很短），右边吃掉剩下的宽度放可编辑的清单 */
+.pick-split {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.pick-left {
+  border-right: 1px solid var(--line);
+  padding-right: 12px;
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+}
+.pick-right {
+  min-width: 0;
+}
+.pick-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.pick-head .muted {
+  font-size: 12px;
+}
+.empty-pick {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 24px 16px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.cand-fail {
+  margin-bottom: 16px;
 }
 .cand-head {
   display: flex;

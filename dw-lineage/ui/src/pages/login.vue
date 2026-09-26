@@ -44,7 +44,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { defaultHome } from '../config/pages';
-import { isMulti, isStandalone, orgOrigin } from '../config/runtime';
+import { isMulti, isStandalone, openOrgLogin } from '../config/runtime';
 import { hasSession, login } from '../stores/auth';
 
 /**
@@ -120,8 +120,12 @@ onMounted(() => {
     return;
   }
   if (isMulti()) {
-    // 整页跳去组织平台，不用 router：那是另一个前端，不属这个路由表
-    window.location.assign(`${orgOrigin()}/org/login`);
+    // 整页跳去组织平台，不用 router：那是另一个前端，不属这个路由表。
+    //
+    // **不带 return**：本页是登录页，用户没有「本来要去的地方」；真正该带的是 401
+    // 拦截器手上那个当前地址（见 `utils/request.ts` 的 recoverFromOrg）。
+    // 这一分支正常也走不到 —— 守卫在 multi 下先把人从登录页赶去项目概况了。
+    openOrgLogin();
     return;
   }
   // 已经有会话了就不用再登一次（守卫一般已经处理，这里防的是直接打开本页）

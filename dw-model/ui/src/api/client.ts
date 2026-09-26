@@ -1,7 +1,7 @@
 /** 生产控制台只调 API。未配置 VITE_API_BASE_URL 时：开发态走 Vite `/api` 代理，已登录则同源。 */
 import { LOGIN_PATH } from '../config/paths';
-import { isEmbed } from '../config/product';
-import { isStandalone } from '../config/runtime';
+import { currentLocation, isEmbed, openOrgLogin } from '../config/product';
+import { isMultiTenant, isStandalone } from '../config/runtime';
 import type {
   DataGrade,
   Domain,
@@ -91,12 +91,30 @@ function isIdle() {
   return Date.now() - last > idleTtlMs();
 }
 
+/**
+ * 身份彻底失效后的去向 —— 「令牌失效」的几条路都收在这里，免得各自漂移。
+ *
+ * <p>multi 的身份在组织平台：回那儿重新登录，并把**当前这一页**带上，登录后落回原处。
+ * 不带的话他落在门户首页，还得自己重新找刚才在看的东西 —— 而这次失效往往只是令牌到期，
+ * 页面本身没毛病。以前这里径直跳本进程的 `LOGIN_PATH`，那一页在 multi 下也不过是再转
+ * 一次组织平台：多一跳，原地址还在这条绕路上丢了。
+ *
+ * <p>嵌入态**绝不整页跳**：那会把组织平台门户的壳变成一整页登录页。那里的续期是向宿主
+ * 求令牌（见 {@link renewFromHost}），求不到时由调用方给出可行动的提示。
+ */
+function backToLogin() {
+  if (typeof window === 'undefined' || isEmbed()) return;
+  if (isMultiTenant()) {
+    openOrgLogin(currentLocation());
+    return;
+  }
+  if (!window.location.pathname.includes('/login')) window.location.assign(LOGIN_PATH);
+}
+
 function expireIdle() {
   if (isStandalone()) return;
   setAuthToken(null);
-  if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
-    window.location.assign(LOGIN_PATH);
-  }
+  backToLogin();
 }
 
 /**
@@ -263,6 +281,12 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
       // 嵌入态先问宿主（见 renewFromHost 里为什么不能反着来）
       if (await renewFromHost()) return doFetch<T>(path, init);
       if (await refreshAccess()) return doFetch<T>(path, init);
+      // 三条路都走不通了。multi 下当场回组织平台重新登录（原页带上）：这次 401 往往
+      // 只是令牌到期，页面本身没毛病，让他落回原处比让各处分别显示一句「请求错误 401」有用。
+      //
+      // 只对 multi 生效 —— standard 的 401 恢复耗尽原本就是把错误抛给调用方，
+      // 那是另一个模式的既有口径，这一轮不顺手改它（嵌入态由 backToLogin 自己挡掉）。
+      if (isMultiTenant()) backToLogin();
     }
     throw e;
   }

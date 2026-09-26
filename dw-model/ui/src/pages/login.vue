@@ -86,6 +86,13 @@ onMounted(async () => {
     return;
   }
   if (isMultiTenant()) {
+    // 正常到不了这里：守卫在进本页之前就把 multi 的无身份访问送去组织平台了
+    // （`stores/app.ts` 的 bootstrapRemote 不再把 multi 误判成 standalone 之后，
+    // 首屏也只跳一次）。留着是兜底。
+    //
+    // **不带 return**：本页是「登录页」，用户没有「本来要去的地方」——
+    // 带着 `/model/login` 回跳只会绕一圈又回到这里。真正该带的是守卫手上那个
+    // `to.fullPath`，它比本页早一步知道用户想去哪。
     openOrgLogin();
     return;
   }

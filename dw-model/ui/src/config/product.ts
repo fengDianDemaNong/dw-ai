@@ -77,8 +77,33 @@ export function orgOrigin(): string {
  * 留着，我们仍然被壳嵌着。
  */
 
-export function openOrgLogin(): void {
-  window.location.href = `${orgOrigin()}/org/login`;
+/** 当前页面的地址（本进程内，不含 hash）—— 交给组织平台作为登录回跳的目标。 */
+export function currentLocation(): string {
+  return `${window.location.pathname}${window.location.search}`;
+}
+
+/**
+ * 回组织平台登录。
+ *
+ * <p>`returnTo` 是本进程内的一个地址（如 `/model/spec/layers`）。传了它，组织平台会在
+ * 登录（以及必要的选租户）之后把身份与这个地址一起送回来，用户落回他本来要去的那一页 ——
+ * 而不是被丢在门户首页。整页跳转带不过去任何内存状态，所以只能走 query。
+ *
+ * <p>不传 = 只是「去登录」，落点由组织平台决定（用户主动点某个需要登录的入口时用）。
+ * 路由守卫拦下未登录的导航时会传 `to.fullPath`：那正是他要去而没去成的地方。
+ *
+ * <p>地址在这里拼成**绝对的**：组织平台要跳回来，必须知道往哪台机器跳 ——
+ * 服务可能在另一个域名/端口下（开发态 5181 与 5171 就不是一个）。
+ *
+ * <p>不以单个 `/` 开头的值直接丢弃：那种串拼出来不是本进程的地址
+ * （`//evil.com` 更是协议相对 URL），宁可不带参数。
+ */
+export function openOrgLogin(returnTo?: string): void {
+  const path = returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '';
+  const back = path
+    ? `?return=${encodeURIComponent(`${window.location.origin}${path}`)}`
+    : '';
+  window.location.href = `${orgOrigin()}/org/login${back}`;
 }
 
 /**

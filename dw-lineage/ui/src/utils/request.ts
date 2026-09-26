@@ -5,7 +5,7 @@ import { hasSession, refreshAccess, tokenExpiringSoon } from '../stores/auth';
 import { requestEmbedToken } from '../config/embed';
 import { onApiBaseChange } from '../config/api';
 import { LOGIN_PATH, requiresLocalLogin } from '../config/pages';
-import { isEmbed, isMulti, orgOrigin } from '../config/runtime';
+import { currentLocation, isEmbed, isMulti, openOrgLogin } from '../config/runtime';
 
 /** SQL 血缘解析属于计算密集型请求，大脚本耗时可达数十秒。 */
 const TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT) || 60000;
@@ -100,7 +100,9 @@ async function recoverFromOrg(config: RetriableConfig | undefined): Promise<unkn
     }
     throw new Error('登录已过期且未从宿主获得新令牌，请从组织平台重新进入数据地图');
   }
-  window.location.assign(`${orgOrigin()}/org/login`);
+  // 把当前这一页带上：组织平台登录后会把他送回这里。不带的话他落在门户首页，
+  // 还得自己重新找刚才在看的东西 —— 而这次 401 往往只是令牌到期，页面本身没毛病。
+  openOrgLogin(currentLocation());
   throw new Error('登录已过期，正在返回组织平台重新登录');
 }
 
