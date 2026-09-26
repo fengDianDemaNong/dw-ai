@@ -92,8 +92,14 @@ export function currentLocation(): string {
  * <p>不传 = 只是「去登录」，落点由组织平台决定（用户主动点某个需要登录的入口时用）。
  * 路由守卫拦下未登录的导航时会传 `to.fullPath`：那正是他要去而没去成的地方。
  *
- * <p>地址在这里拼成**绝对的**：组织平台要跳回来，必须知道往哪台机器跳 ——
- * 服务可能在另一个域名/端口下（开发态 5181 与 5171 就不是一个）。
+ * <p>传过去的是**产品码 + 路径**，不是本进程的绝对地址：组织平台拿产品码去服务注册表里
+ * 查出该往哪个地址跳。这样用户用 localhost / 127.0.0.1 / 局域网 IP / 域名哪一种进来，
+ * 都跳得回来 —— 若传绝对地址，组织侧就得拿它跟注册表里那**一个**写法逐字比对，
+ * 换个写法访问同一个服务就会失配，且失配是**静默回落门户首页**（看不出错）。
+ *
+ * <p>产品码写死 `warehouse` 而不是用 `getUiProduct()`：那个函数的取值是**这个前端
+ * 跑成哪种 UI 变体**（`org` / `warehouse` / `suite`），而服务注册表登记的是**发布身份**，
+ * 两者不是一回事 —— suite 变体将来也可能跑在 `warehouse` 这个服务名下。
  *
  * <p>不以单个 `/` 开头的值直接丢弃：那种串拼出来不是本进程的地址
  * （`//evil.com` 更是协议相对 URL），宁可不带参数。
@@ -101,7 +107,7 @@ export function currentLocation(): string {
 export function openOrgLogin(returnTo?: string): void {
   const path = returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '';
   const back = path
-    ? `?return=${encodeURIComponent(`${window.location.origin}${path}`)}`
+    ? `?returnSvc=warehouse&returnPath=${encodeURIComponent(path)}`
     : '';
   window.location.href = `${orgOrigin()}/org/login${back}`;
 }

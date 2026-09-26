@@ -6,10 +6,15 @@
   "description": "数据地图 / 血缘分析",
   "scripts": {
     "//ui": "ui 已并入仓库根的 npm workspaces（见 docs/tech/adr/0014），依赖装在仓库根，所以要用 --prefix .. 指到根再 -w 选工作区（包名 sql-tools，不是目录名）。",
+    "//mode": "这里是模块内的转发入口，脚本名与**仓库根同名脚本语义一致**（dev:lineage = multi，2026-09 之前它指的是 standard，已对齐，别按旧印象用）。三种模式的完整说明见 README.md 的「启动（仓库根目录）」。",
     "dev": "npm --prefix .. run dev:standard -w sql-tools",
-    "dev:lineage": "npm --prefix .. run dev:standard -w sql-tools",
+    "dev:standard": "npm --prefix .. run dev:standard -w sql-tools",
+    "dev:lineage": "npm --prefix .. run dev:multi -w sql-tools",
+    "dev:standalone": "npm --prefix .. run dev:standalone -w sql-tools",
     "dev:api": "mvn -f api/pom.xml spring-boot:run",
+    "dev:api:standard": "LINEAGE_RUN_MODE=standard mvn -f api/pom.xml spring-boot:run",
     "dev:api:lineage": "mvn -f api/pom.xml spring-boot:run -Dspring-boot.run.profiles=multi",
+    "dev:api:standalone": "LINEAGE_RUN_MODE=standalone mvn -f api/pom.xml spring-boot:run",
     "build": "npm --prefix .. run build -w sql-tools",
     "package": "bash package.sh"
   }

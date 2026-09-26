@@ -90,6 +90,11 @@ npm run dev:lineage:standalone       # 5173
 H2 文件：`dw-lineage/api/data/dw_lineage`（设了 `DW_AI_HOME` 时与 org / model 落进同一个 `data/`）。
 健康检查：`GET http://127.0.0.1:18082/actuator/health`。
 
+以上命令都在**仓库根**执行。`dw-lineage/package.json` 里另有一份**模块内转发入口** —— 因为人已经
+站在 lineage 目录里，它省掉了 `lineage` 那一段：`dev:lineage`（multi）/ `dev:standard` /
+`dev:standalone`，后端对应 `dev:api` / `dev:api:lineage` / `dev:api:standard` / `dev:api:standalone`，
+模式语义与上面一一对应，在 `dw-lineage/` 下直接 `npm run dev:standalone` 即可。
+
 不打 npm 脚本、想从模块内手工起（打 jar 再 `java -jar`）见下面[快速开始](#快速开始)的「构建与启动」。
 
 ---

@@ -112,7 +112,7 @@ async function enter() {
     if (!(await switchTenant(selected.value))) return;
     // 有人是「要回服务页面、但得先选租户」才来的（登录页把 return 一起带了过来）——
     // 租户定了就把他送回去，别再按本门户的落地页算。
-    const back = serviceReturn(route.query.return);
+    const back = serviceReturn(route.query);
     if (back) {
       // 与登录页同一套前戏，两件事都不能省（理由见 `pages/login.vue` 里那段注释）：
       // 服务目录决定 `serviceReturn` 的白名单，`resolveTenantHome()` 的副作用决定

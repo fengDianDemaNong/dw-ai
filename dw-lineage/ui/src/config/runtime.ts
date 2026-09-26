@@ -1,5 +1,5 @@
 import { apiUrl } from './api';
-import { setBootRoles } from './iam';
+import { PRODUCT, setBootRoles } from './iam';
 
 export type RunMode = 'standalone' | 'standard' | 'multi';
 
@@ -101,9 +101,14 @@ export function currentLocation(): string {
  * 而不是被丢在门户首页 —— 与统一认证的回跳是同一件事。整页跳转带不过去任何内存状态，
  * 所以只能走 query。
  *
- * <p>地址在这里拼成**绝对的**：组织平台要跳回来，必须知道往哪台机器跳 ——
- * 服务可能在另一个域名/端口下（开发态 5182 与 5171 就不是一个）。不以单个 `/` 开头的值
- * 直接丢弃：那种串拼出来不是本进程的地址（`//evil.com` 更是协议相对 URL），宁可不带参数。
+ * <p>传过去的是**产品码 + 路径**（`?returnSvc=metadata&returnPath=/lineage/tables`），不是
+ * 本进程的绝对地址：组织平台拿产品码去服务注册表里查出该往哪个地址跳。这样用户用
+ * localhost / 127.0.0.1 / 局域网 IP / 域名哪一种进来都跳得回来 —— 若传绝对地址，组织侧
+ * 就得拿它跟注册表里那**一个**写法逐字比对，换个写法访问同一个服务就失配，且失配是
+ * **静默回落门户首页**（用户只看到「登录完没跳回来」，看不出哪里错）。
+ *
+ * <p>不以单个 `/` 开头的值直接丢弃：那种串拼出来不是本进程的地址
+ * （`//evil.com` 更是协议相对 URL），宁可不带参数。
  *
  * <p><b>嵌在门户 iframe 里时不要调它</b> —— 那会把壳里的画面变成一整页门户登录页。
  * 嵌入态的续期是向宿主求令牌（见 `config/embed.ts` 的 `requestEmbedToken`），
@@ -112,7 +117,7 @@ export function currentLocation(): string {
 export function openOrgLogin(returnTo?: string): void {
   const path = returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '';
   const back = path
-    ? `?return=${encodeURIComponent(`${window.location.origin}${path}`)}`
+    ? `?returnSvc=${PRODUCT}&returnPath=${encodeURIComponent(path)}`
     : '';
   window.location.assign(`${orgOrigin()}/org/login${back}`);
 }

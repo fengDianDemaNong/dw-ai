@@ -30,7 +30,7 @@ import { onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, useRemoteApi } from '../api/client';
 import { ADMIN_HOME, SELECT_TENANT } from '../config/paths';
-import { followHome, openServiceReturn, serviceReturn } from '../config/product';
+import { followHome, openServiceReturn, returnToQuery, serviceReturn } from '../config/product';
 import { getDeployMode, setDeployModeHint } from '../config/runtime';
 import { app, loginDev, loginLocal, navReady, resolveTenantHome, servicesReady } from '../stores/app';
 
@@ -52,8 +52,8 @@ async function submit() {
     // 「回哪」是别人弹我们来登录时带的参数：服务页面发现没身份 → 跳到这里并把原地址
     // 挂上（见 `config/product.ts` 的 `serviceReturn`）。没带、或带的是个不认识的地址
     // 时 back 为空，下面几条落点与以前一字不差。
-    const back = serviceReturn(route.query.return);
-    const rawReturn = typeof route.query.return === 'string' ? route.query.return : '';
+    const back = serviceReturn(route.query);
+    const backQuery = returnToQuery(route.query);
     const needPick = Boolean(out.needSelectTenant || (out.tenants && out.tenants.length > 1));
 
     // 已经有租户上下文（单租户会在 loginDev 里自动选中）—— 直接带着身份回他要去的页面。
@@ -79,7 +79,7 @@ async function submit() {
     // 平台管理员在没有租户上下文时也走这里 —— 他可能绑了租户；一个都没有的话，
     // 选租户页上本来就摆着「进入平台后台」。
     if (needPick || (back && !app.currentTenantId)) {
-      router.push({ path: SELECT_TENANT, query: rawReturn ? { return: rawReturn } : {} });
+      router.push({ path: SELECT_TENANT, query: backQuery });
       return;
     }
     // 落地页要看门户菜单（见 resolveTenantHome 的注释），等这次拉取落定再决定去哪

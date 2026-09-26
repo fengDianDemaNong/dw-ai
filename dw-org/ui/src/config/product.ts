@@ -216,14 +216,20 @@ export function openLineageApp(path = '/lineage'): void {
  *
  * <p><b>它来自 URL query，是用户可控的输入。</b>直接拿去跳就是一个开放重定向：
  * 攻击者把登录链接做成 `…/org/login?return=https://钓鱼站`，用户看到的是自家门户的
- * 登录页、登录后却被送去别处。所以判据必须硬：
+ * 登录页、登录后却被送去别处。所以判据必须硬。
  *
- * <ul>
- *   <li>必须是绝对的 http(s) 地址（`javascript:` / `data:` 一律不认）；</li>
- *   <li>必须落在**服务注册表**里某个产品登记的前端地址之下 —— 同址或以它 + `/` 开头。
- *       加那道 `/` 是必须的：不带的话 `http://host:5181.evil.com` 也能通过
- *       「以 `http://host:5181` 开头」这条前缀判断。</li>
- * </ul>
+ * <p><b>2026-09 起改用「产品码 + 路径」协议</b>
+ * （`?returnSvc=warehouse&returnPath=/model/spec/layers`）：目标主机名**完全由服务注册表
+ * 决定**，用户输入碰不到它 —— 比旧协议「拿用户给的绝对地址去比对白名单」更安全
+ * （压根没有可比对的字符串，也就无从绕过），而且更耐用。
+ *
+ * <p>旧协议为什么换掉：那种比对必须**逐字相同**，而用户换个写法访问同一个服务
+ * （注册表里填的是 `192.168.10.246:5172`、他在地址栏敲的是 `localhost:5172`）就失配，
+ * 失配的表现还是**静默回落门户首页** —— 用户只看到「登录完没跳回去」，看不出哪里错。
+ * 新协议下无论用 localhost / 127.0.0.1 / 局域网 IP / 域名进来，都跳得回去。
+ *
+ * <p>旧的绝对地址仍然接受（见下面的 `legacyServiceReturn`）—— 过渡期里<b>已经打开着的</b>
+ * 旧服务页面还在发那种链接，它们不会被热更新换掉。等三个服务的发链接侧都升级完可以删。
  *
  * <p>不认识的地址一律当「没带」，调用方回落自己的默认落地页 —— 宁可不回跳，
  * 也不要把用户送去一个我们没配过的站。
@@ -231,8 +237,57 @@ export function openLineageApp(path = '/lineage'): void {
  * <p>返回 `{ origin, path }` 而不是原样的 URL：跳转地址由这两段拼出来，原串里的
  * hash 与 query 都不带过去（`#boot=` 是我们自己拼的，原串若带 hash 必须丢掉）。
  */
-export function serviceReturn(raw: unknown): { origin: string; path: string } | undefined {
-  const s = typeof raw === 'string' ? raw.trim() : '';
+export function serviceReturn(query: Record<string, unknown>): { origin: string; path: string } | undefined {
+  const svc = queryStr(query.returnSvc);
+  const rawPath = queryStr(query.returnPath);
+  if (svc && rawPath) {
+    // 主机名只认注册表。查不到这个产品就当没带 —— 本函数的既有口径是静默回落，
+    // 这里也不弹错（弹了反而是把攻击者可控的输入变成了给用户看的提示）。
+    const origin = productOriginResolver(svc).trim().replace(/\/$/, '');
+    const path = inAppPath(rawPath);
+    return origin && path ? { origin, path } : undefined;
+  }
+  return legacyServiceReturn(query.return);
+}
+
+/**
+ * 把「回哪」相关的参数原样透传给下一个页面（登录页 → 选租户页）。
+ *
+ * <p>新老两种参数都带上：选租户页可能由**旧的**服务页面触发，那时 `query` 里只有 `return`。
+ */
+export function returnToQuery(query: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of ['returnSvc', 'returnPath', 'return']) {
+    const v = queryStr(query[k]);
+    if (v) out[k] = v;
+  }
+  return out;
+}
+
+function queryStr(v: unknown): string {
+  return typeof v === 'string' ? v.trim() : '';
+}
+
+/**
+ * 本进程内的一个路径 —— 不是就返回 undefined。
+ *
+ * <p>只收**单个** `/` 开头：`//evil.com` 是协议相对 URL，拼出来会跳到别人的站；
+ * 反斜杠同理（部分浏览器把 `\` 当 `/`）。`#` 之后一律丢掉 —— `#boot=` 是
+ * `openServiceReturn` 自己拼的，原串若带 hash 会把它顶掉。
+ */
+function inAppPath(raw: string): string | undefined {
+  if (!raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\')) return undefined;
+  const noHash = raw.split('#')[0];
+  return noHash.startsWith('/') && !noHash.startsWith('//') ? noHash : undefined;
+}
+
+/**
+ * 旧协议：用户给的绝对地址必须与注册表里某个产品登记的地址**逐字**同址。
+ *
+ * <p>保留它的唯一理由是过渡期兼容（见 {@link serviceReturn} 的注释）。新代码不要再用。
+ */
+function legacyServiceReturn(raw: unknown): { origin: string; path: string } | undefined {
+  const s = queryStr(raw);
   if (!s) return undefined;
   let url: URL;
   try {
