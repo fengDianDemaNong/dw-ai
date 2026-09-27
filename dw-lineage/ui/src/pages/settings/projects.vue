@@ -3,7 +3,9 @@
     <PageHeader title="项目" subtitle="数据的一级隔离">
       <template #actions>
         <Button :loading="loading" @click="load">刷新</Button>
-        <Button type="primary" class="bg-[#1677ff]" :disabled="!tenants.length"
+        <!-- 写入口只在「本进程说了算」的模式下给（见 `canManage`）：multi 的项目真源在
+             组织平台，后端对这些写操作也是一律 403，留着按钮等于让人点了才知道。 -->
+        <Button v-if="canManage" type="primary" class="bg-[#1677ff]" :disabled="!tenants.length"
                 @click="openModal()">新增项目</Button>
       </template>
       <template #help>
@@ -43,7 +45,7 @@
         <div class="pcard-desc" :title="p.description || undefined">{{ p.description || '—' }}</div>
 
         <div class="pcard-foot">
-          <div class="pcard-links">
+          <div v-if="canManage" class="pcard-links">
             <a @click="openModal(p)">编辑</a>
             <a @click="toggle(p)">{{ p.enabled ? '停用' : '启用' }}</a>
             <Popconfirm
@@ -63,7 +65,7 @@
       <div class="page-empty-text">
         还没有任何项目
       </div>
-      <Button v-if="tenants.length" type="primary" class="bg-[#1677ff]" @click="openModal()">
+      <Button v-if="canManage && tenants.length" type="primary" class="bg-[#1677ff]" @click="openModal()">
         新增项目
       </Button>
     </div>
@@ -96,7 +98,7 @@ import {
   type Project, type Tenant,
 } from '../../services/api';
 import { DEFAULT_PROJECT_ID, switchTo, tenantState } from '../../stores/tenant';
-import { LINEAGE_HOME } from '../../config/pages';
+import { LINEAGE_HOME, ownsProjects } from '../../config/pages';
 
 /**
  * 项目管理，工作台那一级。
@@ -116,9 +118,10 @@ import { LINEAGE_HOME } from '../../config/pages';
  * 数据仍来自 `listTenants()` —— 它把每个租户的 projects 一起带回来了，
  * 不需要为这一页加接口。
  *
- * 本页只在有工作台的两级模式（standard / standalone）可达，见 `config/pages.ts` 的
- * `hasWorkbench`。这两种模式下租户都被收成默认租户一个，所以不再呈现租户筛选与归属列 ——
+ * 本页三种模式都可达（工作台那一级，见 `config/pages.ts` 的 `WORKBENCH_HOME`）。
+ * standard 与 standalone 下租户都被收成默认租户一个，所以不再呈现租户筛选与归属列 ——
  * 收紧之前，那个下拉只有一个选项，「所属租户」列每行都是同一个名字。
+ * multi 下这一页只读，见 `canManage`。
  *
  * 写操作固定用 `tenantState.tenantId`：普通模式下它已被 `pinDefaultTenant()`
  * 钉成默认租户，与后端强制的租户一致。
@@ -139,6 +142,17 @@ const modal = reactive({
 
 /** 打平成行：租户列表把各自的项目一起带回来了，这一页只关心项目。 */
 const allRows = computed<Project[]>(() => tenants.value.flatMap((t) => t.projects));
+
+/**
+ * 能不能在本进程增删改项目。
+ *
+ * <p>multi 下不能：项目号的真源在组织平台，后端 `assertLocalAdmin()` 对
+ * 新建 / 改 / 删一律 403（「多租户模式下项目由组织平台管理」）。所以那一页
+ * 退化成纯只读清单 —— 列表照排，「进入」照给，只是不给写入口。
+ *
+ * <p>「进入」不在收口范围内：它只切本地上下文（`switchTo`），不碰后端。
+ */
+const canManage = computed(() => ownsProjects());
 
 const isCurrent = (row: Project) =>
   row.id === tenantState.projectId && row.tenantId === tenantState.tenantId;

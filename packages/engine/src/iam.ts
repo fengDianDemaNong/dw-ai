@@ -55,8 +55,19 @@ export const ROLE_PERMS: Record<Product, Record<ProjectRole, Perm[]>> = {
   },
 };
 
-/** 某产品下某角色是否具备该权限。产品、角色、权限任一未知都判否。 */
+/**
+ * 某产品下某角色是否具备该权限。产品、角色、权限任一未知都判否。
+ *
+ * <p><b>为什么查不到要判否，而不是直接 `includes`</b>：V20 起后端的写侧改成
+ * 「角色码问产品角色表」，平台管理员在后台新建的角色码（如 `analyst`）是能派下去的。
+ * 而 {@link ROLE_PERMS} 是**本前端的判权矩阵**，只登记了内置三档 —— 表里查不到
+ * 就是 `undefined`。早先那句 `.includes()` 在这种情况下抛 TypeError，接进 Vue 的
+ * computed 就是「某人被派了自定义角色 → 整个侧栏白屏」。
+ *
+ * <p>自定义角色在本前端的语义是「未登记」，与产品未知、角色未派同一口径：判否。
+ */
 export function roleHas(product: Product, role: ProjectRole | undefined, perm: Perm): boolean {
   if (!role) return false;
-  return ROLE_PERMS[product][role].includes(perm);
+  const perms = (ROLE_PERMS[product] as Record<string, Perm[] | undefined>)[role];
+  return perms ? perms.includes(perm) : false;
 }

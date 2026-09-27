@@ -193,6 +193,19 @@ public class AccessService {
     return "admin".equalsIgnoreCase(TenantContext.tenantRole());
   }
 
+  /**
+   * 本进程对外自报的产品码（{@code dwai.product-code}，空值回落 {@code warehouse}）。
+   *
+   * <p>public 是因为 {@link NavNodeService} 也要用：org <b>自有</b>菜单节点
+   * （{@code nav_nodes.product = ''}，例如项目壳的「成员管理」）挂的权限词
+   * （{@code iam:member}）同样要按本服务的产品去查角色 —— 那与
+   * {@link #requireMember} 说的是同一件事「这个人在本项目里能不能管成员」，
+   * 两处各读一次配置会让「换产品部署后侧栏按 A 判、接口按 B 判」。
+   */
+  public String productCode() {
+    return product;
+  }
+
   public boolean canAccessTenant(String userId, String tenantId) {
     UserEntity u = users.selectById(userId);
     if (u == null) return false;
@@ -352,7 +365,7 @@ public class AccessService {
   /**
    * 当前登录用户在某个产品里的角色码；这个人跟这里没关系时返回空。
    *
-   * <p><b>给展示链路用</b>（按权限词过滤侧栏，见 {@code NavItemService.menuFor}）。
+   * <p><b>给展示链路用</b>（按权限词过滤侧栏，见 {@code NavNodeService.treeFor}）。
    * 与 {@link #checkAuthz} 的区别只有一处：算不出结论时返回空集合，而不是让调用方收 403。
    * 侧栏是每个页面都要画的东西，让「他没加入这个项目」把整个壳打成 500 不划算 ——
    * 与 {@code menuFor} 里「拿不到租户就返回空列表」是同一条取舍。

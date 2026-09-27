@@ -125,9 +125,9 @@ const inWorkbench = computed(() => isWorkbenchPath(route.path));
  * 项目级的「概况」看当前项目口径。这一点与 dw-model 不同，那边有
  * `currentProjectId = null` 这个状态要清。
  *
- * <p>能点到这一项就说明 `me` 有值、即 standard，而 standard 必然有工作台 ——
- * 不必再判 `hasWorkbench()`。standalone 的入口不在这里（它没有 `me`），
- * 见组件说明以及 `AppTopbar` 里那个按钮。
+ * <p>能点到这一项就说明 `me` 有值、即 standard —— 三种模式都有工作台，不必再判模式。
+ * multi 与 standalone 没有 `me`，入口由 `AppTopbar` 里那个按钮承担，两者的 `v-if`
+ * 正好互补（见组件说明）。
  */
 function toWorkbench(): void {
   router.push(WORKBENCH_HOME);

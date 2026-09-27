@@ -13,7 +13,7 @@
           <a-radio-button value="card">块</a-radio-button>
           <a-radio-button value="row">行</a-radio-button>
         </a-radio-group>
-        <a-button v-if="isTenantAdmin" type="primary" @click="openCreate">新增</a-button>
+        <a-button v-if="canManage" type="primary" @click="openCreate">新增</a-button>
       </template>
     </PageHeader>
 
@@ -34,7 +34,7 @@
         <div class="meta">项目管理员 {{ ownerName(p.owner) }} · {{ p.createdAt }}</div>
         <div class="ops">
           <a-button v-if="!isDisabled(p)" type="primary" @click="go(p.id)">进入项目</a-button>
-          <a-button v-if="isTenantAdmin" @click="openEdit(p)">编辑</a-button>
+          <a-button v-if="canManage" @click="openEdit(p)">编辑</a-button>
         </div>
       </div>
     </div>
@@ -59,12 +59,14 @@
         <template v-else-if="column.key === 'act'">
           <a-space>
             <a-button v-if="!isDisabled(record)" type="link" size="small" @click="go(record.id)">进入项目</a-button>
-            <a-button v-if="isTenantAdmin" type="link" size="small" @click="openEdit(record)">编辑</a-button>
+            <a-button v-if="canManage" type="link" size="small" @click="openEdit(record)">编辑</a-button>
           </a-space>
         </template>
       </template>
     </a-table>
-    <p v-if="!tenantProjects.length" class="muted">还没有可进入的项目。</p>
+    <p v-if="!tenantProjects.length" class="muted">
+      还没有可进入的项目。{{ multi ? '项目由组织平台的工作台创建，这里只列出你已加入的。' : '' }}
+    </p>
 
     <a-drawer
       v-model:open="editOpen"
@@ -108,7 +110,7 @@
           进入项目
         </a-button>
         <a-popconfirm
-          v-if="isTenantAdmin && editing"
+          v-if="canManage && editing"
           title="删除项目将同时删除其中的规范与模型，不可恢复。"
           @confirm="removeFromDrawer"
         >
@@ -162,6 +164,7 @@ import { message } from 'ant-design-vue';
 import { api, type OrgUser } from '../api/client';
 import PageHeader from '../components/PageHeader.vue';
 import { ENGINE_OPTIONS, engineLabel } from '../config/knowledge';
+import { ownsProjects } from '../config/pages';
 import { isMultiTenant } from '../config/runtime';
 import type { EngineKind, Project } from '../types';
 import {
@@ -178,6 +181,15 @@ import {
 const VIEW_KEY = 'dw-ai.projectView';
 const router = useRouter();
 const multi = isMultiTenant();
+/**
+ * 能不能在本进程管理项目（新增 / 编辑 / 删除）。
+ *
+ * <p>multi 下不能：项目号的真源在组织平台，本进程只有 `OrgProjectPuller` 同步下来的镜像，
+ * 而后端的 `ProjectService.createProject` 是本地自编 `p-<时间戳>` 建号的 —— 在这里新建，
+ * 组织平台根本不知道有这个项目（见 `config/pages.ts` 的 `ownsProjects`）。
+ * 建项目、派项目管理员、改状态都在组织平台的工作台做。
+ */
+const canManage = computed(() => isTenantAdmin.value && ownsProjects());
 const view = ref<'card' | 'row'>((sessionStorage.getItem(VIEW_KEY) as 'card' | 'row') || 'card');
 const open = ref(false);
 const editOpen = ref(false);

@@ -115,6 +115,14 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../pages/project-home.vue'),
       },
       {
+        // 壳自己的功能页，**不是**产品页面 —— 所以它排在 `embed/...` 之前，
+        // 且路径只占一段（`members`），不与 `embed/{产品}` 争前缀。
+        path: 'members',
+        name: 'project-members',
+        component: () => import('../pages/project-members.vue'),
+        meta: { title: '成员管理' },
+      },
+      {
         path: 'embed/:product/:pathMatch(.*)*',
         name: 'project-embed',
         component: () => import('../pages/embed.vue'),

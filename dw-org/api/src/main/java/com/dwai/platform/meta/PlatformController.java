@@ -26,8 +26,7 @@ public class PlatformController {
   private final PlatformService platform;
   private final AccessService access;
   private final ServiceRegistry registry;
-  private final NavItemService nav;
-  private final NavGroupService navGroups;
+  private final NavNodeService nav;
   private final MenuCandidateService candidates;
   private final ProductRoleService productRoles;
 
@@ -35,15 +34,13 @@ public class PlatformController {
       PlatformService platform,
       AccessService access,
       ServiceRegistry registry,
-      NavItemService nav,
-      NavGroupService navGroups,
+      NavNodeService nav,
       MenuCandidateService candidates,
       ProductRoleService productRoles) {
     this.platform = platform;
     this.access = access;
     this.registry = registry;
     this.nav = nav;
-    this.navGroups = navGroups;
     this.candidates = candidates;
     this.productRoles = productRoles;
   }
@@ -160,21 +157,25 @@ public class PlatformController {
   }
 
   /**
-   * 门户菜单的增删改查（平台管理员）。
+   * 门户菜单树的增删改查（平台管理员）。
    *
    * <p><b>这是管理面；消费面在 {@link NavController}</b>（{@code /api/nav}）——
    * 那边只要求登录 + 已选租户。两处的鉴权刻意不同：把菜单读取也挂在这个
    * {@code requirePlatform()} 下面，普通租户成员的侧栏会永远是空的
    * （{@code PlatformController} 上所有端点都是平台管理员专属）。
+   *
+   * <p>返回<b>嵌套树</b>：管理页要展示的本来就是树（见 {@link NavNodeService#all}）。
+   * V23 之前这里是 {@code /nav-items} + {@code /nav-groups} 两组端点，分组与菜单是两个
+   * 概念；合并成一张 {@code nav_nodes} 之后只剩这一组。
    */
-  @GetMapping("/nav-items")
-  public List<Map<String, Object>> navItems() {
+  @GetMapping("/nav-nodes")
+  public List<Map<String, Object>> navNodes(@RequestParam(required = false) String scope) {
     access.requirePlatform();
-    return nav.all();
+    return nav.all(scope);
   }
 
-  @PostMapping("/nav-items")
-  public Map<String, Object> createNavItem(@RequestBody(required = false) NavItemService.NavItemReq req) {
+  @PostMapping("/nav-nodes")
+  public Map<String, Object> createNavNode(@RequestBody(required = false) NavNodeService.NavNodeReq req) {
     access.requirePlatform();
     return nav.create(req);
   }
@@ -182,8 +183,11 @@ public class PlatformController {
   /**
    * 各服务报上来的菜单候选，供管理员勾选（见 {@link MenuCandidateService}）。
    *
-   * <p>与 {@code /nav-items} 一样是<b>管理面</b>：它拉的是各服务的前端地址，
+   * <p>与 {@code /nav-nodes} 一样是<b>管理面</b>：它拉的是各服务的前端地址，
    * 属于平台配置动作，不开放给租户成员。
+   *
+   * <p>每一项的 {@code menus} 现在是<b>一棵树</b>（产品可以报任意层级），
+   * 老格式（扁平两层、每项带 {@code group}）也照收 —— 见 {@code foldGroups}。
    */
   @GetMapping("/nav-candidates")
   public Map<String, Object> navCandidates() {
@@ -191,29 +195,19 @@ public class PlatformController {
     return candidates.candidates();
   }
 
-  /**
-   * 批量新建（菜单管理页「拉取候选 → 勾选 → 保存」走这条路，见 {@link NavItemService#createBatch}）。
-   *
-   * <p>逐条报告：{@code created} / {@code skipped}（已配置）/ {@code failed}（带 1 起的序号）。
-   * 不做成「全成功或全失败」—— 一次勾十几条，其中一条重复就整批回滚，管理员得逐个试。
-   */
-  @PostMapping("/nav-items/batch")
-  public Map<String, Object> createNavItems(@RequestBody(required = false) NavItemService.BatchNavItemsReq req) {
-    access.requirePlatform();
-    return nav.createBatch(req == null ? null : req.items);
-  }
-
-  @PatchMapping("/nav-items/{id}")
-  public Map<String, Object> updateNavItem(
-      @PathVariable String id, @RequestBody(required = false) NavItemService.NavItemReq req) {
+  /** 改标题 / 图标 / 顺序 / 权限词 / 启停 / 父子关系 / 空目录策略 / 挂载。 */
+  @PatchMapping("/nav-nodes/{id}")
+  public Map<String, Object> updateNavNode(
+      @PathVariable String id, @RequestBody(required = false) NavNodeService.NavNodeReq req) {
     access.requirePlatform();
     return nav.update(id, req);
   }
 
-  @DeleteMapping("/nav-items/{id}")
-  public void deleteNavItem(@PathVariable String id) {
+  /** 删一个节点**连同它的整棵子树**；返回体里的 {@code subtree} 是连带删掉的子孙条数。 */
+  @DeleteMapping("/nav-nodes/{id}")
+  public Map<String, Object> deleteNavNode(@PathVariable String id) {
     access.requirePlatform();
-    nav.delete(id);
+    return nav.delete(id);
   }
 
   /**
@@ -270,43 +264,6 @@ public class PlatformController {
     // 前端据此回落到「可手填 + 提示」，而不是显示一个空下拉把管理员卡死。
     out.put("perms", candidates.permOptions(product));
     return out;
-  }
-
-  /**
-   * 门户菜单分组的增删改查（平台管理员）。
-   *
-   * <p>与 {@code /nav-items} 同一层管理面；消费面在 {@link NavController}
-   * 的 {@code /api/nav-groups}。两者的关系是<b>软约束</b>（没有外键），
-   * 理由见 {@link NavGroupService} 与 {@code V19__nav_groups.sql}。
-   *
-   * <p>列表支持 {@code ?scope=&product=} 过滤，对应菜单管理页顶部的两个筛选。
-   */
-  @GetMapping("/nav-groups")
-  public List<Map<String, Object>> navGroups(
-      @RequestParam(required = false) String scope, @RequestParam(required = false) String product) {
-    access.requirePlatform();
-    return navGroups.all(scope, product);
-  }
-
-  @PostMapping("/nav-groups")
-  public Map<String, Object> createNavGroup(@RequestBody(required = false) NavGroupService.NavGroupReq req) {
-    access.requirePlatform();
-    return navGroups.create(req);
-  }
-
-  /** 改名时会同事务级联更新菜单项的 {@code group_title}，返回体里的 {@code renamedItems} 是条数。 */
-  @PatchMapping("/nav-groups/{id}")
-  public Map<String, Object> updateNavGroup(
-      @PathVariable String id, @RequestBody(required = false) NavGroupService.NavGroupReq req) {
-    access.requirePlatform();
-    return navGroups.update(id, req);
-  }
-
-  /** 删除不阻塞、不清空菜单项的分组名；返回 {@code referenced} = 仍写着这个名字的菜单条数。 */
-  @DeleteMapping("/nav-groups/{id}")
-  public Map<String, Object> deleteNavGroup(@PathVariable String id) {
-    access.requirePlatform();
-    return navGroups.delete(id);
   }
 
   public static class RegisterServiceReq {

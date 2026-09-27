@@ -18,7 +18,9 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -645,16 +647,16 @@ class ProductRoleTest {
 
     /** 三条固定的菜单：一条读、一条管理、一条**不挂权限词**（进得来就看得见）。 */
     private void seedMenus() throws Exception {
-        createMenuItem("{\"product\":\"metadata\",\"scope\":\"project\",\"label\":\"全文检索\","
+        createMenuItem("{\"product\":\"metadata\",\"scope\":\"project\",\"title\":\"全文检索\","
                 + "\"path\":\"/lineage/search\",\"perm\":\"catalog:read\"}");
-        createMenuItem("{\"product\":\"metadata\",\"scope\":\"project\",\"label\":\"临时表规则\","
+        createMenuItem("{\"product\":\"metadata\",\"scope\":\"project\",\"title\":\"临时表规则\","
                 + "\"path\":\"/lineage/settings\",\"perm\":\"catalog:admin\"}");
-        createMenuItem("{\"product\":\"metadata\",\"scope\":\"project\",\"label\":\"不判权的入口\","
+        createMenuItem("{\"product\":\"metadata\",\"scope\":\"project\",\"title\":\"不判权的入口\","
                 + "\"path\":\"/lineage/free\"}");
     }
 
     private String createMenuItem(String json) throws Exception {
-        Resp res = call(post("/api/v1/platform/nav-items")
+        Resp res = call(post("/api/v1/platform/nav-nodes")
                 .header("Authorization", "Bearer " + adminToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json));
@@ -662,12 +664,30 @@ class ProductRoleTest {
         return MAPPER.readTree(res.body()).path("id").asText();
     }
 
+    /**
+     * 清掉本类建的产品菜单。
+     *
+     * <p><b>不能顺手把整棵树删光</b>：V23 起 {@code /nav-nodes} 里还有 org 自己的菜单种子
+     * （{@code nav-sys-*} / {@code nav-proj-*}），删了它们，别的用例就找不到「项目管理」，
+     * 而那种红看起来与本类毫无关系。判据用「{@code product} 非空」—— 种子的 product 都是空的。
+     *
+     * <p>返回的是<b>嵌套树</b>（V23 起管理面也返回树），所以收集 id 要递归。
+     */
     private void clearNavItems() throws Exception {
-        Resp list = call(get("/api/v1/platform/nav-items").header("Authorization", "Bearer " + adminToken));
-        for (JsonNode row : MAPPER.readTree(list.body())) {
-            call(delete("/api/v1/platform/nav-items/" + row.path("id").asText())
+        Resp list = call(get("/api/v1/platform/nav-nodes").header("Authorization", "Bearer " + adminToken));
+        for (String id : productNodeIds(MAPPER.readTree(list.body()))) {
+            call(delete("/api/v1/platform/nav-nodes/" + id)
                     .header("Authorization", "Bearer " + adminToken));
         }
+    }
+
+    private static List<String> productNodeIds(JsonNode nodes) {
+        List<String> out = new ArrayList<>();
+        for (JsonNode row : nodes) {
+            if (!row.path("product").asText().isBlank()) out.add(row.path("id").asText());
+            out.addAll(productNodeIds(row.path("children")));
+        }
+        return out;
     }
 
     /** 消费面菜单：这个人、这个项目下该看到哪些入口（项目走 `X-Project-Code` 头，与壳一致）。 */
@@ -680,10 +700,29 @@ class ProductRoleTest {
         return MAPPER.readTree(res.body());
     }
 
+    /**
+     * 菜单树里 <b>产品</b> 那一部分的标签（递归到叶子）。
+     *
+     * <p>只收 {@code product} 非空的节点：V23 之后 {@code /api/nav} 返回的是整棵树，
+     * 里面还有 org 自己的菜单（项目壳的「项目」「返回工作台」「成员管理」）。
+     * 它们是壳的一部分，与「这个产品的角色判出什么」无关 —— 混进断言只会让人
+     * 以为权限过滤坏了。
+     *
+     * <p>目录节点（没有 path）也不收：断言关心的是「哪些入口看得见」。
+     */
     private static Set<String> labelsOf(JsonNode menu) {
         Set<String> out = new LinkedHashSet<>();
-        for (JsonNode row : menu) out.add(row.path("label").asText());
+        collectLabels(menu, out);
         return out;
+    }
+
+    private static void collectLabels(JsonNode nodes, Set<String> out) {
+        for (JsonNode row : nodes) {
+            if (!row.path("product").asText().isBlank() && !row.path("path").asText().isBlank()) {
+                out.add(row.path("label").asText());
+            }
+            collectLabels(row.path("children"), out);
+        }
     }
 
     private void assign(String product, String role) throws Exception {

@@ -59,11 +59,22 @@ export function isEmbed(): boolean {
  * 漏配的表现是<b>静默</b>指向 `127.0.0.1:5171` —— 跨服务器部署时那正是用户自己的机器。
  */
 export function orgOrigin(): string {
+  return orgOriginExplicit() ?? 'http://127.0.0.1:5171';
+}
+
+/**
+ * 与 {@link orgOrigin} 同源，但**不含兜底值**：只有壳自报或后端配过才返回。
+ *
+ * <p>给「直连组织平台后端」的调用方用（见 `api/client.ts` 的 `orgApiBase`）。那里不能用
+ * 兜底值 —— `127.0.0.1:5171` 只在单机开发态是对的，跨服务器部署时拿它发请求等于把用户的
+ * 数据打到**他自己这台机器**上，静默且后果不明。取不到时宁可让调用方留在本进程
+ * （拿一个能查到的 404），也不要发出去。
+ */
+export function orgOriginExplicit(): string | undefined {
   const fromBoot = storedHostOrigin();
   if (fromBoot) return fromBoot.replace(/\/$/, '');
   const fromApi = typeof window === 'undefined' ? null : sessionStorage.getItem(ORG_UI_KEY);
-  if (fromApi) return fromApi.replace(/\/$/, '');
-  return 'http://127.0.0.1:5171';
+  return fromApi ? fromApi.replace(/\/$/, '') : undefined;
 }
 
 /**
@@ -110,21 +121,6 @@ export function openOrgLogin(returnTo?: string): void {
     ? `?returnSvc=warehouse&returnPath=${encodeURIComponent(path)}`
     : '';
   window.location.href = `${orgOrigin()}/org/login${back}`;
-}
-
-/**
- * 回组织平台的工作台。
- *
- * <p>multi 下本进程没有工作台（见 `config/pages.ts` 的 `hasWorkbench`）——项目在组织那边建、
- * 进项目也在组织那边完成，所以「返回工作台」对 multi 是一次<b>跨进程跳转</b>，不能写成
- * `router.push(SYS_HOME)`：`SYS_HOME` 是仓建设自己的工作台路径，multi 下会被路由守卫
- * 直接弹回去，点了等于没点（这正是它此前在 multi 下不可见的另一半原因）。
- *
- * <p>落点选 `workbench/projects` 而不是 `/org`：组织平台对普通成员只放行工作台的
- * 「项目管理」页，其余页会把他弹回上一级，指到那里会白跳一次。
- */
-export function openOrgWorkbench(): void {
-  window.location.href = `${orgOrigin()}/org/workbench/projects`;
 }
 
 export function consumeBootHash(): void {

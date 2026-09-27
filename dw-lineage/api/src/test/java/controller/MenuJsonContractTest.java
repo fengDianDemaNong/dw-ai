@@ -53,7 +53,7 @@ class MenuJsonContractTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    /** 与 dw-org 的 `NavItemService.SCOPES` 同一份白名单。 */
+    /** 与 dw-org 的 `NavNodeService.SCOPES` 同一份白名单。 */
     private static final Set<String> SCOPES = Set.of("workbench", "project");
 
     private static Path menuJsonPath() throws Exception {
@@ -96,38 +96,79 @@ class MenuJsonContractTest {
         }
     }
 
-    /** `scope` 是组织平台 `nav_items.scope` 的白名单，写错了 org 侧会 400 而前端看不出原因。 */
+    /** `scope` 是组织平台 `nav_nodes.scope` 的白名单，写错了 org 侧会 400 而前端看不出原因。 */
     @Test
     void everyScopeIsLegal() throws Exception {
         Path file = menuJsonPath();
         assumeTrue(Files.exists(file), "还没有生成 " + file);
 
-        for (JsonNode item : MAPPER.readTree(Files.readString(file)).path("menus")) {
-            String scope = item.path("scope").asText();
+        walk(MAPPER.readTree(Files.readString(file)).path("menus"), "", (item, scope) -> {
             assertTrue(SCOPES.contains(scope),
                     "候选 " + item.path("path").asText() + " 的 scope「" + scope
                             + "」不在 " + SCOPES + " 里 —— org 侧写入时会被拒");
-        }
+        });
     }
 
-    /** 每条候选都要有能在侧栏画出来的最小信息，缺一项配出来的就是个空白入口。 */
+    /**
+     * 每条候选都要有能在侧栏画出来的最小信息，缺一项配出来的就是个空白入口。
+     *
+     * <p><b>树形之后判据分两种</b>（V23 起产品可以报任意层级）：
+     *
+     * <ul>
+     *   <li><b>有路径的（叶子）</b>：图标不能空 —— 侧栏里没有图标的项看起来像加载失败。</li>
+     *   <li><b>没有路径的（目录）</b>：要有子节点。一个既没有路径也没有子节点的节点
+     *       在 org 侧会被整份清单拒掉（见 {@code MenuCandidateService.normalize}）——
+     *       它点不动、里面也没有东西，配到侧栏里只会凭空少一条。</li>
+     * </ul>
+     *
+     * <p>{@code id} 与 {@code label} 两种都必须有，而且是 V23 之后更要紧的一条：
+     * {@code id} 是挂载的匹配键（{@code nav_nodes.ref}），没有它这个节点挂不上，
+     * 而症状是「管理页里看不到这条候选」，与「产品本来就没报这个页面」分不开。
+     */
     @Test
     void everyCandidateCarriesLabelAndIcon() throws Exception {
         Path file = menuJsonPath();
         assumeTrue(Files.exists(file), "还没有生成 " + file);
 
-        for (JsonNode item : MAPPER.readTree(Files.readString(file)).path("menus")) {
-            List<String> required = List.of("id", "path", "label", "icon");
-            for (String field : required) {
+        walk(MAPPER.readTree(Files.readString(file)).path("menus"), "", (item, scope) -> {
+            for (String field : List.of("id", "label")) {
                 assertTrue(!item.path(field).asText().isBlank(),
                         "候选 " + item.path("path").asText() + " 缺 " + field);
             }
+            if (item.path("path").asText().isBlank()) {
+                assertTrue(item.path("children").size() > 0,
+                        "候选「" + item.path("label").asText()
+                                + "」既没有 path 也没有 children —— org 侧会整份拒掉");
+            } else {
+                assertTrue(!item.path("icon").asText().isBlank(),
+                        "候选 " + item.path("path").asText() + " 缺 icon");
+            }
+        });
+    }
+
+    /**
+     * 树形遍历。菜单从 V23 起可以是任意层级的树，只查一层会漏掉所有子菜单 ——
+     * 而漏掉的那些恰恰是新加的东西，测试全绿而它们从没被检查过。
+     *
+     * <p>{@code scope} 可以省略并<b>继承父节点</b>：一层目录里的每一项都重抄一遍是噪音，
+     * 抄错一个就是「这一支在侧栏里整片消失」。所以这里沿用 org 侧的继承规则，
+     * 而不是要求每一层都显式写。
+     */
+    private static void walk(JsonNode nodes, String parentScope, java.util.function.BiConsumer<JsonNode, String> visit) {
+        for (JsonNode n : nodes) {
+            String declared = n.path("scope").asText();
+            String scope = declared.isBlank() ? parentScope : declared;
+            visit.accept(n, scope);
+            walk(n.path("children"), scope, visit);
         }
     }
 
     private static Map<String, String> pathToPerm(JsonNode menus) {
         Map<String, String> out = new LinkedHashMap<>();
-        for (JsonNode m : menus) out.put(m.path("path").asText(), m.path("perm").asText());
+        walk(menus, "", (m, scope) -> {
+            // 目录节点没有路径，进不了「路径 → 权限词」这张表
+            if (!m.path("path").asText().isBlank()) out.put(m.path("path").asText(), m.path("perm").asText());
+        });
         return out;
     }
 }

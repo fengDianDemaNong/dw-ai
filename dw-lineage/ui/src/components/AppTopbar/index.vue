@@ -9,14 +9,12 @@
     </div>
     <div class="topbar-right">
       <ProjectSwitcher v-if="!topNav && !standalone" />
-      <!-- standalone 没有本地身份，UserMenu（根节点 `v-if="me"`）整个不渲染，
-           连带把它里面的「返回工作台」一起带走了 —— 但工作台在 standalone 下
-           **是存在的**（见 config/pages.ts 的 hasWorkbench：standalone 的口径是
-           「standard 去掉用户/登录」，工作台那一级它照样有）。少了这个入口，
-           人从工作台点进某个项目之后就再也回不去了，除非手改地址。
-           只在项目层级出现：站在工作台上再给一个「回工作台」没有意义。 -->
+      <!-- **没有本地身份的模式**（multi / standalone）的入口在这里。UserMenu 的根节点是
+           `v-if="me"`，而 `me` 只有 standard 有值 —— multi 与 standalone 下它整个不渲染，
+           连带把里面的「返回工作台」一起带走。少了这个入口，人从工作台点进某个项目之后
+           就再也回不去了，除非手改地址。判据见 `showBackToWorkbench`。 -->
       <button
-        v-if="standalone && hasWorkbench() && !inWorkbench"
+        v-if="showBackToWorkbench"
         type="button"
         class="back-workbench"
         @click="toWorkbench"
@@ -34,7 +32,8 @@ import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { HomeOutlined } from '@ant-design/icons-vue';
 import { activeNavItem, groupOf } from '../../config/nav';
-import { WORKBENCH_HOME, hasWorkbench, isWorkbenchPath } from '../../config/pages';
+import { WORKBENCH_HOME, isWorkbenchPath } from '../../config/pages';
+import { authState } from '../../stores/auth';
 import { preferences } from '../../stores/preferences';
 import { uiState } from '../../stores/ui';
 import ProjectSwitcher from '../ProjectSwitcher/index.vue';
@@ -52,6 +51,20 @@ const topNav = computed(() => preferences.navPosition === 'top');
  * 必须跟着路由算，不能在 setup 里求一次值 —— 这一项的出现条件里含当前层级。
  */
 const inWorkbench = computed(() => isWorkbenchPath(route.path));
+
+/**
+ * 顶栏那个「返回工作台」按钮：**没有本地身份时才由顶栏承担**。
+ *
+ * <p>`me` 只有 standard 有值（`main.ts` 在那个模式才调 `loadMe`），而那个模式的入口
+ * 在 `UserMenu` 里 —— 跟着它自己的 `v-if="me"` 走，顶栏不重复。multi 与 standalone
+ * 都没有 `me`，UserMenu 整个不渲染，入口就落在顶栏这里。
+ *
+ * <p>等价于 dw-model 的 `canBackToWorkbench`（multi / standalone 下对所有人为真）：
+ * 那边要按租户角色分，是因为它有 `tenantRole`；这边没有角色表，只分「有没有本地身份」
+ * 就够。判据里不含模式 —— 「没有 `me`」本身就只在 multi 与 standalone 成立。
+ */
+const me = computed(() => authState.me);
+const showBackToWorkbench = computed(() => !me.value && !inWorkbench.value);
 
 /**
  * 回工作台。只跳路径：两个层级的区别纯粹是地址位置（工作台「概况」看全部项目

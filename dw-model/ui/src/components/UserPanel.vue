@@ -31,8 +31,8 @@
         </button>
         <button v-if="!standalone" type="button" class="act" @click="openProfile">个人信息</button>
         <button v-if="!standalone" type="button" class="act" @click="openPwd">修改密码</button>
-        <!-- 判据见 `config/pages.ts` 的 `canBackToWorkbench`：multi 下所有人都该有
-             （上一级在组织平台），其余模式只给租户管理员，standalone 兜底。 -->
+        <!-- 判据见 `config/pages.ts` 的 `canBackToWorkbench`：multi 与 standalone
+             下所有人都该有，standard 只给租户管理员。落点是本进程的工作台。 -->
         <button v-if="canBackHome" type="button" class="act" @click="toWorkbench">返回工作台</button>
         <button v-if="!remote && !standalone" type="button" class="act" @click="resetAndLeave">重置演示</button>
         <button v-if="!standalone" type="button" class="act danger" @click="out">退出</button>
@@ -82,7 +82,7 @@ import { message } from 'ant-design-vue';
 import { useRemoteApi } from '../api/client';
 import { PROJECT_ROLE_LABEL, TENANT_ROLE_LABEL } from '../config/iam';
 import { LOGIN_PATH, SYS_HOME } from '../config/paths';
-import { openOrgLogin, openOrgWorkbench } from '../config/product';
+import { openOrgLogin } from '../config/product';
 import { APP_VERSION } from '../config/version';
 import { isMultiTenant, isStandalone } from '../config/runtime';
 import { canBackToWorkbench } from '../config/pages';
@@ -196,11 +196,8 @@ function toSelectTenant() {
 
 function toWorkbench() {
   leaveProject();
-  // multi 的工作台在组织平台（本进程没有这一级），所以是整页跳转而非 router.push。
-  if (multi) {
-    openOrgWorkbench();
-    return;
-  }
+  // 工作台在本进程，三种模式都有（见 `config/pages.ts` 的 `ownsProjects`）—— 所以是
+  // 进程内跳转。此前 multi 下这里整页跳到组织平台的工作台，用户 2026-09-26 报的就是它。
   router.push(SYS_HOME);
 }
 

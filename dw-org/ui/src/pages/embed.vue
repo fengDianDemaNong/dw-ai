@@ -37,7 +37,8 @@ import { ORG_PAGES } from '../config/pages';
 import { productEmbedUrl } from '../config/product';
 import { isEmbeddable } from '../config/products';
 import type { ProductModule } from '../config/iam';
-import { app, currentProject, currentTenant, hasModule, loadNav, productMenus } from '../stores/app';
+import { app, currentProject, currentTenant, hasModule, loadNav, navTree } from '../stores/app';
+import type { NavNodeRow } from '../api/client';
 
 defineOptions({ name: 'PortalEmbed' });
 
@@ -66,6 +67,19 @@ const shell = computed(() =>
 );
 
 /**
+ * 把菜单树按深度优先摊平 —— 产品节点可能挂在任意层级下（挂在某个目录里、
+ * 或者本身就是挂载展开出来的子树），只扫顶层会漏掉它们。
+ */
+function flattenProducts(nodes: NavNodeRow[]): NavNodeRow[] {
+  const out: NavNodeRow[] = [];
+  for (const n of nodes) {
+    out.push(n);
+    if (n.children?.length) out.push(...flattenProducts(n.children));
+  }
+  return out;
+}
+
+/**
  * 当前产品在菜单里的那一项。地址与标题都从它来，不另外查一次服务表。
  *
  * <p>优先取**当前壳**的那一项：同一条子路径可以两个壳各挂一份，标题也可能不同
@@ -73,8 +87,8 @@ const shell = computed(() =>
  * 地址是产品级的，所以两处都能用；只有标题有这个讲究。
  */
 const menu = computed(() => {
-  const ofProduct = productMenus.value.filter((m) => m.product === product.value);
-  return ofProduct.find((m) => m.scope === shell.value) ?? ofProduct[0];
+  const ofProduct = flattenProducts(navTree.value).filter((n) => n.product === product.value);
+  return ofProduct.find((n) => n.scope === shell.value) ?? ofProduct[0];
 });
 const frontendUrl = computed(() => menu.value?.frontendUrl ?? '');
 const label = computed(() => menu.value?.label ?? '产品页面');

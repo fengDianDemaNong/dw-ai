@@ -48,7 +48,7 @@ import { clusterLogs, scoreCluster } from '../engine/materialize';
 import { checkDuplicate } from '../engine/metrics';
 import { assessImpact, tableDependentsOf } from '@dw-ai/engine';
 import { buildSpecPack, type SpecPack } from '../engine/specIo';
-import { api, authToken, setAuthToken, refreshAccess, setIdleTtlSeconds, useRemoteApi, type KnowledgeArticleDto, type NavGroupRow, type ProductMenu, type ProductService, type Session, type Snapshot } from '../api/client';
+import { api, authToken, setAuthToken, refreshAccess, setIdleTtlSeconds, useRemoteApi, type KnowledgeArticleDto, type NavNodeRow, type ProductService, type Session, type Snapshot } from '../api/client';
 import { ADMIN_HOME, APP_HOME, NO_PROJECT, ORG_HOME, SELECT_TENANT, SYS_HOME } from '../config/paths';
 import { isEmbeddable } from '../config/products';
 import { configureProductOrigins, isOrgUi } from '../config/product';
@@ -436,8 +436,7 @@ export function logoutRemote() {
   state.currentProjectId = null;
   state.platformAdmin = false;
   state.tenantRole = null;
-  navItems.value = [];
-  navGroups.value = [];
+  navTree.value = [];
 }
 
 export function logout() {
@@ -473,42 +472,21 @@ function gradeUsedByTables(pid: string | null, code: string): boolean {
 export const app = readonly(state);
 
 /**
- * 门户菜单（产品页面配进侧栏的那些），服务端已按租户许可过滤。
+ * 门户菜单**树**（org 自有节点与各个产品挂进来的节点在同一棵树上），
+ * 服务端已按租户许可与**这个人**的角色裁过一遍（见 `NavNodeService.treeFor`）。
  *
  * <p>刻意<b>不</b>放进持久化的 {@code AppState}：它是服务端配置的投影，
  * 存进 localStorage 只会让旧值盖住新配置。跟着租户走
  * （{@code applySession} 里加载、{@code leaveTenant} 里清空）。
- */
-const navItems = ref<ProductMenu[]>([]);
-
-/** 全部产品菜单，不分壳。落地页判断与「有没有可嵌的产品」用它。 */
-export const productMenus = computed(() => navItems.value);
-
-/**
- * 按归属壳拆成两套侧栏的数据源。
  *
- * <p>归属由平台管理员在「菜单管理」里指定，服务端原样返回 —— 前端只负责分流，
- * 不猜也不补默认值。同一条路径可以两个壳各挂一份（`nav_items` 的唯一约束是
- * `(scope, product, path)`），所以两者<b>不是</b>互补关系，各自独立过滤。
- */
-export const workbenchMenus = computed(() => navItems.value.filter((m) => m.scope === 'workbench'));
-export const projectMenus = computed(() => navItems.value.filter((m) => m.scope === 'project'));
-
-/**
- * 分组元数据（组间顺序 + 空组策略），服务端配置的投影。
+ * <p><b>V23 起只有这一份</b>：以前这里是 `navItems`（菜单）+ `navGroups`（分组元数据）
+ * 两个 ref、两个请求；分组并进菜单表之后，组间顺序与空组策略就是树里那一行自己的
+ * 字段（`sortOrder` / `emptyPolicy`），没有第二份要分开拉的东西。
  *
- * <p>与 {@link navItems} 一样不持久化、跟着租户走。**与菜单分开存放、分开拉取**：
- * 它拉不到时侧栏回落成现在的样子（首次出现序、无空组占位），而菜单拉不到是少入口 ——
- * 两种症状不该互相掩盖（同 {@code productServices} 那条注释的理由）。
- *
- * <p>注意它<b>不受租户许可过滤</b>：一个模块没开通时，它的分组元数据照样回来，
- * 这正是 `emptyPolicy='always'` 能「整组保留、入口置灰说明」的前提。
+ * <p>整棵树**不按壳预先切开**：切开是渲染那一步的事（`config/sysNav.ts` 的
+ * `toNavItems` 按 `ctx.scope` 取顶层），在这里再存两份只会让「哪份是权威」多一个答案。
  */
-const navGroups = ref<NavGroupRow[]>([]);
-
-/** 按归属壳拆开，供两个壳各自的侧栏用（与 {@link workbenchMenus} 同一套分流）。 */
-export const workbenchNavGroups = computed(() => navGroups.value.filter((g) => g.scope === 'workbench'));
-export const projectNavGroups = computed(() => navGroups.value.filter((g) => g.scope === 'project'));
+export const navTree = ref<NavNodeRow[]>([]);
 
 /**
  * 产品服务目录（`GET /api/services`）：产品码 → 它自己的站点根。
@@ -549,34 +527,26 @@ export function navReady(): Promise<void> {
 }
 
 /**
- * 拉一次菜单与分组元数据。
+ * 拉一次菜单树。
  *
  * <p>失败时留空而<b>不</b>抛：侧栏是每个页面都要画的东西，让「菜单接口不通」
- * 把整个壳带下水不划算 —— 用户仍能用「系统管理」那一组。留一条 warn 是因为
- * 这个失败从界面上看与「管理员还没配菜单」完全一样。
+ * 把整个壳带下水不划算 —— 用户仍能用「系统管理」那一支（它是前端硬编码的平台壳菜单，
+ * 或已进库的 org 自有节点）。留一条 warn 是因为这个失败从界面上看与
+ * 「管理员还没配菜单」完全一样。
  *
- * <p>两个请求并行、<b>各自兜底</b>：所以用 {@code allSettled} 而不是 {@code all} ——
- * 后者一坏俱坏，分组接口挂掉会连带把菜单也丢掉（反之亦然），而这两件事的后果
- * 完全不同（少入口 vs 组顺序回落）。而且它是两个独立端点、本来就不同源。
+ * <p>以前这里是一个 `Promise.allSettled([nav(), navGroups()])` —— 两个请求各自兜底。
+ * V23 把分组并进菜单表之后只剩一个请求，那层「一坏俱坏」的顾虑也随之消失。
  */
 export async function loadNav() {
   if (!useRemoteApi() || !authToken()) {
-    navItems.value = [];
-    navGroups.value = [];
+    navTree.value = [];
     return;
   }
-  const [menus, groups] = await Promise.allSettled([api.nav(), api.navGroups()]);
-  if (menus.status === 'fulfilled') {
-    navItems.value = menus.value;
-  } else {
-    console.warn('[dw-ai] 拉取门户菜单失败，侧栏将只显示系统菜单:', menus.reason);
-    navItems.value = [];
-  }
-  if (groups.status === 'fulfilled') {
-    navGroups.value = groups.value;
-  } else {
-    console.warn('[dw-ai] 拉取分组元数据失败，侧栏将按各组首次出现序分组、不显示空组:', groups.reason);
-    navGroups.value = [];
+  try {
+    navTree.value = await api.nav();
+  } catch (e) {
+    console.warn('[dw-ai] 拉取门户菜单失败，侧栏将只显示平台/系统菜单:', e);
+    navTree.value = [];
   }
 }
 
@@ -675,6 +645,23 @@ export function projectRoleOf(product: Product, projectId?: string): ProjectRole
   return undefined;
 }
 
+/**
+ * 按项目 code 找项目 —— 项目壳的地址里只有 code（`/org/project/{code}/...`）。
+ *
+ * <p><b>为什么不读 {@link state}.currentProjectId</b>：它来自 sessionStorage
+ * （`enterProject` 写入、`bootstrapRemote` 恢复），与地址里的 code **可能不是同一个
+ * 项目** —— 粘贴地址、前进/后退、另开标签页进来时都会不一致。项目壳里判权与取数
+ * 一律按地址里的 code 解析：地址才是这个页面的唯一真相，sessionStorage 只是「上次
+ * 去过哪儿」的记忆。
+ *
+ * <p>找不到返回 `undefined`（项目被删、code 打错）—— 由调用方决定怎么呈现，
+ * 不在这里兜一个「第一个项目」，那会让打错的地址静默变成另一个项目的页面。
+ */
+export function projectByCode(code: string): Project | undefined {
+  if (!code) return undefined;
+  return state.projects.find((p) => p.code === code);
+}
+
 /** 仓建设下的角色 —— 工作台的「当前角色」标签与几个写权限都看它。 */
 export const currentProjectRole = computed<ProjectRole | undefined>(() => projectRoleOf('warehouse'));
 
@@ -713,10 +700,26 @@ export const canPublishModel = computed(() => can('warehouse', 'model:publish'))
  * 时返回 `null`，由调用方回落工作台 —— 那里至少有「项目管理」可用，比空白页好。
  */
 export function projectMenuHref(code: string): string | null {
-  const menu = projectMenus.value.find((m) => isEmbeddable(m.product) && m.frontendUrl);
+  const menu = findEmbeddableNode(navTree.value.filter((n) => n.scope === 'project'));
   if (!menu) return null;
   const sub = menu.path.startsWith('/') ? menu.path : `/${menu.path}`;
   return `${ORG_HOME}/project/${encodeURIComponent(code)}/embed/${menu.product}${sub}`;
+}
+
+/**
+ * 树里第一个「能嵌、已登记页面地址、并且自己是个可点项」的产品节点（深度优先）。
+ *
+ * <p>三个判据缺一不可：不能嵌的（如数据质量）只能整页跳走，不是壳里的落点；
+ * 没登记地址的点了只会弹回首页；`path` 为空的是目录节点，它自己不是一个页面 ——
+ * 前两个判据在旧的平铺列表上是够的，因为那时每一行都是一条菜单项。
+ */
+function findEmbeddableNode(nodes: NavNodeRow[]): NavNodeRow | null {
+  for (const n of nodes) {
+    if (n.product && n.path && n.frontendUrl && isEmbeddable(n.product)) return n;
+    const hit = findEmbeddableNode(n.children ?? []);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 /**
@@ -776,10 +779,14 @@ export const currentRoleLabel = computed(() =>
  *
  * <p>产品码必须显式给：工作台要同时判断仓建设与数据地图能不能进
  * （见 `pages/projects.vue` 的 `go()`），这里给个隐含默认值只会帮倒忙。
+ *
+ * <p>`projectId` 可选，透传给 {@link projectRoleOf}：缺省看当前选中的项目，
+ * 项目壳里则必须显式传 —— 它要判的是**地址里那个项目**，不是 sessionStorage
+ * 记着的那个（理由见 {@link projectByCode}）。
  */
-export function can(product: Product, perm: Perm): boolean {
+export function can(product: Product, perm: Perm, projectId?: string): boolean {
   if (isStandalone()) return true;
-  return roleHas(product, projectRoleOf(product), perm);
+  return roleHas(product, projectRoleOf(product, projectId), perm);
 }
 
 export function hasModule(mod: ProductModule): boolean {
@@ -976,8 +983,7 @@ export function leaveTenant() {
   state.currentProjectId = null;
   state.tenantRole = null;
   // 平台壳的侧栏是 buildAdminNav()，产品菜单与分组元数据都不该跟过去
-  navItems.value = [];
-  navGroups.value = [];
+  navTree.value = [];
   sessionStorage.removeItem('dw-ai.tenantId');
   sessionStorage.removeItem('dw-ai.projectId');
   sessionStorage.removeItem('dw-ai.tenantCode');

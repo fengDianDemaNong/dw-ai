@@ -117,7 +117,7 @@ public class ProductRoleService {
   /**
    * 改角色名 / 说明 / 顺序 / 权限词 / 是否管理角色。
    *
-   * <p><b>产品与角色码不能改</b>（照 {@code NavGroupService} 拒绝改 scope/product 的写法）：
+   * <p><b>产品与角色码不能改</b>（照 {@code NavNodeService} 拒绝改 scope 的写法）：
    * 两者一起构成角色身份（唯一键 {@code (product, code)}），允许改就是「换一个角色」，
    * 该走删 + 建。而且角色码还写在 {@code project_members.role} 里，改了它所有持有者
    * 会在一瞬间失去权限 —— 那种变更必须显式发生，不能藏在一个「编辑」里。
@@ -160,7 +160,7 @@ public class ProductRoleService {
   /**
    * 删角色。<b>不阻塞、不级联清空成员的角色列。</b>
    *
-   * <p>返回 {@code referenced} = 仍写着这个角色码的成员人次。与 {@code NavGroupService.delete}
+   * <p>返回 {@code referenced} = 仍写着这个角色码的成员人次。与 {@code NavNodeService.delete}
    * 同一个取舍：顺手把成员的角色改掉等于<b>静默改人的权限</b>，而管理员删的是一个角色配置。
    * 那 N 个人此后在该产品下判否（表里没这个角色、{@code Perms} 也没有），是可见且可解释的；
    * 悄悄把他们降成 viewer 则是不可见的。

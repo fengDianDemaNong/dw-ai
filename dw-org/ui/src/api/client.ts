@@ -375,80 +375,97 @@ export type LoginRes = {
   tenants?: Tenant[];
 };
 
-/** 门户菜单项：管理面看全部字段，消费面（`api.nav()`）拿到的是它的子集。 */
 /** 一条菜单项挂哪个壳：进项目**之前**（工作台）还是**之后**（项目）。 */
 export type NavScope = 'workbench' | 'project';
 
-export type NavItemRow = {
+/**
+ * 菜单树里的一个节点 —— **V23 起侧栏与菜单管理共用的形状**。
+ *
+ * <p>「分组」这个概念没有了：分组原本表达的就是「一层目录」，现在它就是一个 `path`
+ * 为空、带 `children` 的节点（用户 2026-09-27：「统一都是菜单，菜单下面还有菜单…
+ * 不限制菜单层级」）。所以这里没有 `groupTitle`。
+ *
+ * <p>三类节点只看两列（见服务端 `NavNodeService` 的类注释）：
+ * <ul>
+ *   <li>org 自有：`product` 为空 → `path` 是 org 的**完整路由**（可能含 `{code}` 占位符）；</li>
+ *   <li>手工复制的产品页面：`product` 非空、`mounted` 为假 → `path` 是**子应用内**路径；</li>
+ *   <li>挂载节点：`mounted` 为真 → 内容按 `(product, ref)` 在产品清单里**实时展开**，
+ *       此时 `path`/权限词都取自产品那一项，而不是这一行的配置。</li>
+ * </ul>
+ *
+ * <p>`frontendUrl` / `disabled` / `disabledReason` 只有消费面（`api.nav()`）会给：
+ * 那是渲染要用的判权结果（服务端替前端判完了，见 `config/sysNav.ts` 的 `toNavItems`）。
+ */
+export type NavNodeRow = {
   id: string;
-  product: string;
   scope: NavScope;
-  /** 侧栏分组标题，如「数据地图」。为空 = 不分组。 */
-  groupTitle: string;
+  /** 父节点 id；空串 = 壳下的顶层节点（用户说的「主菜单」），**不是** `null`。 */
+  parentId: string;
   label: string;
-  icon: string;
-  /** 【子应用内】路径，如 /lineage/tables */
+  /** 空串 = 目录节点（不可点，只用来挂子节点）。 */
   path: string;
-  /** 子应用内的权限词，如 `catalog:read`。为空 = 不判权。 */
+  icon: string;
   perm: string;
   sortOrder: number;
   enabled: boolean;
+  /** 仅租户管理员可见（只对 org 自有节点有意义）。 */
+  adminOnly: boolean;
+  /** 产品码；空串 = org 自己的页面。 */
+  product: string;
+  /** `mounted` 为真时：产品清单里那个节点的 id。 */
+  ref: string;
+  mounted: boolean;
+  emptyPolicy: NavGroupEmptyPolicy;
   createdAt?: string;
+  /** 该节点的产品站点根；空串 = 「服务注册」里还没配。 */
+  frontendUrl?: string;
+  disabled?: boolean;
+  disabledReason?: string;
+  /** 子菜单，层级不限。消费面里已经被服务端按许可与角色裁过一遍。 */
+  children?: NavNodeRow[];
 };
 
-export type NavItemInput = {
-  product?: string;
+/**
+ * 新建 / 修改菜单节点的请求体（服务端 `NavNodeService.NavNodeReq` 的镜像）。
+ *
+ * <p>字段缺席 = 不改（`PATCH` 的语义）；新建时 `scope` 必填，其余由服务端落默认值。
+ * 三类节点的填法（见 {@link NavNodeRow}）：
+ * <ul>
+ *   <li>org 自有页面 / 目录：`product` 留空，`path` 写 org 路由（空串 = 目录）；</li>
+ *   <li>手工复制产品页面：给 `product` + 子应用内的 `path`，`mounted` 留假（默认）；</li>
+ *   <li>挂载产品节点：给 `product` + `ref`（产品清单里那个节点的 id）并置 `mounted: true`
+ *       —— 此时 `path` / 权限词由服务端在渲染时现取，**不要**自己填。</li>
+ * </ul>
+ */
+export type NavNodeInput = {
   scope?: NavScope;
-  groupTitle?: string;
-  label?: string;
-  icon?: string;
+  /** 父节点 id；空串 = 壳下的顶层节点（用户说的「主菜单」）。 */
+  parentId?: string;
+  title?: string;
+  /** 空串 = 目录节点。 */
   path?: string;
+  icon?: string;
   perm?: string;
   sortOrder?: number;
   enabled?: boolean;
-};
-
-/** 空组策略：没有可用菜单时，这个分组是保留（入口置灰并说明）还是整组隐藏。 */
-export type NavGroupEmptyPolicy = 'always' | 'hide';
-
-/**
- * 一个侧栏分组的元数据（管理面 `platform.navGroups()` 与消费面 `api.navGroups()` 同一形状）。
- *
- * <p>名字带 `Row` 后缀，与 `NavItemRow` 同一套命名 —— `config/nav.ts` 里的 `NavGroup`
- * 是**渲染后**的分组（带 items），两者不是一回事，别弄混。
- *
- * <p>它与 `NavItemRow.groupTitle` 是**软约束**关系：分组表只是候选清单 + 组间顺序 +
- * 空组策略，菜单项里那个字符串仍是渲染真源。所以这里没有、也不该有 id 之外的关联字段。
- */
-export type NavGroupRow = {
-  id: string;
-  scope: NavScope;
-  product: string;
-  title: string;
-  /** 组【间】顺序；组内顺序仍由菜单项的 `sortOrder` 决定。 */
-  sortOrder: number;
-  emptyPolicy: NavGroupEmptyPolicy;
-  createdAt?: string;
-};
-
-export type NavGroupInput = {
-  scope?: NavScope;
+  /** 仅租户管理员可见；只能用在 org 自有节点上（`product` 为空）。 */
+  adminOnly?: boolean;
+  /** 产品码；空串 = org 自己的页面。 */
   product?: string;
-  title?: string;
-  sortOrder?: number;
+  /** `mounted` 为真时必填：产品清单里那个节点的 id。 */
+  ref?: string;
+  mounted?: boolean;
   emptyPolicy?: NavGroupEmptyPolicy;
 };
 
-/** 改分组名的回执：`renamedItems` 是同事务里跟着改名的菜单条数。 */
-export type NavGroupUpdateResult = NavGroupRow & { renamedItems?: number };
-
 /**
- * 删除分组的回执。
+ * 空目录策略：目录下的子菜单一个都不可用时（判权全不过、产品拉不到），
+ * 这个目录是保留（入口置灰并说明）还是整条隐藏。
  *
- * `referenced` = 仍写着这个名字的菜单条数 —— 删除**不阻塞、不清空**菜单项的分组名
- * （那等于静默改菜单），前端拿它提示「已删除，但有 N 条菜单仍写着这个名字」。
+ * <p>V23 之前它是「分组」的字段，现在挂在**目录节点**自己身上（`NavNodeRow.emptyPolicy`）
+ * —— 分组没了，原来那种「组有策略、组内的菜单项没策略」的两层关系也就跟着塌成一层。
  */
-export type NavGroupDeleteResult = { referenced: number };
+export type NavGroupEmptyPolicy = 'always' | 'hide';
 
 /** 权限词的一个可选值。`label` 是**产品自己的说法**（「查看目录」），org 侧原样展示。 */
 export type PermOption = { value: string; label: string };
@@ -500,17 +517,46 @@ export type ProductRoleInput = {
 /** 删除角色的回执。`referenced` = 仍被派了这个角色的成员人次 —— 删除**不阻塞、不改人**。 */
 export type ProductRoleDeleteResult = { referenced: number; code: string };
 
-/** 某个服务报上来的一个菜单候选（`{frontendUrl}/menu.json` 里的一项）。 */
+/**
+ * 角色下拉的一个选项 —— `GET /projects/{id}/member-roles` 的投影。
+ *
+ * <p>刻意不含 `perms`：那是管理面「产品角色」页要看的权限词清单，成员页只拿它填下拉。
+ * 后端也只回这四项（见 `ProjectService.memberRoles`）。
+ *
+ * <p>`code` 是自定义角色码的来源 —— 别在前端写死 `admin/modeler/viewer` 三值：
+ * 写侧 V20 起角色码问产品角色表，后台新建的角色是能派下去的，前端写死会让它
+ * **存得进、选不出**。
+ */
+export type ProjectRoleOption = {
+  code: string;
+  label: string;
+  hint?: string | null;
+  isAdmin?: boolean;
+};
+
+/**
+ * 某个服务报上来的一个菜单候选（`{frontendUrl}/menu.json` 里的一项）。
+ *
+ * <p><b>V23 起是一棵树</b>：产品可以报任意层级，目录节点有 `children` 且 `path` 为空。
+ * 老格式（扁平两层、每一项带 `group`）在服务端就被折成了「目录节点 + 子项」
+ * （见 `MenuCandidateService.foldGroups`），所以这里读到 `group` 非空是**不可能的** ——
+ * 留着这个字段只为让老服务端的报文仍能解析。
+ */
 export type MenuCandidate = {
+  /** 产品清单里这个节点的 id。挂载（`NavNodeRow.ref`）引用的就是它。 */
   id: string;
   /** 服务自己建议的归属壳；管理员可以改。 */
   scope: NavScope;
+  /** @deprecated V23 起恒为空串；分组已经折成父节点了。 */
   group: string;
+  /** 空串 = 目录节点（只有子菜单，自己没有页面）。 */
   path: string;
   label: string;
   icon: string;
   perm: string;
   sort: number;
+  /** 子菜单，层级不限。 */
+  children?: MenuCandidate[];
 };
 
 /**
@@ -526,33 +572,10 @@ export type MenuCandidatesOfProduct = {
   menus: MenuCandidate[];
 };
 
-/** 批量新建的逐条回执（`created` / `skipped` 已配置 / `failed` 带 1 起序号）。 */
-export type NavBatchResult = {
-  created: NavItemRow[];
-  skipped: { product: string; path: string; scope: NavScope; reason: string }[];
-  failed: { index: number; reason: string }[];
-};
-
 /** 服务目录里的一条（`GET /api/services`）：产品码 → 它的站点根。 */
 export type ProductService = {
   product: string;
   /** 该产品的前端地址；为空 = 还没在「服务注册」里配。 */
-  frontendUrl: string;
-};
-
-/** 侧栏要渲染的一条产品菜单（`GET /api/nav`），许可过滤已在服务端做过。 */
-export type ProductMenu = {
-  product: string;
-  /** 挂哪个壳 —— 前端靠这一项把一份清单拆成工作台与项目两套侧栏。 */
-  scope: NavScope;
-  /** 侧栏分组标题，如「数据地图」。为空 = 不分组。 */
-  groupTitle: string;
-  label: string;
-  icon: string;
-  path: string;
-  /** 子应用内的权限词；为空 = 不判权。 */
-  perm: string;
-  /** 该产品页面的前端地址；为空 = 还没在「服务注册」里配。 */
   frontendUrl: string;
 };
 
@@ -597,25 +620,19 @@ export const api = {
     req<Me>('/api/v1/auth/enter-tenant', { method: 'POST', body: JSON.stringify({ tenantId, code }) }),
   me: () => req<Me>('/api/v1/auth/me'),
   /**
-   * 当前租户可见的门户菜单。
+   * 当前租户可见的**菜单树**（消费面）。
    *
    * <p>注意路径是 `/api/nav` 而不是 `/api/v1/platform/...`：后者是平台管理员专属，
    * 挂过去普通成员的侧栏会永远是空的（服务端 `NavController` 上有同样的注释）。
-   */
-  nav: () => req<ProductMenu[]>('/api/v1/nav'),
-
-  /**
-   * 当前租户侧栏要用的分组元数据（组间顺序 + 空组策略）。
    *
-   * <p>**与 `nav()` 分开拉，不要合并**：两者失败后果不同。菜单拉不到 = 侧栏少入口；
-   * 分组拉不到 = 侧栏回落成现在的样子（按首次出现序、无空组）。合成一个请求会让
-   * 这两种症状互相掩盖 —— 与 `stores/app.ts` 里 `navItems` 与 `productServices`
-   * 分开拉是同一条理由。
+   * <p>返回的是**这个人**的树，不是这个租户的树：挂了权限词的节点已经按他在当前项目下的
+   * 角色判过（`X-Project-Id` 由壳带上），所以**切项目必须重拉一次**。
    *
-   * <p>返回条数**不受租户许可过滤**（服务端 `NavGroupService.groupsFor` 的注释解释了
-   * 为什么）：这正是 `emptyPolicy='always'` 能在「模块未开通」时仍出现的前提。
+   * <p>以前这里还要再拉一次 `navGroups()` 拿「组间顺序 + 空组策略」—— V23 起那些就是
+   * 树里那一行自己的字段（`sortOrder` / `emptyPolicy`），没有第二份需要单独拉的东西，
+   * 也就没有「菜单到了、分组没到」这种半成品状态。
    */
-  navGroups: () => req<NavGroupRow[]>('/api/v1/nav/groups'),
+  nav: () => req<NavNodeRow[]>('/api/v1/nav'),
 
   /**
    * 产品服务目录（消费面）：当前租户开通的产品各自的前端地址在哪。
@@ -659,8 +676,22 @@ export const api = {
       req<unknown>('/api/v1/platform/services', { method: 'POST', body: JSON.stringify(body) }),
     removeService: (product: string) =>
       req<void>(`/api/v1/platform/services/${encodeURIComponent(product)}`, { method: 'DELETE' }),
-    // 门户菜单是平台管理员配的（管理面）；普通成员读的是下面 api.nav()
-    navItems: () => req<NavItemRow[]>('/api/v1/platform/nav-items'),
+    /**
+     * 门户菜单树的**全树**（管理面，平台管理员）。
+     *
+     * <p>与消费面 `api.nav()` 的三点不同：这里**不判权、不裁许可、不展开挂载节点** ——
+     * 管理页要看到自己配的全部行（含停用、含产品节点），所以每一行都是 `nav_nodes` 里的
+     * 真实一行，`children` 也就是真实层级。消费面那棵是「这个人看到的树」，两者别混。
+     *
+     * <p>`mounted` 的行在管理面只有 `ref`，没有内容 —— 它的子菜单要去 `navCandidates()`
+     * 里对着产品清单看（挂载是「窗口」，不是「副本」）。
+     */
+    navNodes: (query?: { scope?: NavScope }) => {
+      const qs = new URLSearchParams();
+      if (query?.scope) qs.set('scope', query.scope);
+      const suffix = qs.toString() ? `?${qs}` : '';
+      return req<NavNodeRow[]>(`/api/v1/platform/nav-nodes${suffix}`);
+    },
     /**
      * 各服务报上来的菜单候选。
      *
@@ -668,39 +699,23 @@ export const api = {
      * 浏览器直接去拉会撞上跨域，而且这些地址在跨机部署时浏览器根本到不了。
      */
     navCandidates: () => req<{ products: MenuCandidatesOfProduct[] }>('/api/v1/platform/nav-candidates'),
-    createNavItemsBatch: (items: NavItemInput[]) =>
-      req<NavBatchResult>('/api/v1/platform/nav-items/batch', {
-        method: 'POST',
-        body: JSON.stringify({ items }),
-      }),
-    createNavItem: (body: NavItemInput) =>
-      req<NavItemRow>('/api/v1/platform/nav-items', { method: 'POST', body: JSON.stringify(body) }),
-    updateNavItem: (id: string, body: NavItemInput) =>
-      req<NavItemRow>(`/api/v1/platform/nav-items/${encodeURIComponent(id)}`, {
+    /**
+     * 建一条菜单节点。**一次只建一条** —— V23 后端没有批量端点（旧的那条随
+     * `/nav-items/batch` 一起删了），因为「从产品拉取菜单」现在要支持嵌套：
+     * 一次导入是一棵子树、父子 id 要在导入过程中传递，前端递归逐条建反而更直白
+     * （见 `pages/admin/nav-items.vue` 的 `walkImport`）。
+     */
+    createNavNode: (body: NavNodeInput) =>
+      req<NavNodeRow>('/api/v1/platform/nav-nodes', { method: 'POST', body: JSON.stringify(body) }),
+    /** 改标题/图标/顺序/权限词/启停/父子关系/空目录策略/挂载。字段缺席 = 不改。 */
+    updateNavNode: (id: string, body: NavNodeInput) =>
+      req<NavNodeRow>(`/api/v1/platform/nav-nodes/${encodeURIComponent(id)}`, {
         method: 'PATCH',
         body: JSON.stringify(body),
       }),
-    deleteNavItem: (id: string) =>
-      req<void>(`/api/v1/platform/nav-items/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-    // 分组：让管理员把「有哪些分组」提前建好（菜单管理页的「分组管理」抽屉）。
-    // 与 navItems 一样是管理面；消费面的只读版本是上面的 api.navGroups()。
-    navGroups: (query?: { scope?: NavScope; product?: string }) => {
-      const qs = new URLSearchParams();
-      if (query?.scope) qs.set('scope', query.scope);
-      if (query?.product) qs.set('product', query.product);
-      const suffix = qs.toString() ? `?${qs}` : '';
-      return req<NavGroupRow[]>(`/api/v1/platform/nav-groups${suffix}`);
-    },
-    createNavGroup: (body: NavGroupInput) =>
-      req<NavGroupRow>('/api/v1/platform/nav-groups', { method: 'POST', body: JSON.stringify(body) }),
-    /** 传 `title` 就是改名，服务端会级联更新菜单项的分组名（见返回的 `renamedItems`）。 */
-    updateNavGroup: (id: string, body: NavGroupInput) =>
-      req<NavGroupUpdateResult>(`/api/v1/platform/nav-groups/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        body: JSON.stringify(body),
-      }),
-    deleteNavGroup: (id: string) =>
-      req<NavGroupDeleteResult>(`/api/v1/platform/nav-groups/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /** 删一个节点**连同整棵子树**；`subtree` 是连带删掉的子孙条数（确认框要用）。 */
+    deleteNavNode: (id: string) =>
+      req<{ subtree: number }>(`/api/v1/platform/nav-nodes/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     /**
      * 某产品认哪些权限词（产品自报，见各服务前端 `config/navData.ts` 的 `PERM_OPTIONS`）。
      *
@@ -870,11 +885,33 @@ export const api = {
     req<Project>(`/api/v1/projects/${projectId}`, { method: 'PATCH', body: JSON.stringify(body) }),
   deleteProject: (projectId: string) => req<void>(`/api/v1/projects/${projectId}`, { method: 'DELETE' }),
   snapshot: (projectId: string) => req<Snapshot>(`/api/v1/projects/${projectId}/snapshot`),
-  putMember: (projectId: string, userId: string, role: string) =>
+  /**
+   * 项目成员列表。
+   *
+   * <p>行是 **(项目, 用户, 产品)** 粒度：同一个人在每个已开通产品下各占一行、各有各的角色。
+   * 渲染时别按 `userId` 去重 —— 去重等于丢掉产品维，症状是「改了这个产品的角色，
+   * 另一个产品的下拉跟着变」，而库里两行其实不一致。
+   */
+  listMembers: (projectId: string) => req<ProjectMember[]>(`/api/v1/projects/${projectId}/members`),
+  /**
+   * 派/改一个人在本项目某产品下的角色。
+   *
+   * <p>`product` 可选：不传时由后端按仓建设兜底（老的「只传 role」调用点零改动）。
+   */
+  putMember: (projectId: string, userId: string, role: string, product?: string) =>
     req<ProjectMember>(`/api/v1/projects/${projectId}/members/${encodeURIComponent(userId)}`, {
       method: 'PUT',
-      body: JSON.stringify({ role }),
+      body: JSON.stringify(product ? { product, role } : { role }),
     }),
+  /**
+   * 把一个人移出本项目 —— **所有产品**的角色都会被清掉，不是某一个。
+   * 界面上的确认文案必须把这个范围说出来。
+   */
+  deleteMember: (projectId: string, userId: string) =>
+    req<void>(`/api/v1/projects/${projectId}/members/${encodeURIComponent(userId)}`, { method: 'DELETE' }),
+  /** 本项目可派的产品角色（成员页角色下拉的选项）。 */
+  projectMemberRoles: (projectId: string) =>
+    req<ProjectRoleOption[]>(`/api/v1/projects/${projectId}/member-roles`),
   spec: {
     domains: (projectId: string) => req<Domain[]>(`/api/v1/projects/${projectId}/domains`),
     layers: (projectId: string) => req<LayerRule[]>(`/api/v1/projects/${projectId}/layers`),

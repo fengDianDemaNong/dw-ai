@@ -35,7 +35,8 @@
     </PageHeader>
 
     <!-- ============ 当前数据范围 ============ -->
-    <div v-if="hasWorkbench()" class="card">
+    <!-- 三种模式都显示：它改的是「我在看哪一份数据」，工作台层级同样有项目上下文 -->
+    <div class="card">
       <div class="card-title mb-1">当前数据范围</div>
       <p class="hint mb-3">
         改的是「我在看哪一份数据」，不是「有哪些项目」—— 后者去
@@ -81,7 +82,7 @@
 import { Button, Popconfirm, Radio, message } from 'ant-design-vue';
 import PageHeader from '../../components/PageHeader/index.vue';
 import ProjectScopeSwitcher from '../../components/ProjectScopeSwitcher/index.vue';
-import { WORKBENCH_PAGES, hasWorkbench } from '../../config/pages';
+import { WORKBENCH_PAGES } from '../../config/pages';
 import { preferences, resetAppearance } from '../../stores/preferences';
 import type { ThemeName } from '../../stores/preferences';
 

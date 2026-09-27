@@ -35,12 +35,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 })
 class SchemaBootstrapTest {
 
-    /** dw-org 全库应有的表（跨 V1~V20 全部迁移）。 */
+    /** dw-org 全库应有的表（跨 V1~V23 全部迁移）。 */
     private static final List<String> EXPECTED_TABLES = List.of(
             "tenants", "users", "user_tenants", "projects", "project_members",
             "platform_access", "tenant_grants", "tenant_licenses", "tenant_llm",
             "appearance_prefs", "tenant_ai_prompts", "tenant_knowledge_articles",
-            "refresh_tokens", "service_registry", "nav_items", "nav_groups",
+            "refresh_tokens", "service_registry", "nav_nodes",
             "product_roles", "product_role_perms");
 
     /**
@@ -53,12 +53,13 @@ class SchemaBootstrapTest {
     private static final Map<String, List<String>> EXPECTED_COLUMNS = Map.of(
             // frontend_url 是 V16 新增的，门户 iframe 嵌入读的就是它
             "service_registry", List.of("product", "version", "base_url", "seen_at", "frontend_url"),
-            // nav_items 是 V17 新增的（门户菜单）；scope / group_title / perm 是 V18 加的
-            "nav_items", List.of("id", "product", "label", "icon", "path", "sort_order", "enabled",
-                    "scope", "group_title", "perm"),
-            // nav_groups 是 V19 新增的（分组管理）。empty_policy 是这张表存在的理由之一，
-            // 漏了它整张表就只剩个空壳，却又「表建出来了」不报错，所以要单独钉住。
-            "nav_groups", List.of("id", "scope", "product", "title", "sort_order", "empty_policy"),
+            // nav_nodes 是 V23 新增的（菜单树：分组与菜单合并成一张表，parent_id 自引用，
+            // 层级不限深度）。这几列各自都是这张表存在的理由，漏一个就少一种能力，
+            // 而「表建出来了」不会报任何错：漏 parent_id 就没有层级、漏 product/ref/mounted
+            // 挂载整个失效、漏 admin_only 那批菜单会显示给所有成员、漏 empty_policy
+            // 空目录的行为就成了某个没人预期的默认值。
+            "nav_nodes", List.of("id", "scope", "parent_id", "title", "path", "icon", "perm",
+                    "sort_order", "enabled", "admin_only", "product", "ref", "mounted", "empty_policy"),
             // product_roles / product_role_perms 是 V20 新增的（产品角色）。
             // is_admin 与 builtin 是这张表存在的理由：漏了 is_admin，租户管理员在该产品里
             // 就找不到短路映射的目标；漏了 builtin，管理员能把出厂角色删掉。
@@ -68,63 +69,97 @@ class SchemaBootstrapTest {
             "tenant_licenses", List.of("tenant_id", "modules", "ai_caps"));
 
     /**
-     * V18 把唯一约束从 {@code (product, path)} 换成了 {@code (scope, product, path)}。
+     * V23 的 {@code (scope, parent_id, title)} 唯一约束真的建出来了。
      *
-     * <p>这条必须单独验：旧约束<b>不会</b>让上面任何一条断言变红 —— 建表语句能跑、
-     * 列也都在，症状要等管理员把同一条路径分别挂到工作台与项目壳时才现形，
-     * 那时报的是 400「已经有指向 /lineage/search 的菜单项了」，看起来像数据重复而不是约束没改。
-     */
-    @Test
-    void navItemsUniqueConstraintCoversScope() {
-        JdbcTemplate db = new JdbcTemplate(dataSource);
-        String insert = "insert into nav_items (id, product, scope, group_title, label, icon, path, perm,"
-                + " sort_order, enabled) values (?, ?, ?, '', ?, '', ?, '', 0, true)";
-
-        db.update(insert, "t-p1", "metadata", "project", "血缘", "/lineage/tables");
-        // 同 product + 同 path，只是换了壳 —— 必须能共存，这正是 V18 放宽约束的理由
-        db.update(insert, "t-w1", "metadata", "workbench", "血缘", "/lineage/tables");
-
-        // 同一壳下再配一遍仍要撞约束，否则侧栏会出现两个一模一样的入口
-        try {
-            db.update(insert, "t-p2", "metadata", "project", "血缘", "/lineage/tables");
-            org.junit.jupiter.api.Assertions.fail("同一壳下重复路径应当被唯一约束挡住");
-        } catch (org.springframework.dao.DuplicateKeyException expected) {
-            // 正是预期
-        }
-    }
-
-    /**
-     * V19 的 {@code (scope, product, title)} 唯一约束真的建出来了。
+     * <p>这条必须单独验：约束没建出来时上面每条断言照样绿 —— 建表语句能跑、列也都在，
+     * 症状要等管理员在同一层建了两个同名菜单才现形，表现为侧栏里出现两条一模一样的入口，
+     * 看起来像渲染重复，其实是唯一键没建。
      *
-     * <p>这条也要单独验：约束没建出来时上面每条断言照样绿，症状要等管理员在同一壳同一
-     * 产品下建了两个同名分组才现形 —— 表现为侧栏出现两段同名分组、顺序还各按各的
-     * {@code sortOrder}，看起来像排序逻辑坏了，其实是唯一键没建。
+     * <p>三个方向都要钉住，因为「收得太松」与「收得太紧」都坏：
+     * 换壳要能重名（两个壳各有一套侧栏）、同壳不同层要能重名（层级是菜单树的核心）、
+     * 同壳同层不能重名。
+     *
+     * <p><b>顶层那一行用的是空串而不是 {@code null}</b> —— 这条就是「为什么不用 NULL」的
+     * 可执行说明：唯一约束里 {@code null} 与任何值都不相等，用 {@code null} 表示顶层时
+     * 顶层可以建出无数个同名节点，约束形同虚设。
      *
      * <p>用完自己清干净：这个 H2 库在本类各测试间共享，留一行会污染别人的列表断言。
      */
     @Test
-    void navGroupsUniqueConstraintCoversScopeProductTitle() {
+    void navNodesUniqueConstraintCoversScopeParentTitle() {
         JdbcTemplate db = new JdbcTemplate(dataSource);
-        String insert = "insert into nav_groups (id, scope, product, title, sort_order, empty_policy)"
-                + " values (?, ?, ?, ?, 0, 'hide')";
-        String cleanup = "delete from nav_groups where id in ('t-g1', 't-g2', 't-g3')";
+        String insert = "insert into nav_nodes (id, scope, parent_id, title, sort_order)"
+                + " values (?, ?, ?, ?, 0)";
+        String cleanup = "delete from nav_nodes where id in"
+                + " ('t-n1', 't-n2', 't-n3', 't-n4', 't-n5')";
 
         try {
-            db.update(insert, "t-g1", "project", "metadata", "数据地图");
+            db.update(insert, "t-n1", "project", "", "数据地图");
 
-            // 同 product + 同 title，只是换了壳 —— 必须能共存（两个壳各有一套侧栏）
-            db.update(insert, "t-g2", "workbench", "metadata", "数据地图");
+            // 换个壳就是另一个节点 —— 必须能共存（两个壳各有一套侧栏）
+            db.update(insert, "t-n2", "workbench", "", "数据地图");
 
-            // 同一壳同一产品下再建一遍同名分组仍要撞约束
+            // 同一壳、不同父节点下的同名节点必须能共存：层级是这棵树的全部意义，
+            // 收得比 (scope, parent_id) 更严就等于「全树不能重名」
+            db.update(insert, "t-n3", "project", "", "数仓");
+            db.update(insert, "t-n4", "project", "t-n3", "数据地图");
+
+            // 同壳同层再建一个同名的仍要撞
             try {
-                db.update(insert, "t-g3", "project", "metadata", "数据地图");
-                org.junit.jupiter.api.Assertions.fail("同壳同产品下的同名分组应当被唯一约束挡住");
+                db.update(insert, "t-n5", "project", "", "数据地图");
+                org.junit.jupiter.api.Assertions.fail("同壳同层的同名菜单应当被唯一约束挡住");
             } catch (org.springframework.dao.DuplicateKeyException expected) {
                 // 正是预期
             }
         } finally {
             db.update(cleanup);
         }
+    }
+
+    /**
+     * V23 把两张旧表 DROP 了。
+     *
+     * <p>这不只是洁癖：{@code nav_items} 还在，说明迁移只跑了前半段（建新表、灌种子），
+     * 而旧的读路径如果也还在（见 {@code CrossServiceDesignGuardTest}），就会有一份
+     * 没人维护的菜单继续被读出来 —— 表现是「改了新配置但侧栏不变」。
+     */
+    @Test
+    void legacyNavTablesAreDropped() {
+        Map<String, Set<String>> actual = allColumns();
+        assertFalse(actual.containsKey("nav_items"), "nav_items 应当已被 V23 删掉");
+        assertFalse(actual.containsKey("nav_groups"), "nav_groups 应当已被 V23 删掉");
+    }
+
+    /**
+     * V23 的种子：org 自有菜单必须落库。
+     *
+     * <p><b>这条守的是「升级后侧栏不空」这个承诺。</b>V23 之前这批菜单硬编码在
+     * {@code ui/src/config/sysNav.ts} 里，迁移之后前端不再有它们；种子没灌或灌漏了，
+     * 表现是所有人的侧栏少了「用户管理 / 角色管理」这几项，而 Flyway 报的是「成功」。
+     *
+     * <p>「成员管理」的路径单独钉：它是<b>模板</b>（含运行期的项目码），前端渲染时替换
+     * {@code {code}}。写成任何别的形状（比如带上某个具体项目码）都只会在那个项目里才对，
+     * 进别的项目这一项就点不动。
+     */
+    @Test
+    void navNodesAreSeeded() {
+        JdbcTemplate db = new JdbcTemplate(dataSource);
+
+        Integer seeded = db.queryForObject(
+                "select count(*) from nav_nodes where id like 'nav-sys%' or id like 'nav-proj%'",
+                Integer.class);
+        assertEquals(9, seeded == null ? 0 : seeded,
+                "种子应当是 6 条工作台壳（系统管理 + 5 项）+ 3 条项目壳");
+
+        assertEquals("/org/project/{code}/members", db.queryForObject(
+                        "select path from nav_nodes where id = 'nav-proj-members'", String.class),
+                "项目码是运行期才知道的，菜单里只能存模板");
+        assertEquals("iam:member", db.queryForObject(
+                        "select perm from nav_nodes where id = 'nav-proj-members'", String.class),
+                "「成员管理」的可见性由这个权限词决定");
+        assertEquals(Boolean.TRUE, db.queryForObject(
+                        "select admin_only from nav_nodes where id = 'nav-sys-users'", Boolean.class),
+                "「用户管理」只有租户管理员可见（原先由 buildSysNav 的入参在前端算）");
     }
 
     /**

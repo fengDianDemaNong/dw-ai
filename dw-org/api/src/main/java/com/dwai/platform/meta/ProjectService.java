@@ -416,12 +416,23 @@ public class ProjectService {
     return list;
   }
 
+  /**
+   * 项目成员列表，<b>带显示名与登录名</b>。
+   *
+   * <p>为什么用 {@link #toMemberWithName} 而不是 {@link #toMember}：成员表只存 userId，
+   * 不带名字的话前端只能把「显示名」列退化成 {@code u-1790068559315} 这样的内部主键 ——
+   * 对人没有任何意义。这正是 {@link #membersOfTenant} 注释里写过的症状，当初只在
+   * 服务间那条通道上修了，项目壳这一条（本方法）漏了。
+   *
+   * <p>代价是逐行回查 users 表（N+1）。一个项目的成员是个位数量级，可接受；
+   * 真要优化应当一次性 `in` 查回来，而不是退回不带名字。
+   */
   public List<ApiModels.MemberDto> listMembers(String projectId) {
     access.requireProject(projectId);
     access.requireMember(projectId, "spec:read");
     return members.selectList(Wrappers.<ProjectMemberEntity>lambdaQuery()
             .eq(ProjectMemberEntity::getProjectId, projectId))
-        .stream().map(this::toMember).toList();
+        .stream().map(this::toMemberWithName).toList();
   }
 
   @Transactional
@@ -464,6 +475,37 @@ public class ProjectService {
     members.delete(Wrappers.<ProjectMemberEntity>lambdaQuery()
         .eq(ProjectMemberEntity::getProjectId, projectId)
         .eq(ProjectMemberEntity::getUserId, userId));
+  }
+
+  /**
+   * 本项目可派的产品角色 —— 「成员管理」页角色下拉的选项来源。
+   *
+   * <p><b>为什么不能前端写死三值</b>：{@link #putMember} 写侧自 V20 起改成「角色码问产品角色表」
+   * （校验见 L444），平台管理员在后台新建的角色码是能派下去的。读侧若还按
+   * {@code admin/modeler/viewer} 枚举，那些新角色就<b>存得进、选不出</b> ——
+   * 正是本仓反复出现的「假开关」。前端那份 {@code ROLE_PERMS} 是判权矩阵、不是角色清单，
+   * 不能拿来当选项。
+   *
+   * <p>只投影 code/label/hint/isAdmin 四项：{@code all()} 的原始行里还带 {@code perms}
+   * （该角色拥有哪些权限词），那是管理面「产品角色」页要看的，成员管理页用不上 ——
+   * 少发一份权限词清单给每个有 {@code spec:read} 的人。
+   *
+   * <p>用 {@link LinkedHashMap} 而不是 {@code Map.of}：后者遇 null 抛 NPE，而
+   * {@code hint} 等字段在部分行上可能是 null。
+   */
+  public List<Map<String, Object>> memberRoles(String projectId) {
+    access.requireProject(projectId);
+    access.requireMember(projectId, "spec:read");
+    List<Map<String, Object>> out = new java.util.ArrayList<>();
+    for (Map<String, Object> r : productRoles.all(props.productCode())) {
+      Map<String, Object> row = new LinkedHashMap<>();
+      row.put("code", r.get("code"));
+      row.put("label", r.get("label"));
+      row.put("hint", r.get("hint"));
+      row.put("isAdmin", r.get("isAdmin"));
+      out.add(row);
+    }
+    return out;
   }
 
   public void ensureDevUser(String username, String tenantId) {

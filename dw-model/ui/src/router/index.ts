@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import type { RouteRecordRaw } from 'vue-router';
 import type { Perm, ProductModule } from '../config/iam';
-import { guestAccess, hasWorkbench, localLoginRequired } from '../config/pages';
+import { guestAccess, localLoginRequired } from '../config/pages';
 import { LOGIN_PATH, MODEL_HOME, NO_PROJECT, SYS_HOME } from '../config/paths';
 import { isMultiTenant } from '../config/runtime';
 import { consumeBootHash, openOrgLogin } from '../config/product';
@@ -76,7 +76,11 @@ const routes: RouteRecordRaw[] = [
     meta: { tenant: true, shell: 'sys', owner: 'model' },
     children: [
       { path: '', name: 'sys-projects', component: () => import('../pages/projects.vue'), meta: { title: '项目管理' } },
-      { path: 'users', name: 'sys-users', component: () => import('../pages/admin/users.vue'), meta: { title: '用户管理' } },
+      // 「用户管理」是**租户**级那一页（含平台授权码、转让管理员），数据源随模式而异：
+      // standard 是本地账号，multi 是组织平台（`api.org.*`）。原来这里错挂了
+      // `admin/users.vue`（那是「平台用户」页，调 `/api/platform/users`），
+      // 与本条路由的标题「用户管理」和授权码区块都对不上。
+      { path: 'users', name: 'sys-users', component: () => import('../pages/org-users.vue'), meta: { title: '用户管理' } },
       { path: 'roles', name: 'sys-roles', component: () => import('../pages/sys/roles.vue'), meta: { title: '角色管理' } },
       { path: 'knowledge', name: 'sys-knowledge', component: () => import('../pages/sys/knowledge.vue'), meta: { title: '知识库' } },
       { path: 'settings', name: 'sys-settings', component: () => import('../pages/sys/settings.vue'), meta: { title: '设置' } },
@@ -144,15 +148,12 @@ router.beforeEach((to) => {
     }
     return { path: LOGIN_PATH };
   }
-  // 工作台只有 multi 没有（见 `config/pages.ts` 的 `hasWorkbench`）。原先这里写的是
-  // `!standard`，把 standalone 也一起挡在外面 —— 但 standalone 的口径是
-  // 「standard 去掉用户/登录」，工作台那一级它照样有。
+  // 工作台路径一律放行 —— 三种模式都有这一级（见 `config/pages.ts` 的 `ownsProjects`）。
+  // 原先这里把 multi 下的工作台整片打回、只留「设置」一个白名单；工作台回到本进程之后，
+  // 那个白名单就是多余的了。
   //
-  // multi 下仍放行「设置」（`sys-settings`）：它管的是**租户级**的外观 / 大模型 /
-  // AI 提示词，挂在工作台路径下只是因为工作台曾是它的入口，而组织平台的工作台壳
-  // 正需要它（见 `config/navData.ts` 的工作台候选）。其余几页照旧打回 ——
-  // 项目管理在 multi 下由组织平台自己提供，用户/角色管理的账号也在组织那边。
-  if (to.path.startsWith(SYS_HOME) && !hasWorkbench() && to.name !== 'sys-settings') return home();
+  // 工作台里**能做什么**由页面自己收口：multi 不提供项目的新建 / 改 / 删（项目号的
+  // 真源在组织平台），用户 / 角色两页由 `sysNav.ts` 按「租户管理员 + 非 standalone」收起。
   if (to.name === 'no-project') {
     const next = resolveTenantHome();
     if (next !== NO_PROJECT) return { path: next };

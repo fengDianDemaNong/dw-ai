@@ -10,8 +10,9 @@ import {
   WORKBENCH_HOME,
   WORKBENCH_PAGES,
   defaultHome,
-  hasWorkbench,
+  hasLocalAccounts,
   isWorkbenchPath,
+  ownsProjects,
   requiresLocalLogin,
 } from '../config/pages';
 import { authState, hasSession } from '../stores/auth';
@@ -25,16 +26,17 @@ declare module 'vue-router' {
 }
 
 /**
- * 「基本信息」页的落点。
+ * 「基本信息」页的落点：工作台那一页。
  *
- * <p>它只在工作台那一级有意义（页面上的「当前数据范围」就是项目切换器，
- * 站在项目里再摆一个和右上角那个重复），所以 standard 去工作台那一页，
- * 其余模式去项目级的「数据地图设置」—— 那是那些模式下唯一合用的设置页。
- * 老地址 `/settings/preferences` 与项目层级的 `/lineage/settings/preferences`
+ * <p>三种模式都落在工作台 —— 这一页上的「当前数据范围」就是项目切换器，
+ * 站在项目里再摆一个和右上角那个重复，所以它只在工作台那一级有意义。
+ * 此前 multi 没有工作台，那时它被送去项目级的「数据地图设置」（那些模式下唯一
+ * 合用的设置页）；工作台回到本进程之后 multi 也有这一页了，落点统一。
+ *
+ * <p>老地址 `/settings/preferences` 与项目层级的 `/lineage/settings/preferences`
  * 都走它，写法保持一处。
  */
-const preferencesHome = (): string =>
-  hasWorkbench() ? WORKBENCH_PAGES.preferences : PROJECT_SETTINGS_PAGES.map;
+const preferencesHome = (): string => WORKBENCH_PAGES.preferences;
 
 /**
  * 路由表。本进程页面统一挂 /lineage。
@@ -59,7 +61,7 @@ const routes: RouteRecordRaw[] = [
     // /lineage/workbench/* 会命中这条，/lineage 的 children 里没有 workbench 段，
     // 不会互相抢。两边共用 AppLayout（菜单位置、G6 尺寸测量都在那里）。
     //
-    // standard 与 standalone 能到，由下面的守卫把 multi 挡回项目概况。
+    // 三种模式都能到（原先守卫里有一条把 multi 挡回项目概况，2026-09-26 已删）。
     path: WORKBENCH_HOME,
     component: AppLayout,
     children: [
@@ -148,8 +150,8 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '元数据' },
       },
       // 设置页的**项目层级**地址。它们不是工作台的替身，是嵌入契约本身
-      // （dw-model 的「元数据服务」「数据地图设置」推的就是这两个路径，
-      // 而 multi 模式没有工作台），所以这里必须是真实路由。详见
+      // （dw-model 的「元数据服务」「数据地图设置」推的就是这两个路径，而嵌入
+      // 发生在项目页里），所以这里必须是真实路由。详见
       // `config/pages.ts` 的 `PROJECT_SETTINGS_PAGES`。
       {
         path: 'settings/metadata',
@@ -166,15 +168,15 @@ const routes: RouteRecordRaw[] = [
       // 基本信息只在工作台那一级（见 `preferencesHome`）
       { path: 'settings/preferences', redirect: preferencesHome },
       // 这两项是工作台专有的（项目 CRUD、本地账号），项目层级没有对应的页面。
-      // standard 下把老地址送去工作台里的新家；其余模式回项目概况 ——
-      // 与收紧之前的行为一致（那时这两条被 `showLocalTenantSettings()` 挡回 LINEAGE_HOME）。
+      // 项目 CRUD 只在「本进程说了算」的模式下去工作台那一页，其余模式回项目概况；
+      // 账号页更是只对 standard 存在。
       {
         path: 'settings/projects',
-        redirect: () => (hasWorkbench() ? WORKBENCH_PAGES.projects : LINEAGE_HOME),
+        redirect: () => (ownsProjects() ? WORKBENCH_PAGES.projects : LINEAGE_HOME),
       },
       {
         path: 'settings/users',
-        redirect: () => (hasWorkbench() ? WORKBENCH_PAGES.users : LINEAGE_HOME),
+        redirect: () => (hasLocalAccounts() ? WORKBENCH_PAGES.users : LINEAGE_HOME),
       },
       // 「租户」三种模式都到不了，没有可去的层级，回项目概况
       { path: 'settings/tenants', redirect: LINEAGE_HOME },
@@ -250,11 +252,6 @@ router.beforeEach((to) => {
       // standard 的首页是工作台（先看全部项目，再点进某一个）
       return { path: defaultHome() };
     }
-  }
-
-  // 工作台只有 multi 没有。菜单里本来就不会出现它，但直接敲 URL 仍然会走到这里。
-  if (isWorkbenchPath(to.path) && !hasWorkbench()) {
-    return { path: LINEAGE_HOME };
   }
 
   // 管理员页的软门禁。`me` 为空（还没拉回来 / 拉失败）时按「不是管理员」处理：

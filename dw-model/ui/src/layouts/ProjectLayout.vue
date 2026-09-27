@@ -44,7 +44,7 @@ import {
 import { appearanceOf } from '../stores/prefs';
 import { isMultiTenant } from '../config/runtime';
 import { canBackToWorkbench } from '../config/pages';
-import { isEmbed, openOrgWorkbench } from '../config/product';
+import { isEmbed } from '../config/product';
 
 /**
  * 被组织平台的壳嵌着时，**这里不再画第二条导航栏**。
@@ -62,7 +62,7 @@ const embed = isEmbed();
 
 const router = useRouter();
 const tenant = currentTenant;
-/** 见 `canBackToWorkbench`：multi 下所有人都给（上一级在组织平台），其余模式只给租户管理员。 */
+/** 见 `canBackToWorkbench`：multi 与 standalone 下所有人都给，standard 只给租户管理员。 */
 const canBackHome = computed(() => canBackToWorkbench(isRealTenantAdmin.value));
 const groups = computed(() =>
   buildNavGroups(projectLayerRules.value, {
@@ -85,11 +85,9 @@ watch(
 
 function back() {
   leaveProject();
-  // multi 的工作台在组织平台（本进程没有这一级），所以是整页跳转而非 router.push。
-  if (isMultiTenant()) {
-    openOrgWorkbench();
-    return;
-  }
+  // 工作台在本进程，三种模式都有（见 `config/pages.ts` 的 `ownsProjects`）—— 所以是
+  // 进程内跳转。此前 multi 下这里整页跳到组织平台的工作台，与 `UserPanel.vue` 那处
+  // 是同一个判据、同一个落点。
   router.push(SYS_HOME);
 }
 </script>

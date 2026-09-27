@@ -49,7 +49,6 @@ import { assessImpact, tableDependentsOf } from '@dw-ai/engine';
 import { buildSpecPack, type SpecPack } from '../engine/specIo';
 import { api, authToken, setAuthToken, refreshAccess, setIdleTtlSeconds, useRemoteApi, type KnowledgeArticleDto, type Session, type Snapshot } from '../api/client';
 import { clearDeployMode, isMultiTenant, isStandalone, isStandardMode } from '../config/runtime';
-import { hasWorkbench } from '../config/pages';
 import { ORG_UI_KEY, isWarehouseUi } from '../config/product';
 import { MODEL_HOME, NO_PROJECT, SYS_HOME } from '../config/paths';
 import { loadPlatformAppearance, loadTenantAppearance, loadTenantLlm } from './prefs';
@@ -230,7 +229,11 @@ function applySession(s: Session) {
   }
   const t = state.tenants.find((x) => x.id === state.currentTenantId);
   if (t?.code) sessionStorage.setItem('dw-ai.tenantCode', t.code);
-  if (state.currentTenantId) void loadTenantKnowledge(state.currentTenantId);
+  if (state.currentTenantId) {
+    void loadTenantKnowledge(state.currentTenantId);
+    // multi 下后端报出来的角色是回落值，要另取一次（见 refreshTenantRole 的说明）
+    void refreshTenantRole();
+  }
 }
 
 /** 会话里的租户列表应是当前用户全部可用租户，不是只含当前这一家。 */
@@ -241,6 +244,49 @@ export async function refreshMyTenants() {
     if (list.length) state.tenants = list;
   } catch {
     /* 保持现有列表 */
+  }
+}
+
+/**
+ * multi 下从组织平台补齐「我在当前租户里的角色」。
+ *
+ * <h2>为什么后端给不出这个值</h2>
+ *
+ * <p>租户成员表在组织侧，而仓建设的本地种子在 multi 下一行 `user_tenants` 都不种
+ * （`WarehouseLocalSeedRunner` 开头就 `if (props.isMulti()) return`）。于是
+ * `TenantFilter` 走 `warehouseMulti` 分支把角色回落成 `"member"`，`AuthService.currentMe`
+ * 再把它透出来 —— multi 下这个字段恒为 `member`。
+ *
+ * <p>后果不是「少一个字段」：`isRealTenantAdmin` 恒为假，于是工作台的
+ * 「用户管理 / 角色管理」两页永远不出现，用户管理页里的「平台授权码」区块
+ * （`v-if="multi && isRealTenantAdmin"`）也永远不渲染。**那正是这一轮要恢复的功能**，
+ * 所以这一份必须补上。
+ *
+ * <h2>为什么在前端补而不是加后端端点</h2>
+ *
+ * <p>权威接口本来就有：组织平台的 `GET /api/tenants/{id}/users`（与 `org-users.vue`
+ * 同一个），响应里每个用户带 `tenantRole`。而 multi 下前端直连组织平台取租户数据
+ * 正是本产品既有的通路（见 `api/client.ts` 的 `isOrgScoped`），这里顺着走，
+ * 不必为一个渲染用的字段新增内部端点 + 跨进程调用。
+ *
+ * <p>**它只决定「要不要摆入口」，不是门禁**：真正的判权在组织侧
+ * （`TenantAdminController.assertTenantAdmin`）。被改了的后果只是多看到一个点进去会 403
+ * 的入口 —— 与 `bootRoles` 被改的后果同级。
+ *
+ * <p>拿不到就保持后端给的那个值；standard / standalone 直接跳过 ——
+ * 那两种模式下 `tenantRole` 的来源本来就是对的（`WarehouseLocalSeedRunner` 会种）。
+ */
+export async function refreshTenantRole(): Promise<void> {
+  if (!useRemoteApi() || !isMultiTenant()) return;
+  const tid = state.currentTenantId;
+  const uid = state.currentUserId;
+  if (!tid || !uid) return;
+  try {
+    const list = await api.org.users(tid);
+    const me = list.find((u) => u.id === uid || u.username === uid);
+    if (me?.tenantRole) state.tenantRole = me.tenantRole;
+  } catch {
+    /* 保持后端给的角色，见上：这一份只影响渲染 */
   }
 }
 
@@ -305,7 +351,15 @@ export async function bootstrapRemote() {
     if (!authToken() && !standalone) return;
     applySession(await api.session());
     await refreshMyTenants();
-    await loadPlatformAppearance();
+    // 平台层外观（`/api/platform/appearance`）只有平台用户读得到，所以**先问身份再发请求**。
+    // 不加这一问的后果在 multi 下是确定的：每个租户成员启动时都发一次注定被拒的请求 ——
+    // 这个端点在组织平台，`access.requirePlatform()`，租户成员拿到的是 403
+    // （见 `api/client.ts` 的 `isOrgScoped`：这组端点现在直连组织平台了）。
+    //
+    // 平台用户这一支维持原样：他们本来就该读到平台外观，`/admin` 那一支的
+    // `appearanceOf('platform')`（`layouts/SystemLayout.vue:28`）靠的就是它。
+    // 本 UI 目前没有 admin 壳路由，非平台用户更是连读的人都没有，纯白发一趟。
+    if (isPlatformAdmin.value) await loadPlatformAppearance();
     if (state.currentTenantId) {
       await loadTenantAppearance(state.currentTenantId);
       await loadTenantLlm(state.currentTenantId);
@@ -545,10 +599,10 @@ export const canPublishModel = computed(() => can('model:publish'));
 export function resolveTenantHome(): string {
   const list = tenantProjects.value;
   if (!list.length) return isStandalone() ? MODEL_HOME : NO_PROJECT;
-  // tenant admin 优先进入系统管理工作台（尚未选项目时）。原先只判 standard，
-  // 但工作台 standalone 也有（见 `config/pages.ts` 的 `hasWorkbench`）——
-  // 后端 `TenantFilter` 对 standalone 直接给 `tenantRole=admin`，这个条件本来就成立。
-  if (hasWorkbench() && state.tenantRole === 'admin' && !state.currentProjectId) return SYS_HOME;
+  // tenant admin 优先进入系统管理工作台（尚未选项目时）。工作台三种模式都有
+  // （见 `config/pages.ts` 的 `ownsProjects`），后端 `TenantFilter` 对 standalone
+  // 直接给 `tenantRole=admin`，这个条件本来就成立。
+  if (state.tenantRole === 'admin' && !state.currentProjectId) return SYS_HOME;
   const keep = list.find((p) => p.id === state.currentProjectId);
   const id = keep?.id ?? list[0].id;
   if (state.currentProjectId !== id) {

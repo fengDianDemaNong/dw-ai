@@ -1,0 +1,19 @@
+-- 「挂载产品分组」：把一个产品的某个分组挂到某个壳上，此后这一组的菜单由产品在
+-- **渲染时**提供，而不是管理员一次性复制成 nav_items 行。
+--
+-- 【为什么复用 nav_groups 而不是新建一张表】
+-- 挂载的身份就是 (scope, product, title) —— 这与 nav_groups 已有的唯一键完全相同，
+-- 而「组间顺序」(sort_order) 与「空组策略」(empty_policy) 本来也在这张表上。
+-- 另起一张挂载表会让组间顺序出现两个真源，两边不一致时没有任何判据可依。
+--
+-- 【它和 nav_items 的关系仍是软约束，这一点没变】挂载只表达「这一组的内容由产品
+-- 提供」；nav_items 里那些同名分组下的复制行仍然是自由文本、仍然合法。渲染时按
+-- (scope, product, path) 让产品清单**接管**同路径的行（见 NavItemService.menuFor），
+-- 避免同一批菜单在侧栏出现两遍。产品清单拉不到时不接管，老的复制行照常渲染。
+--
+-- 【默认 FALSE 是刻意的】nav_groups 没有种子数据，存量行全部落到 FALSE ⇒ 升级后
+-- 渲染结果与升级前逐字节一致。要「跟随产品」必须管理员显式挂载。
+--
+-- 这份同时给 H2 用（见 V17 顶部注释 —— MetaDb.flywayLocation 只有 postgresql
+-- 有专属目录），所以写法要 H2 也认：不用 IF NOT EXISTS。
+ALTER TABLE nav_groups ADD COLUMN mounted BOOLEAN NOT NULL DEFAULT FALSE;

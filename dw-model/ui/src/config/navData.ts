@@ -1,4 +1,3 @@
-import { layerHref, layerIcon } from './layers';
 import type { NavGroup } from './nav';
 import { MODEL_PAGES } from './pages';
 import { MODEL_HOME, SYS_HOME } from './paths';
@@ -28,11 +27,13 @@ import { MODEL_HOME, SYS_HOME } from './paths';
  * <ul>
  *   <li><b>菜单变更要重新构建前端才进候选。</b>这符合规格里「菜单是产品信息架构、
  *       跟版本走」——`menu.json` 随构建产物发布，不是运行期可改的配置。</li>
- *   <li><b>管理员自建的层码进不了静态清单。</b>候选里的分层入口报的是产品**内置认识**
- *       的那几个层码（{@link BUILTIN_LAYER_CODES}）—— 它们有图标、有配色、页面也认。
- *       若某个项目在「分层规范」里自建了别的层码（如 `MID`），静态文件里表达不了：
- *       要让它进候选，得由组织平台支持**运行期动态菜单**（壳渲染时向子应用拉一次
- *       本项目实际的分层），那是比「构建期导出清单」大一层的改动。</li>
+ *   <li><b>依赖运行期数据的菜单进不了候选。</b>最典型的是<b>分层入口</b>：这个项目在
+ *       「分层规范」里登记了哪些层，是建完项目才知道、之后还能自由增删改的事实
+ *       （侧栏由 `nav.ts` 的 `buildNavGroups` 按它现算），而壳的侧栏配置是**全局**的、
+ *       多项目共用一份 —— 静态清单没法表达「对这个项目而言有哪些层」。所以候选里
+ *       一个分层入口都没有，要挂就在组织平台侧手工配。想让它们自动出现，得由组织平台
+ *       支持**运行期动态菜单**（壳渲染时向子应用拉一次本项目实际的分层），
+ *       那是比「构建期导出清单」大一层的改动。</li>
  * </ul>
  */
 
@@ -148,7 +149,15 @@ const GROUP_SPEC: NavGroup = {
 
 /**
  * 建模中心：整组要 `model:read`，组内各项**在渲染时**被 {@link buildModelingItems}
- * 换成分层项 —— 这里写的 `buildModelingItems([])` 只是初始值（只剩「规范校验」）。
+ * 换成分层项（见 `nav.ts` 的 `buildNavGroups`），这里写的 `buildModelingItems([])`
+ * 只是「这个项目还没有任何分层」时的取值（只剩「规范校验」）。
+ *
+ * <p><b>报给组织平台的候选用的也是这一个对象</b>（见 {@link MENU_CANDIDATES}），
+ * 于是候选里只剩不依赖分层的那一项。这一条是刻意的：分层是**运行期逐项目**的事实，
+ * 而 org 壳的侧栏配置是**全局**的（一个壳的配置被所有项目共用），静态清单表达不了它。
+ * 早先这里报的是六个内置层码加两个「从 …生成」工具页，那等于替一个尚未指定的项目做承诺 ——
+ * 管理员在菜单管理里看到「这个产品有 ODS/DWD/… 六个入口」，而实际上有没有要看那个项目
+ * 在「分层规范」里登记了什么。
  */
 const GROUP_MODELING: NavGroup = {
   title: '建模中心',
@@ -185,45 +194,18 @@ function inheritGroupPerm(groups: NavGroup[]): NavGroup[] {
 }
 
 /**
- * 产品**内置认识**的层码：`layers.ts` 给它们配了图标与配色，层页面也按它们渲染。
- *
- * <p>为什么是这六个而不是 `seedStdLayers` 灌的那四个（ODS/DWD/DWS/ADS）：那四个只是
- * 「勾了初始化标准规范」的项目开局就有的层，`DIM`/`STG` 同样是一等公民（建维表、
- * 贴源缓冲都用得上），产品认得它们，就一并报给管理员挑。
- */
-const BUILTIN_LAYER_CODES = ['ODS', 'DWD', 'DWS', 'ADS', 'DIM', 'STG'];
-
-/**
- * 建模中心报给平台的候选：**每个内置分层入口 + 三个路径固定的工具页**。
- *
- * <p>只报内置层码（{@link BUILTIN_LAYER_CODES}），不报项目实际有哪些层 —— 那是运行期
- * 才知道的（建项目时可勾「初始化标准规范」，之后还能自由增删改），静态清单表达不了。
- * 配上去而项目没登记该层，点进去不是白屏：层页面会说明「该分层未在『分层规范』中登记，
- * 侧栏不会显示。可到规范中心补登记。」（见 `pages/model/dwd-overview.vue`），
- * 挂不挂由管理员按项目情况定。
- *
- * <p>「规范校验」「从 ODS 生成」「从 DWD 生成」在本进程侧栏里是**有条件**的
- * （后两项要项目同时有 ODS+DWD / DWD+DWS），这里一并报：它们是路径固定的工具页，
- * 对有那些层的项目就是该有的入口。
- */
-const MODELING_CANDIDATES: NavGroup = {
-  title: '建模中心',
-  module: 'warehouse',
-  perm: 'model:read',
-  items: [
-    ...BUILTIN_LAYER_CODES.map((l) => ({ path: layerHref(l), label: l, icon: layerIcon(l) })),
-    ...buildModelingItems(BUILTIN_LAYER_CODES.map((layer) => ({ layer }))),
-  ],
-};
-
-/**
  * 报给组织平台的菜单候选及**建议归属**。
  *
- * <p>只报本进程自己的、且在 multi（被组织平台嵌入时的形态）下真实存在的页面：
+ * <p>只报本进程自己的、且在 multi（被组织平台嵌入时的形态）下真实存在的页面，
+ * 且只报**与具体项目无关**的那些：
  *
  * <ul>
- *   <li><b>项目壳</b>：顶层三项 + 规范中心七项 + 建模中心（内置分层入口与三个工具页，
- *       见 {@link MODELING_CANDIDATES}）—— 自建的层码报不了，理由写在那边的注释里。</li>
+ *   <li><b>项目壳</b>：顶层三项 + 规范中心七项 + 建模中心。建模中心报的就是
+ *       {@link GROUP_MODELING} 本身 —— 组内只剩「规范校验」一项。分层入口与
+ *       「从 ODS/DWD 生成」**刻意不报**：它们取决于那个项目在「分层规范」里登记了哪些层，
+ *       是运行期逐项目的事实，而壳的侧栏配置是全局的（见 {@link GROUP_MODELING} 的说明）。
+ *       要挂就在 org 侧手工配 —— 项目没有该层时点进去是说明页而不是白屏
+ *       （`pages/model/dwd-overview.vue` 既有行为）。</li>
  *   <li><b>工作台壳</b>：只报「数仓建模 / 设置」一页。它管的是**租户级**的外观 / 大模型 / AI 提示词，
  *       与「这个部署有没有工作台」无关，而组织平台的工作台壳正需要它 ——
  *       数据地图的「元数据服务」用的是同一个做法（`dw-lineage/ui/src/config/navData.ts`）。
@@ -251,7 +233,7 @@ export const MENU_CANDIDATES: MenuCandidateSource[] = [
   },
   {
     scope: 'project',
-    groups: inheritGroupPerm([...GROUPS_TOP, GROUP_SPEC, MODELING_CANDIDATES]),
+    groups: inheritGroupPerm([...GROUPS_TOP, GROUP_SPEC, GROUP_MODELING]),
   },
 ];
 

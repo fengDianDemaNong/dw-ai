@@ -29,9 +29,9 @@ import java.util.Map;
 @RequestMapping({"/api/services", "/api/v1/services"})
 public class ServiceCatalogController {
 
-  private final NavItemService nav;
+  private final NavNodeService nav;
 
-  public ServiceCatalogController(NavItemService nav) {
+  public ServiceCatalogController(NavNodeService nav) {
     this.nav = nav;
   }
 

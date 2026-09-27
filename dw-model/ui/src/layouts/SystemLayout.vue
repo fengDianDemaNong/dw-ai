@@ -14,7 +14,7 @@ import AppNav from '../components/AppNav.vue';
 import { ADMIN_HOME, SYS_HOME } from '../config/paths';
 import { buildAdminNav, buildSysNav } from '../config/sysNav';
 import { isEmbed } from '../config/product';
-import { app } from '../stores/app';
+import { app, isRealTenantAdmin } from '../stores/app';
 import { appearanceOf } from '../stores/prefs';
 
 /** 被壳嵌入时不画第二条导航栏 —— 与 ProjectLayout 同一套理由，见那边的说明。 */
@@ -22,7 +22,11 @@ const embed = isEmbed();
 
 const route = useRoute();
 const adminShell = computed(() => route.matched.some((r) => r.meta.shell === 'admin'));
-const groups = computed(() => (adminShell.value ? buildAdminNav() : buildSysNav()));
+// 账号两页按身份收口：multi 下授权码只租户管理员能签发，普通成员看到只会是 403。
+// 判据的两个维度（身份 + 模式）见 `sysNav.ts` 的 `buildSysNav` doc。
+const groups = computed(() =>
+  adminShell.value ? buildAdminNav() : buildSysNav(isRealTenantAdmin.value)
+);
 const home = computed(() => (adminShell.value ? ADMIN_HOME : SYS_HOME));
 const menuPos = computed(() =>
   adminShell.value ? appearanceOf('platform').menuPos : appearanceOf('tenant', app.currentTenantId).menuPos

@@ -182,7 +182,10 @@
               :checked-keys="checkedMenuKeys"
               @check="onTreeCheck"
             />
-            <p v-else-if="!menuLoading" class="muted">这个产品还没有配过菜单（见「菜单管理」）。</p>
+            <p v-else-if="!menuLoading" class="muted">
+              没读到这个产品的菜单清单（它的页面地址没配、或暂时不可达 —— 见「服务注册」），
+              或者它的菜单都没挂权限词。左边的勾选框仍然可用。
+            </p>
           </a-spin>
         </a-form-item>
       </a-form>
@@ -207,7 +210,13 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { message } from 'ant-design-vue';
-import { api, type NavItemRow, type PermOption, type ProductRoleRow } from '../../api/client';
+import {
+  api,
+  type MenuCandidate,
+  type MenuCandidatesOfProduct,
+  type PermOption,
+  type ProductRoleRow,
+} from '../../api/client';
 import { ORG_PAGES } from '../../config/pages';
 import { PRODUCT_OPTIONS, productLabel } from '../../config/products';
 import PageHeader from '../../components/PageHeader.vue';
@@ -218,8 +227,20 @@ const product = ref(PRODUCT_OPTIONS[0]?.value ?? '');
 
 /** 该产品自报的权限词表（「按菜单勾选」与勾选框都要它）。 */
 const words = ref<PermOption[]>([]);
-/** 已配过的菜单项 —— 菜单树由它派生。 */
-const navItems = ref<NavItemRow[]>([]);
+/**
+ * 该产品自报的**菜单候选树** —— 下面的「按菜单勾选」由它派生。
+ *
+ * <p>V23 起这里读的是产品清单（`navCandidates`）而不是管理员已配的门户菜单行
+ * （旧的 `navItems`）。理由是同一件事在两处有两个真相：门户菜单是**编排**
+ * （管理员挑了几条摆到侧栏哪一层），清单才是**权限面**（这个产品一共认哪些词、
+ * 哪个词挂在哪一项上）。配角色问的是后者 —— 用编排当权限面会漏掉两类词：
+ * 没被摆上门户的菜单，以及挂在**挂载节点子树**里的菜单（挂载是「窗口」，
+ * 管理面那行自己没有 children）。
+ *
+ * <p>代价是它依赖产品的页面地址可达（见「服务注册」）；拉不到时下面的
+ * `menuTree` 是空的，页面会退化成「只用勾选框」，与改动之前的降级一致。
+ */
+const menus = ref<MenuCandidate[]>([]);
 const menuLoading = ref(false);
 
 function rolesOf(code: string) {
@@ -249,12 +270,12 @@ async function loadContext(code: string) {
   if (!code) return;
   menuLoading.value = true;
   try {
-    const [perms, items] = await Promise.all([
+    const [perms, cands] = await Promise.all([
       api.platform.productPerms(code).catch(() => ({ product: code, perms: [] as PermOption[] })),
-      api.platform.navItems().catch(() => [] as NavItemRow[]),
+      api.platform.navCandidates().catch(() => ({ products: [] as MenuCandidatesOfProduct[] })),
     ]);
     words.value = perms.perms;
-    navItems.value = items.filter((i) => i.product === code);
+    menus.value = cands.products.find((p) => p.product === code)?.menus ?? [];
   } finally {
     menuLoading.value = false;
   }
@@ -333,16 +354,47 @@ const SCOPE_LABEL: Record<string, string> = { workbench: '工作台壳', project
  * 而这里被树与「勾选态」两处读，边算边填会让勾选态读到上一轮的旧映射
  * （表现是切产品后勾选亮错行）。做成独立 computed，两边都从它派生，就没有先后问题。
  */
+/** 候选树里的全部节点（展平）—— 下面两个 computed 只关心「有哪些词」，不关心层级。 */
+const flatMenus = computed(() => {
+  const out: MenuCandidate[] = [];
+  const walk = (list: MenuCandidate[]) => {
+    for (const m of list) {
+      out.push(m);
+      walk(m.children ?? []);
+    }
+  };
+  walk(menus.value);
+  return out;
+});
+
 const permByLeaf = computed(() => {
   const out = new Map<string, string>();
-  for (const item of navItems.value) {
-    if (item.perm) out.set(`m:${item.id}`, item.perm);
+  for (const m of flatMenus.value) {
+    if (m.perm) out.set(`m:${m.id}`, m.perm);
   }
   return out;
 });
 
 /**
- * 树 = 壳 → 分组 → 菜单项。**只收挂了权限词的菜单**。
+ * 一个候选节点 → 树上的一个节点。**只收挂了权限词的**，但目录例外：
+ * 目录自己常常不挂词（挂词的是子菜单），它是子菜单的容器 —— 只要子树里还有带词的
+ * 节点就得保留它，否则那些子菜单会被一起丢掉。整支都没词的目录才不进树。
+ *
+ * <p>不按 `scope` 过滤子节点：只按顶层过滤（产品报的 `scope` 是给顶层用的建议值），
+ * 与 `config/sysNav.ts` 的 `toNavItems` 同一条规矩。
+ */
+function toMenuNode(m: MenuCandidate): MenuNode | null {
+  const kids = (m.children ?? []).map(toMenuNode).filter((n): n is MenuNode => !!n);
+  if (!m.perm && !kids.length) return null;
+  const node: MenuNode = {
+    key: `m:${m.id}`,
+    title: m.perm ? `${m.label}（${permLabel(m.perm)}）` : m.label,
+  };
+  return kids.length ? { ...node, children: kids } : node;
+}
+
+/**
+ * 树 = 壳 → 产品自己的层级 → 菜单项（**没有「分组」这一层了**：分组就是产品报的目录节点）。
  *
  * <p>没挂词的那些（不判权）不进树：它们对谁都可见，勾不出来、勾了也没有词可落，
  * 放进来只会让人以为「勾上就等于限制了」。它们在抽屉底部用一行文字列出来。
@@ -350,29 +402,18 @@ const permByLeaf = computed(() => {
 const menuTree = computed<MenuNode[]>(() => {
   const scopes: MenuNode[] = [];
   for (const scope of ['workbench', 'project']) {
-    const items = navItems.value.filter((i) => i.scope === scope && i.perm);
-    if (!items.length) continue;
-    const byGroup = new Map<string, MenuNode[]>();
-    for (const item of items) {
-      const title = (item.groupTitle || '').trim() || '未分组';
-      const leaf: MenuNode = { key: `m:${item.id}`, title: `${item.label}（${permLabel(item.perm)}）` };
-      byGroup.set(title, [...(byGroup.get(title) ?? []), leaf]);
-    }
-    scopes.push({
-      key: `s:${scope}`,
-      title: SCOPE_LABEL[scope] ?? scope,
-      children: [...byGroup.entries()].map(([title, children]) => ({
-        key: `g:${scope}/${title}`,
-        title,
-        children,
-      })),
-    });
+    const kids = menus.value
+      .filter((m) => m.scope === scope)
+      .map(toMenuNode)
+      .filter((n): n is MenuNode => !!n);
+    if (!kids.length) continue;
+    scopes.push({ key: `s:${scope}`, title: SCOPE_LABEL[scope] ?? scope, children: kids });
   }
   return scopes;
 });
 
 /** 没挂权限词的菜单名（不进树，用一行文字说明）。 */
-const noPermMenus = computed(() => navItems.value.filter((i) => !i.perm).map((i) => i.label));
+const noPermMenus = computed(() => flatMenus.value.filter((m) => !m.perm).map((m) => m.label));
 
 function permLabel(word: string) {
   return words.value.find((o) => o.value === word)?.label || word;

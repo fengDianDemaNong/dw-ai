@@ -4,6 +4,7 @@ import com.dwai.platform.internal.ServiceRegistry;
 import com.dwai.platform.meta.support.Jsons;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.ClientHttpRequestFactories;
 import org.springframework.boot.web.client.ClientHttpRequestFactorySettings;
 import org.springframework.stereotype.Service;
@@ -66,13 +67,61 @@ public class MenuCandidateService {
   private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(2);
   private static final Duration READ_TIMEOUT = Duration.ofSeconds(5);
 
-  /** 成功结果缓存时长。菜单是配置，变化远慢于项目镜像。 */
-  private static final Duration TTL = Duration.ofSeconds(300);
+  /** 成功结果缓存时长的缺省值。菜单是配置，变化远慢于项目镜像。 */
+  private static final long DEFAULT_TTL_SECONDS = 300;
+
+  /**
+   * 成功结果缓存时长，可配。
+   *
+   * <p><b>为什么做成配置项</b>：「挂载产品分组」把这份缓存变成了侧栏正确性的一部分 ——
+   * 挂载的分组内容来自这里，缓存多久就代表「产品新增菜单后最多多久出现」。默认 300 秒
+   * 对生产是合适的（挡的是侧栏每次渲染都去打产品）；但测试要验「产品加了一条菜单、
+   * 不做任何管理动作、侧栏就带上它」，那个断言在 300 秒缓存下永远跑不过。
+   *
+   * <p>调到 0 = 每次渲染都实时拉产品。不建议在生产这么配：侧栏是关键路径，
+   * 每个用户每次进项目都等一次产品响应。
+   */
+  private final long ttlSeconds;
+
+  public MenuCandidateService(
+      ServiceRegistry registry,
+      @Value("${dwai.nav.candidate-ttl-seconds:" + DEFAULT_TTL_SECONDS + "}") long ttlSeconds) {
+    this.registry = registry;
+    this.ttlSeconds = Math.max(0, ttlSeconds);
+    this.http = RestClient.builder()
+        .requestFactory(ClientHttpRequestFactories.get(
+            ClientHttpRequestFactorySettings.DEFAULTS
+                .withConnectTimeout(CONNECT_TIMEOUT)
+                .withReadTimeout(READ_TIMEOUT)))
+        .build();
+  }
+
+  /**
+   * 丢掉**所有**产品的成功缓存与失败记忆，让下一次读重新去拉。
+   *
+   * <p>管理员挂载 / 取消挂载 / 删除一个分组时调用：不丢的话，他刚挂完刷新侧栏，
+   * 看到的仍是最多 5 分钟前的旧清单 —— 一个「点了没反应」的开关。
+   *
+   * <p><b>为什么是「所有」而不是「这个组相关的那个产品」</b>：分组不再绑产品
+   * （见 {@code V22__nav_groups_drop_product.sql}），一个组的菜单可能来自任意几个
+   * 产品的自报清单，而「到底哪几个报了」正是拉一遍才知道的事。
+   * 与其先拉一遍再决定清谁，不如全清 —— 代价是几个网络请求。
+   *
+   * <p><b>为什么连 {@code permMiss} 一起清</b>：它是「拉不到」的失败记忆（60 秒）。
+   * 管理动作正是一个**显式要求重试**的信号 —— 不清的话，刚把产品页面地址填对的管理员
+   * 会看到「挂载点了没反应」，那恰好是本方法要消灭的那类困惑。
+   * 写入路径（{@code knownPerms}）不受影响：它下次读重新等一次超时，那是对的。
+   */
+  public void invalidateAll() {
+    cache.clear();
+    permMiss.clear();
+  }
 
   /**
    * 词表专用的失败记忆时长，见 {@link #knownPerms}。
    *
-   * <p>比 {@link #TTL} 短得多：它挡的不是「陈旧」，而是「连续网络超时」。
+   * <p>比菜单缓存的 {@code dwai.nav.candidate-ttl-seconds} 短得多：它挡的不是「陈旧」，
+   * 而是「连续网络超时」。
    * 产品发版才会改词表，一分钟的陈旧窗口没有实际代价。
    */
   private static final Duration PERM_FAIL_TTL = Duration.ofSeconds(60);
@@ -98,16 +147,6 @@ public class MenuCandidateService {
   private record Payload(List<Map<String, Object>> menus, List<Map<String, Object>> perms) {}
 
   private record Cached(Payload payload, Instant at) {}
-
-  public MenuCandidateService(ServiceRegistry registry) {
-    this.registry = registry;
-    this.http = RestClient.builder()
-        .requestFactory(ClientHttpRequestFactories.get(
-            ClientHttpRequestFactorySettings.DEFAULTS
-                .withConnectTimeout(CONNECT_TIMEOUT)
-                .withReadTimeout(READ_TIMEOUT)))
-        .build();
-  }
 
   /**
    * 每个已登记产品一份候选，<b>各报各的成败</b>。
@@ -188,6 +227,24 @@ public class MenuCandidateService {
   }
 
   /**
+   * 该产品自报的菜单清单；<b>拉不到时返回 {@code null}，而不是空列表</b>。
+   *
+   * <p>这个区分是「挂载产品节点」的降级判据（见 {@code NavNodeService.treeFor}）：
+   * {@code null} = 不知道产品现在报了什么，此时<b>不接管</b>同路径的老菜单行，
+   * 侧栏回落到管理员复制下来的那份；空列表 = 产品确实报了个空清单，那就该按空处理。
+   *
+   * <p>塌成一个的话，「产品服务挂了」会表现成「管理员挂的整个分组从侧栏消失」——
+   * 而侧栏是关键路径，那种失败没有任何人能立刻看出原因。
+   *
+   * <p>与 {@link #knownPerms} 共用 {@link #payloadOf} 的失败记忆（60 秒）：本方法跑在
+   * <b>渲染路径</b>上，产品地址填错时不能每个用户每次进项目都等满 2 秒连接 + 5 秒读取。
+   */
+  public List<Map<String, Object>> menusOrNull(String product) {
+    Payload payload = payloadOf(product);
+    return payload == null ? null : payload.menus();
+  }
+
+  /**
    * 拿不到返回 {@code null}，而不是空 Payload。
    *
    * <p>「不知道词表」（null）与「词表确实是空的」（有 payload、perms 为空列表）在
@@ -232,8 +289,8 @@ public class MenuCandidateService {
     return out;
   }
 
-  private static boolean fresh(Cached hit) {
-    return Duration.between(hit.at(), Instant.now()).compareTo(TTL) < 0;
+  private boolean fresh(Cached hit) {
+    return Duration.between(hit.at(), Instant.now()).toSeconds() < ttlSeconds;
   }
 
   private Payload fetch(String product, String url) {
@@ -270,9 +327,84 @@ public class MenuCandidateService {
       if (!(item instanceof Map<?, ?> m)) {
         throw new IllegalStateException("拉取 " + url + " 的 menus 里有一项不是对象");
       }
-      menus.add(normalize(m, url));
+      menus.add(normalize(m, url, ""));
     }
-    return new Payload(menus, parsePerms(root.get("perms"), url));
+    return new Payload(foldGroups(product, menus), parsePerms(root.get("perms"), url));
+  }
+
+  /**
+   * 把**老格式**（扁平两层：每项带 {@code group}）折成树。
+   *
+   * <p>{@code group} 是 V23 之前的产品清单形状：一项一个分组名，分组本身不是节点。
+   * 新版清单用 {@code children} 表达层级，不再需要 {@code group}。这里保留读入是为了
+   * <b>厂商两侧不必同时升级</b> —— org 先上、产品还没发版时，老清单照样能挂、能渲染。
+   *
+   * <p>折出来的目录节点 id 由 {@code (product, scope, group)} 拼成，<b>与产品自己给
+   * 树形节点的 id 规则无关</b>：产品从老格式升级到树形时，同一个分组在两种格式下的 id
+   * 不一样，已经挂载了它的 org 节点会因此失配、降级成空目录。这是升级期的已知代价
+   * （重新挂一次即可），换来的是「不改产品也能先用起来」。
+   *
+   * <p>完全没有 {@code group} 的清单原样返回 —— 不做任何加工，树形清单走不到这里。
+   */
+  private static List<Map<String, Object>> foldGroups(String product, List<Map<String, Object>> menus) {
+    boolean legacy = false;
+    for (Map<String, Object> m : menus) {
+      if (!str(m.get("group")).isEmpty()) {
+        legacy = true;
+        break;
+      }
+    }
+    if (!legacy) return menus;
+
+    List<Map<String, Object>> out = new ArrayList<>();
+    // 分组的首次出现序就是它在清单里的位置，用「键 → 下标」钉住
+    Map<String, Integer> at = new LinkedHashMap<>();
+    for (Map<String, Object> m : menus) {
+      String group = str(m.get("group"));
+      if (group.isEmpty()) {
+        out.add(m);
+        continue;
+      }
+      String scope = str(m.get("scope"));
+      String key = scope + '\u0000' + group;
+      List<Map<String, Object>> bucket;
+      Integer index = at.get(key);
+      if (index == null) {
+        Map<String, Object> dir = new LinkedHashMap<>();
+        dir.put("id", product + ':' + scope + ":group:" + group);
+        dir.put("scope", scope);
+        // 目录节点没有 group、没有 path —— 它的身份就是「一层目录」
+        dir.put("group", "");
+        dir.put("path", "");
+        dir.put("label", group);
+        dir.put("icon", "");
+        dir.put("perm", "");
+        dir.put("sort", sortOf(m));
+        bucket = new ArrayList<>();
+        dir.put("children", bucket);
+        at.put(key, out.size());
+        out.add(dir);
+      } else {
+        bucket = children(out.get(index));
+      }
+      bucket.add(m);
+    }
+    return out;
+  }
+
+  private static int sortOf(Map<String, Object> node) {
+    Object v = node.get("sort");
+    return v instanceof Number n ? n.intValue() : 0;
+  }
+
+  private static List<Map<String, Object>> children(Map<String, Object> node) {
+    Object kids = node.get("children");
+    if (kids instanceof List<?> list) {
+      @SuppressWarnings("unchecked")
+      List<Map<String, Object>> cast = (List<Map<String, Object>>) list;
+      return cast;
+    }
+    return List.of();
   }
 
   /**
@@ -324,28 +456,70 @@ public class MenuCandidateService {
   }
 
   /**
-   * 把一个候选菜单项规范成固定的字段集，顺带校验。
+   * 把一个候选菜单节点规范成固定的字段集，顺带校验。<b>递归处理 {@code children}</b>。
    *
-   * <p>校验放在这里而不是等落库：`scope` 是 {@code nav_items} 的白名单，
+   * <p>校验放在这里而不是等落库：`scope` 是 {@code nav_nodes.scope} 的白名单，
    * 清单里写错的值会让管理员勾完之后拿到一条 400，而看不出是清单本身有问题。
    * 整份清单一起拒（而不是跳过坏项）：候选少一条能手工补，
    * 「悄悄少了一条」则会让人以为服务那边本来就没有这个页面。
+   *
+   * <p><b>三条规则是 V23 引入树形清单时新加的</b>：
+   *
+   * <ul>
+   *   <li><b>子节点可以省略 {@code scope}</b>，继承父节点。一层目录里的每一项都重抄一遍
+   *       {@code scope} 是纯粹的噪音，而且抄错一个就是「这一支在侧栏里整片消失」。</li>
+   *   <li><b>{@code id} 必填</b>。挂载节点的匹配键就是它（{@code nav_nodes.ref}），
+   *       没有 id 的节点挂不上 —— 而且这个错误必须在这里报出来，否则症状是
+   *       「管理员在管理页里看不到这条候选」，与「产品本来就没报这个页面」分不开。</li>
+   *   <li><b>既没有 {@code path} 也没有 {@code children} 的节点要拒</b>。它既点不动
+   *       （没有路径）又没有内容（没有子项），渲染时会被静默丢掉，配到侧栏里就是一个
+   *       凭空少掉的入口。目录节点没有 path 是合法的 —— 判据是「有没有子节点」。</li>
+   * </ul>
+   *
+   * @param parentScope 父节点的壳；顶层传空串（顶层必须自己报 {@code scope}）
    */
-  private static Map<String, Object> normalize(Map<?, ?> raw, String url) {
+  private static Map<String, Object> normalize(Map<?, ?> raw, String url, String parentScope) {
     String scope = str(raw.get("scope"));
-    if (!NavItemService.SCOPES.contains(scope)) {
+    if (scope.isEmpty()) scope = parentScope;
+    if (!NavNodeService.SCOPES.contains(scope)) {
       throw new IllegalStateException("拉取 " + url + " 的候选里有非法的 scope「" + scope
-          + "」—— 可用值：" + NavItemService.SCOPES);
+          + "」—— 可用值：" + NavNodeService.SCOPES);
     }
+    String label = required(raw, "label", url);
+    String id = required(raw, "id", url);
+
+    List<Map<String, Object>> children = new ArrayList<>();
+    Object kids = raw.get("children");
+    if (kids != null && !(kids instanceof List<?>)) {
+      throw new IllegalStateException("拉取 " + url + " 的候选里「" + label + "」的 children 不是数组");
+    }
+    if (kids instanceof List<?> list) {
+      for (Object item : list) {
+        if (!(item instanceof Map<?, ?> m)) {
+          throw new IllegalStateException("拉取 " + url + " 的候选里「" + label + "」的 children 里有一项不是对象");
+        }
+        children.add(normalize(m, url, scope));
+      }
+    }
+
+    String path = str(raw.get("path"));
+    if (path.isEmpty() && children.isEmpty()) {
+      throw new IllegalStateException("拉取 " + url + " 的候选里「" + label + "」(id=" + id
+          + ") 既没有 path 也没有 children —— 它点不动、里面也没有东西，配到侧栏里只会凭空少一条");
+    }
+
     Map<String, Object> m = new LinkedHashMap<>();
-    m.put("id", str(raw.get("id")));
+    m.put("id", id);
     m.put("scope", scope);
+    // group 是 V23 之前的老格式：一项一个分组名。保留读入是为了厂商两侧不必同时升级
+    // （见 foldGroups），树形清单里它是空的。
     m.put("group", str(raw.get("group")));
-    m.put("path", required(raw, "path", url));
-    m.put("label", required(raw, "label", url));
+    m.put("path", path);
+    m.put("label", label);
     m.put("icon", str(raw.get("icon")));
     m.put("perm", str(raw.get("perm")));
     m.put("sort", raw.get("sort") instanceof Number n ? n.intValue() : 0);
+    m.put("children", children);
     return m;
   }
 

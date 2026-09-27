@@ -38,6 +38,28 @@ export interface NavItem {
    * 这与 PRD 对数据地图分组的要求一致。
    */
   perm?: Perm;
+  /**
+   * 子菜单 —— 有它就是**目录节点**，`path` 必须留空串、`ready` 给 `true`。
+   *
+   * <p>V23 起组织平台的侧栏是一棵不限深度的树（分组就是一个目录节点），产品报给它的
+   * `menu.json` 也跟着能带层级（见 `scripts/gen-menu.mjs` 的 {@code candidateId}）。
+   * 这里给自己的一项加 `children`，那一条就在 org 壳的侧栏里多一层缩进，**org 侧不用
+   * 改任何配置**。
+   *
+   * <p><b>两个前提</b>：
+   *
+   * <ol>
+   *   <li>本进程自己的侧栏（{@code AppSidebar} / {@code AppTopnav}）目前只画两层，
+   *       加了 `children` 只会看到一个点不动的空路径项。要用就先把它改成递归渲染 ——
+   *       否则「org 壳里看得见、产品自己的侧栏里看不见」。</li>
+   *   <li>目录节点不能同时是可点的页面（`path` 必须为空）：渲染端对目录只认它的子节点，
+   *       带了 `path` 也不会被用上，而那一行看起来像能点。构建期会拒掉这种写法
+   *       （见 `gen-menu.mjs`）。</li>
+   * </ol>
+   *
+   * <p>{@code path} 保持必填（而不是改成可选）：目录写空串，这样现有调用方一行不用改。
+   */
+  children?: NavItem[];
 }
 
 /**
@@ -94,8 +116,9 @@ export const projectNavGroups: NavGroup[] = PROJECT_GROUPS;
  * - 只有 standard 有本地账号，所以「账号管理」在这之外的模式一律不出现
  * - 非管理员看不到「账号管理」—— 让他看见一个点进去必然 403 的入口没有意义
  *
- * <p>「项目」页不再需要按模式过滤：它现在只出现在工作台菜单里，而工作台本身
- * 只有 standard 与 standalone 能到（`hasWorkbench` + 路由守卫双重保证）。
+ * <p>「项目」页不需要按模式过滤：它只出现在工作台菜单里，而工作台三种模式都能到。
+ * multi 下那一页是只读的（`ownsProjects` 为假时收掉写入口），但菜单项本身就该在 ——
+ * 那是「我在哪几个项目里」的入口，只读也照样要看。
  *
  * <p>`authState.me` 在 standard 下是**挂载前**就拉好的（`main.ts` 里 await `loadMe()`），
  * 所以这里能读到它。调用方（AppSidebar / AppTopnav）如果在 setup 里一次性调用，
@@ -139,6 +162,9 @@ export function activeNavPath(path: string): string | undefined {
   const stripped = normalizePath(path);
   let best: string | undefined;
   for (const item of visibleNavGroups(stripped).flatMap((g) => g.items)) {
+    // 目录节点（`path` 为空串，见 NavItem.children）不参与高亮：`startsWith('')` 恒真，
+    // 它会把**任意**路径都点亮成这一项
+    if (!item.path) continue;
     // 两个层级的首页都要求精确相等，否则它会点亮本层级下所有页面
     const exact = item.path === LINEAGE_HOME || item.path === WORKBENCH_PAGES.home;
     const hit = exact ? stripped === item.path : stripped.startsWith(item.path);

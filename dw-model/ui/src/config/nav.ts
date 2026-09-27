@@ -17,6 +17,26 @@ export interface NavItem {
    * 由 {@link buildNavGroups} 统一标记，渲染端只认 `disabled` / `disabledReason`。
    */
   perm?: Perm;
+  /**
+   * 子菜单 —— 有它就是**目录节点**，`path` 必须留空串。
+   *
+   * <p>V23 起组织平台的侧栏是一棵不限深度的树（分组就是一个目录节点），产品报给它的
+   * `menu.json` 也跟着能带层级（见 `scripts/gen-menu.mjs` 的 {@code candidateId}）。
+   * 这里给自己的一项加 `children`，那一条就在 org 壳的侧栏里多一层缩进，**org 侧不用
+   * 改任何配置**。
+   *
+   * <p><b>两个前提</b>：
+   *
+   * <ol>
+   *   <li>本进程自己的侧栏（{@code AppNav} / {@code AppSidebar}）目前只画两层，
+   *       加了 `children` 只会看到一个点不动的空路径项。要用就先把它改成递归渲染 ——
+   *       否则「org 壳里看得见、产品自己的侧栏里看不见」。</li>
+   *   <li>目录节点不能同时是可点的页面（`path` 必须为空）：渲染端对目录只认它的子节点，
+   *       带了 `path` 也不会被用上，而那一行看起来像能点。构建期会拒掉这种写法
+   *       （见 `gen-menu.mjs`）。</li>
+   * </ol>
+   */
+  children?: NavItem[];
 }
 
 export interface NavGroup {
@@ -83,6 +103,9 @@ export function buildNavGroups(
 export function activeNavPath(path: string, groups: NavGroup[] = navGroups): string | undefined {
   let best: string | undefined;
   for (const item of groups.flatMap((g) => g.items)) {
+    // 目录节点（`path` 为空串，见 NavItem.children）不参与高亮：`startsWith('')` 恒真，
+    // 它会把**任意**路径都点亮成这一项
+    if (!item.path) continue;
     const hit = item.path === MODEL_HOME ? path === item.path : path.startsWith(item.path);
     if (hit && (!best || item.path.length > best.length)) best = item.path;
   }

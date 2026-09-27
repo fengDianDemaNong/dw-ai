@@ -77,7 +77,15 @@ const cols = [
 ];
 
 onMounted(async () => {
-  if (app.currentTenantId) users.value = await api.org.users(app.currentTenantId);
+  if (!app.currentTenantId) return;
+  try {
+    users.value = await api.org.users(app.currentTenantId);
+  } catch {
+    // 拿不到就留空表。这组端点（`/api/tenants/{id}/users`）只在组织平台，
+    // 而 standard 是单进程部署、没有组织平台可直连（model-api 不含这组端点）——
+    // 那边这一页本来就是空的，不必把 404 抛成未捕获异常。
+    users.value = [];
+  }
 });
 </script>
 

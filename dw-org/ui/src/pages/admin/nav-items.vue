@@ -2,20 +2,20 @@
   <div class="page">
     <PageHeader
       title="菜单管理"
-      subtitle="把各产品的页面挂到两个壳上：工作台（进项目之前）与项目（进项目之后）。路径来自各服务自己报的候选清单，管理员决定它挂哪个壳、排第几。"
+      subtitle="一棵树管两个壳：工作台（进项目之前）与项目（进项目之后）。节点有两类 —— org 自己的页面，以及从各产品挂上来的页面；两类都可以无限层级，类目由你编排，产品的层级由产品自己报。"
     >
       <template #actions>
         <a-button @click="load">刷新</a-button>
-        <a-button @click="openGroups">分组管理</a-button>
-        <a-button :disabled="!canCreate" @click="openFetch">从服务拉取菜单</a-button>
-        <a-button type="primary" :disabled="!canCreate" @click="openCreate">新增菜单</a-button>
+        <a-button @click="openFetch">从服务拉取菜单</a-button>
+        <a-button :disabled="!hasProducts" @click="openPicker('create')">挂载产品菜单</a-button>
+        <a-button type="primary" @click="openCreate(null)">新增主菜单</a-button>
       </template>
     </PageHeader>
 
-    <p v-if="!configuredProducts.length" class="muted card">
-      还没有登记任何产品的页面地址，先到
+    <p v-if="!hasProducts" class="muted card">
+      还没有登记任何产品的页面地址，产品菜单会挂不上来。先到
       <router-link :to="ORG_PAGES.platformServices">服务注册</router-link>
-      填上要嵌入的产品，再回来配菜单。
+      填上要嵌入的产品。<b>org 自己的页面不受影响</b>，照常能在下面配。
     </p>
 
     <div class="filters">
@@ -27,7 +27,7 @@
     </div>
 
     <a-table
-      :data-source="treeRows"
+      :data-source="tableRows"
       :columns="cols"
       row-key="id"
       :pagination="false"
@@ -35,48 +35,90 @@
       class="card card-flush"
       :indent-size="14"
       :row-class-name="rowClass"
-      :expanded-row-keys="expandedKeys"
-      @expand="onExpand"
+      v-model:expanded-row-keys="expandedKeys"
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'name'">
-          <a-tag v-if="record.depth === 0" :color="record.scope === 'project' ? 'blue' : 'purple'">
-            {{ record.name }}
+          <!-- 壳根：前端合成的两行，不是菜单表里的行（工作台壳 / 项目壳） -->
+          <a-tag v-if="isShell(record)" :color="record.scope === 'project' ? 'blue' : 'purple'">
+            {{ record.label }}
           </a-tag>
-          <span v-else :class="{ 'node-branch': record.nodeType === 'branch' }">{{ record.name }}</span>
-          <!-- 空组：已登记分组但这一壳这一产品下一条菜单都没有。不标出来，管理员会以为没保存成功 -->
-          <a-tag v-if="record.emptyGroup" color="default" style="margin-left: 6px">空</a-tag>
-          <!-- 未登记：这个分组名只存在于菜单项里（各服务动态生成的，如仓建设的「建模中心」） -->
-          <a-tag v-else-if="record.unregisteredGroup" style="margin-left: 6px">未登记</a-tag>
-        </template>
-        <template v-else-if="column.key === 'icon'">
-          <template v-if="record.nodeType === 'item'">
-            <component :is="icons[record.icon]" v-if="icons[record.icon]" />
-            <span v-else class="muted">通用</span>
+          <template v-else>
+            <span :class="{ 'node-dir': isDir(record) && !record.mounted }">{{ record.label }}</span>
+            <a-tooltip v-if="record.mounted" :title="mountedTip(record)">
+              <a-tag color="cyan" style="margin-left: 6px">挂载</a-tag>
+            </a-tooltip>
+            <a-tooltip v-if="isMismatch(record)" :title="mismatchTip(record)">
+              <a-tag color="orange" style="margin-left: 6px">已失配</a-tag>
+            </a-tooltip>
+            <a-tag v-if="record.adminOnly" style="margin-left: 6px">仅管理员</a-tag>
+            <a-tag v-if="!record.enabled" style="margin-left: 6px">停用</a-tag>
           </template>
         </template>
+
+        <template v-else-if="column.key === 'path'">
+          <template v-if="!isShell(record)">
+            <a-tag v-if="record.product" style="margin-right: 6px">{{ productLabel(record.product) }}</a-tag>
+            <template v-if="record.mounted">
+              <span class="muted">内容来自产品清单：<code>{{ record.ref }}</code></span>
+            </template>
+            <span v-else-if="!record.path" class="muted">目录（不可点）</span>
+            <code v-else>{{ record.path }}</code>
+          </template>
+        </template>
+
+        <template v-else-if="column.key === 'perm'">
+          <span v-if="isShell(record)"></span>
+          <code v-else-if="record.perm">{{ record.perm }}</code>
+          <span v-else class="muted">不判权</span>
+        </template>
+
+        <template v-else-if="column.key === 'icon'">
+          <component v-if="!isShell(record) && icons[record.icon]" :is="icons[record.icon]" />
+          <span v-else-if="!isShell(record)" class="muted">通用</span>
+        </template>
+
         <template v-else-if="column.key === 'sortOrder'">
-          <span v-if="record.nodeType === 'item'">{{ record.sortOrder }}</span>
+          <span v-if="!isShell(record)">{{ record.sortOrder }}</span>
         </template>
-        <template v-else-if="column.key === 'enabled'">
-          <a-tag v-if="record.nodeType === 'item'" :color="record.enabled ? 'green' : 'default'">
-            {{ record.enabled ? '启用' : '停用' }}
-          </a-tag>
+
+        <template v-else-if="column.key === 'emptyPolicy'">
+          <template v-if="!isShell(record) && isDir(record)">
+            <a-tag :color="record.emptyPolicy === 'always' ? 'orange' : 'default'">
+              {{ record.emptyPolicy === 'always' ? '保留并置灰' : '隐藏' }}
+            </a-tag>
+          </template>
         </template>
+
         <template v-else-if="column.key === 'act'">
-          <template v-if="record.nodeType === 'item'">
-            <a-button size="small" @click="openEdit(record.item!)">编辑</a-button>
-            <a-button size="small" danger @click="remove(record.id)">删除</a-button>
+          <a-button size="small" type="link" @click="openCreate(record)">
+            {{ isShell(record) ? '新增主菜单' : '新增子菜单' }}
+          </a-button>
+          <template v-if="!isShell(record)">
+            <a-button size="small" @click="openEdit(record)">编辑</a-button>
+            <a-button size="small" danger @click="remove(record)">删除</a-button>
           </template>
         </template>
       </template>
     </a-table>
+
     <p v-if="rows.length" class="muted">
-      菜单项里的路径是<b>子应用内</b>的路径（如 <code>/lineage/tables</code>），不是本平台的地址 ——
-      本平台会把它拼成 <code>/org/embed/{产品}{路径}</code>（项目壳下多一级 <code>/org/project/{项目}{产品}{路径}</code>）。
+      <b>两类节点的区别</b>：org 自己的页面（路径形如 <code>/org/...</code>，直接跳）与从产品挂上来的页面。
+      产品那一类又分两种：<b>手工复制</b>（把产品清单里的某一条抄成一行，产品以后改了这里不跟着变）与
+      <b>挂载</b>（只记「产品 + 清单里的节点 id」，内容是每次渲染时现取的 —— 产品新增子菜单，侧栏自动跟上）。
+    </p>
+    <p v-if="rows.length" class="muted">
+      <b>产品页面里的路径是子应用内</b>的路径（如 <code>/lineage/tables</code>），不是本平台的地址 ——
+      本平台会拼成 <code>/org/embed/{产品}{路径}</code>（项目壳下多一级 <code>/org/project/{项目}</code>）。
+      挂载节点展开出来的项会<b>覆盖同路径的手工行</b>：同一个页面既手工复制又挂载时，侧栏只显示产品报的那一条。
+    </p>
+    <p v-if="failedReports.length" class="muted">
+      这些产品的清单没拉到，下面标不了「已失配」也列不出它们的可挂载项：
+      {{ failedReports.map((p) => `${productLabel(p.product)}（${p.error || '拉取失败'}）`).join('、') }}。
+      修好「服务注册」里的页面地址，或确认产品前端已经构建过。
     </p>
 
-    <!-- 从服务拉取候选 -->
+    <!-- 从服务拉取候选：勾一棵子树 = 整支抄成手工行（引用不是复制，要「跟着产品变」请用挂载） -->
     <a-drawer
       v-model:open="fetchOpen"
       title="从服务拉取菜单"
@@ -87,6 +129,7 @@
       <p class="muted">
         候选来自各服务前端构建时导出的 <code>menu.json</code>，后端按「服务注册」里登记的
         <b>页面地址</b>去拉。菜单变更要重新构建该服务的前端才会进到这里。
+        勾选后抄进菜单表的是<b>副本</b>；要让侧栏跟着产品走，请用上面的「挂载产品菜单」。
       </p>
 
       <a-spin :spinning="fetching">
@@ -99,8 +142,8 @@
           style="margin-bottom: 12px"
         />
 
-        <!-- 左树右选：左边是服务上报的菜单树（产品 → 壳·分组 → 菜单项），右边是即将导入的清单。
-             勾一个分组 = 整组导入。 -->
+        <!-- 左树右选：左边是产品上报的菜单树（产品 → 目录 → 子菜单…），右边是即将导入的清单。
+             勾一个目录 = 整支导入。 -->
         <div class="pick-split">
           <div class="pick-left">
             <div v-for="group in failedCandidates" :key="group.product" class="cand-fail">
@@ -127,56 +170,59 @@
           <div class="pick-right">
             <div class="pick-head">
               <b>将导入 {{ pickedRows.length }} 项</b>
-              <span v-if="pickedRows.length" class="muted">归属壳、分组、菜单名、权限词、排序都能改了再保存</span>
+              <span v-if="pickedRows.length" class="muted">
+                归属壳、菜单名、权限词、排序都能改了再保存；层级照产品的清单落下来
+              </span>
             </div>
 
             <a-table
               v-if="pickedRows.length"
               :data-source="pickedRows"
               :columns="pickedCols"
-              row-key="id"
+              row-key="key"
               size="small"
               :pagination="false"
             >
               <template #bodyCell="{ column, record }">
                 <template v-if="column.key === 'scope'">
                   <a-select
-                    v-model:value="draft[record.id].scope"
+                    v-model:value="draft[record.key].scope"
                     size="small"
                     style="width: 108px"
                     :options="scopeChoices"
                   />
                 </template>
-                <template v-else-if="column.key === 'group'">
-                  <a-auto-complete
-                    v-model:value="draft[record.id].group"
-                    size="small"
-                    placeholder="不分组"
-                    :options="groupOptions(draft[record.id].scope, record.product)"
-                  />
+                <template v-else-if="column.key === 'title'">
+                  <a-input v-model:value="draft[record.key].title" size="small" />
                 </template>
-                <template v-else-if="column.key === 'label'">
-                  <a-input v-model:value="draft[record.id].label" size="small" />
+                <template v-else-if="column.key === 'path'">
+                  <code v-if="record.node.path">{{ record.node.path }}</code>
+                  <span v-else class="muted">目录</span>
                 </template>
                 <template v-else-if="column.key === 'perm'">
                   <!-- 与手填表单用的是同一个控件：两处各写一遍必然会漂成「同一件事能填的词不一样」 -->
                   <PermSelect
-                    v-model:value="draft[record.id].perm"
+                    v-model:value="draft[record.key].perm"
                     :options="optionsOf(record.product)"
                     placeholder="不判权"
                   />
                 </template>
                 <template v-else-if="column.key === 'sort'">
-                  <a-input-number v-model:value="draft[record.id].sortOrder" size="small" :min="0" style="width: 72px" />
+                  <a-input-number
+                    v-model:value="draft[record.key].sortOrder"
+                    size="small"
+                    :min="0"
+                    style="width: 72px"
+                  />
                 </template>
                 <template v-else-if="column.key === 'act'">
-                  <a-button size="small" @click="unpick(record)">移除</a-button>
+                  <a-button size="small" @click="unpick(record.key)">移除</a-button>
                 </template>
               </template>
             </a-table>
 
             <p v-else class="muted empty-pick">
-              在左边勾选要挂上来的菜单。勾<b>一个分组</b>（主菜单）会把这一组下面的菜单一起选进来 ——
+              在左边勾选要挂上来的菜单。勾<b>一个目录</b>会把这一支下面的菜单一起选进来 ——
               像数仓建模的「建模中心」，它下面的分层是按项目动态生成的，逐条勾太碎。
             </p>
           </div>
@@ -196,130 +242,47 @@
       </template>
     </a-drawer>
 
-    <!-- 分组管理：把「有哪些分组」提前建好，配菜单时就能从下拉里选 -->
-    <a-drawer
-      v-model:open="groupsOpen"
-      title="分组管理"
-      placement="right"
-      :width="820"
-      :body-style="{ paddingBottom: '80px' }"
-    >
-      <p class="muted">
-        这里只是把分组<b>提前建好</b>：有了它，配菜单时能直接选，不必每处手打分組名；分组还能定
-        <b>组间顺序</b>与<b>空组策略</b>。它<b>不</b>是强制约束 —— 菜单项里的分组名仍然是文本，
-        各服务动态生成的分组（如仓建设按项目分层的「建模中心」）照旧可以直接写。
-      </p>
-
-      <div class="filters">
-        <a-radio-group v-model:value="groupScopeFilter" button-style="solid">
-          <a-radio-button value="">全部</a-radio-button>
-          <a-radio-button value="workbench">工作台壳</a-radio-button>
-          <a-radio-button value="project">项目壳</a-radio-button>
-        </a-radio-group>
-        <a-select
-          v-model:value="groupProductFilter"
-          style="width: 160px"
-          :options="[{ value: '', label: '全部产品' }, ...productChoices]"
-        />
-      </div>
-
-      <a-table
-        :data-source="filteredGroups"
-        :columns="groupCols"
-        row-key="id"
-        size="small"
-        :pagination="false"
-        class="card card-flush"
-      >
-        <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'scope'">
-            <a-tag :color="record.scope === 'project' ? 'blue' : 'purple'">{{ scopeLabel(record.scope) }}</a-tag>
-          </template>
-          <template v-else-if="column.key === 'product'">{{ productLabel(record.product) }}</template>
-          <template v-else-if="column.key === 'emptyPolicy'">
-            <a-tag :color="record.emptyPolicy === 'always' ? 'orange' : 'default'">
-              {{ record.emptyPolicy === 'always' ? '保留并置灰' : '整组隐藏' }}
-            </a-tag>
-          </template>
-          <template v-else-if="column.key === 'act'">
-            <a-button size="small" @click="openGroupEdit(record)">编辑</a-button>
-            <a-button size="small" danger @click="removeGroup(record)">删除</a-button>
-          </template>
-        </template>
-      </a-table>
-      <p v-if="!filteredGroups.length" class="muted">还没有登记任何分组。</p>
-
-      <template #footer>
-        <div class="drawer-foot">
-          <a-button :loading="importing" @click="importGroups">从候选导入分组</a-button>
-          <span>
-            <a-button @click="groupsOpen = false">关闭</a-button>
-            <a-button type="primary" @click="openGroupCreate">新增分组</a-button>
-          </span>
-        </div>
-      </template>
-    </a-drawer>
-
-    <a-modal
-      v-model:open="groupOpen"
-      :title="groupForm.id ? '编辑分组' : '新增分组'"
-      ok-text="保存"
-      :confirm-loading="groupBusy"
-      @ok="submitGroup"
-    >
-      <a-form layout="vertical">
-        <a-form-item label="归属壳" required>
-          <a-radio-group v-model:value="groupForm.scope" :disabled="Boolean(groupForm.id)">
-            <a-radio-button value="workbench">工作台壳</a-radio-button>
-            <a-radio-button value="project">项目壳</a-radio-button>
-          </a-radio-group>
-          <p class="muted" style="margin: 4px 0 0">壳 + 产品 + 分组名 三样一起才是这个分组的身份，建好之后不能改。</p>
-        </a-form-item>
-        <a-form-item label="产品" required>
-          <a-select v-model:value="groupForm.product" :options="productChoices" :disabled="Boolean(groupForm.id)" />
-        </a-form-item>
-        <a-form-item label="分组名" required>
-          <a-input v-model:value="groupForm.title" placeholder="数据地图" />
-        </a-form-item>
-        <a-form-item label="组间顺序">
-          <a-input-number v-model:value="groupForm.sortOrder" :min="0" style="width: 120px" />
-          <p class="muted" style="margin: 4px 0 0">
-            数字小的排前面。这里排的是<b>分组之间</b>的先后；分组里面每一项的先后仍由菜单项自己的排序决定。
-          </p>
-        </a-form-item>
-        <a-form-item label="空组策略">
-          <a-radio-group v-model:value="groupForm.emptyPolicy">
-            <a-radio-button value="hide">整组隐藏</a-radio-button>
-            <a-radio-button value="always">保留并置灰</a-radio-button>
-          </a-radio-group>
-          <p class="muted" style="margin: 4px 0 0">
-            这一组在当前人那儿<b>一个可用入口都没有</b>时（模块没开通、没派角色、还没配菜单）怎么办。
-            「整组隐藏」= 现状行为；「保留并置灰」= 分组照常出现，里面放一条说明为什么点不开。
-            <br />
-            按规范，<b>「数据地图」这一组要选「保留并置灰」</b>：它要求未开通或未派角色时分组仍在、入口禁用并说明。
-          </p>
-        </a-form-item>
-      </a-form>
-    </a-modal>
-
-    <!-- 新增第一步：选产品 → 选它报出来的页面。默认值全部来自产品，管理员再改。 -->
+    <!-- 挂载 / 从产品取：同一个选择器，两种落点（直接建挂载行 / 回填表单） -->
     <a-modal
       v-model:open="pickOpen"
-      title="新增菜单 · 从产品取"
+      :title="
+        pickTarget === 'create'
+          ? '挂载产品菜单'
+          : pickTarget === 'mounted'
+            ? '选一个要挂载的产品节点'
+            : '从产品清单里挑一条'
+      "
       :width="900"
       :footer="null"
       :body-style="{ paddingBottom: '8px' }"
+      @cancel="onPickCancel"
     >
       <p class="muted">
-        选一个产品，再从它<b>自己上报</b>的页面清单里挑一条。菜单名、图标、分组、权限词、路径都会按产品的
-        说法预填好，下一步还能改（路径除外 —— 它是那个页面在子应用里的真实路由）。
+        <template v-if="pickTarget === 'create'">
+          挂载<b>不复制</b>任何行：产品以后新增子菜单，侧栏下次刷新就跟着多一条。
+          勾一个目录 = 把这一支整体挂上去（子树跟着进来）。
+        </template>
+        <template v-else-if="pickTarget === 'mounted'">
+          这一条会记成「挂载：产品 + 清单里的节点 id」，路径与权限词都跟随产品。
+          选一个目录 = 挂载这一支（它的子菜单在侧栏里展开）。
+        </template>
+        <template v-else>
+          菜单名、图标、权限词、路径都按产品自己的说法预填，下一步还能改（<b>路径除外</b> ——
+          它是那个页面在子应用里的真实路由，手改出来的点进去就是 404）。
+        </template>
       </p>
       <a-form layout="vertical">
+        <a-form-item v-if="pickTarget === 'create'" label="归属壳">
+          <a-radio-group v-model:value="pickScope">
+            <a-radio-button value="workbench">工作台壳</a-radio-button>
+            <a-radio-button value="project">项目壳</a-radio-button>
+          </a-radio-group>
+        </a-form-item>
         <a-form-item label="产品">
           <a-select
             v-model:value="pickProduct"
             style="max-width: 260px"
-            :options="pickProductChoices"
+            :options="productChoices"
             @change="loadPickMenus"
           />
         </a-form-item>
@@ -327,111 +290,164 @@
 
       <a-spin :spinning="pickLoading">
         <a-alert v-if="pickError" type="warning" show-icon :message="pickError" style="margin-bottom: 12px" />
-        <a-table
-          v-if="!pickError"
-          :data-source="pickMenus"
-          :columns="pickCols"
-          row-key="id"
-          size="small"
-          :pagination="{ pageSize: 8, size: 'small' }"
-          :scroll="{ y: 360 }"
-        >
-          <template #bodyCell="{ column, record }">
-            <template v-if="column.key === 'scope'">
-              <a-tag :color="record.scope === 'project' ? 'blue' : 'purple'">{{ scopeLabel(record.scope) }}</a-tag>
-            </template>
-            <template v-else-if="column.key === 'group'">{{ record.group || '未分组' }}</template>
-            <template v-else-if="column.key === 'perm'">
-              <span v-if="record.perm">{{ record.perm }}</span>
-              <span v-else class="muted">不判权</span>
-            </template>
-            <template v-else-if="column.key === 'configured'">
-              <a-tag v-if="alreadyConfigured(record)" color="default">已配置</a-tag>
-            </template>
-            <template v-else-if="column.key === 'act'">
-              <!-- 已配置的仍可再选：同一条路径挂到另一个壳是合法用法，撞了后端会拒 -->
-              <a-button size="small" type="link" @click="chooseCandidate(record)">选它</a-button>
-            </template>
-          </template>
-        </a-table>
-        <p v-if="!pickLoading && !pickError && !pickMenus.length" class="muted">这个产品没有上报任何可配的页面。</p>
+        <a-tree
+          v-if="!pickError && pickTree.length"
+          :tree-data="pickTree"
+          :selectable="true"
+          default-expand-all
+          @select="onPickSelect"
+        />
+        <p v-if="!pickLoading && !pickError && !pickTree.length" class="muted">
+          这个产品没有上报任何页面。
+        </p>
       </a-spin>
-
-      <template #footer>
-        <div class="drawer-foot">
-          <span class="muted">产品没上报的页面只能手填。</span>
-          <span>
-            <a-button @click="pickOpen = false">取消</a-button>
-            <a-button @click="openBlankForm">直接手填</a-button>
-          </span>
-        </div>
-      </template>
     </a-modal>
 
     <a-modal
       v-model:open="open"
-      :title="form.id ? '编辑菜单' : pathLocked ? '新增菜单 · 来自候选' : '新增菜单'"
+      :title="form.id ? '编辑菜单' : '新增菜单'"
       ok-text="保存"
       :confirm-loading="busy"
       @ok="submit"
     >
       <a-form layout="vertical">
-        <a-form-item label="产品" required>
-          <a-select v-model:value="form.product" :options="productChoices" :disabled="Boolean(form.id)" />
-          <p class="muted" style="margin: 4px 0 0">
-            只列已登记页面地址的产品 —— 没登记的产品配了菜单也点不开。
-          </p>
-        </a-form-item>
         <a-form-item label="归属壳" required>
-          <a-radio-group v-model:value="form.scope">
+          <a-radio-group v-model:value="form.scope" :disabled="Boolean(form.id)">
             <a-radio-button value="workbench">工作台壳</a-radio-button>
             <a-radio-button value="project">项目壳</a-radio-button>
           </a-radio-group>
           <p class="muted" style="margin: 4px 0 0">
-            工作台 = 进项目**之前**那一级；项目 = 进项目**之后**。同一条路径可以两个壳各挂一份。
+            工作台 = 进项目<b>之前</b>那一级；项目 = 进项目<b>之后</b>。同一棵树在两个壳里各拉一支，
+            建好之后不能改（改壳等于换了一棵树）。
           </p>
         </a-form-item>
-        <a-form-item label="菜单名" required>
-          <a-input v-model:value="form.label" placeholder="数据地图" />
+
+        <a-form-item label="父节点">
+          <a-tree-select
+            v-model:value="form.parentId"
+            :tree-data="parentTree"
+            allow-clear
+            placeholder="顶层（主菜单）"
+            style="width: 100%"
+            :dropdown-style="{ maxHeight: '320px', overflow: 'auto' }"
+          />
+          <p class="muted" style="margin: 4px 0 0">
+            留空 = 这个壳的<b>主菜单</b>（侧栏第一层）。选一个节点 = 成为它的子菜单，层级不限。
+          </p>
         </a-form-item>
-        <a-form-item label="子应用路径" required>
-          <!-- 必须写 `:readonly`（全小写）：antd-vue 声明的是 `readonly` 这个 prop，
-               写成 `:read-only` 会驼峰化成 `readOnly` 对不上，结果渲染出一个非标准的
-               dead 属性 `read-only="true"` —— 看着锁了、帮助文案也写着只读，但能打字。 -->
-          <a-input v-model:value="form.path" :readonly="pathLocked" placeholder="/lineage/tables" />
+
+        <a-form-item label="来源">
+          <a-radio-group v-model:value="form.source">
+            <a-radio-button value="org">org 自己的页面</a-radio-button>
+            <a-radio-button value="manual">手工复制产品页面</a-radio-button>
+            <a-radio-button value="mounted" :disabled="!hasProducts">挂载产品节点</a-radio-button>
+          </a-radio-group>
+          <p class="muted" style="margin: 4px 0 0">
+            <template v-if="form.source === 'org'">
+              路径是本平台的完整路由（如 <code>/org/workbench/projects</code>）。判权词走<b>本项目下
+              仓建设</b>的角色（如 <code>iam:member</code>），不满足时这一条在侧栏里<b>置灰</b>而不是消失。
+            </template>
+            <template v-else-if="form.source === 'manual'">
+              把产品清单里的某一条抄成一行。产品以后改了名字、换了路径，这里<b>不跟着变</b>；
+              想跟着变请改用「挂载」。
+            </template>
+            <template v-else>
+              只记「产品 + 清单里的节点 id」。路径与权限词都<b>实时</b>取自产品清单 ——
+              产品改了这里就跟着改，产品加子菜单侧栏自动多一条。
+            </template>
+          </p>
+        </a-form-item>
+
+        <a-form-item v-if="form.source !== 'org'" label="产品" required>
+          <a-select
+            v-model:value="form.product"
+            :options="productChoices"
+            :disabled="form.source === 'mounted'"
+          />
+          <p class="muted" style="margin: 4px 0 0">
+            只列已登记页面地址的产品 —— 没登记的产品配了菜单也点不开。
+          </p>
+        </a-form-item>
+
+        <a-form-item v-if="form.source === 'mounted'" label="挂载的产品节点" required>
+          <a-button @click="openPicker('mounted')">
+            {{ form.ref ? '重新选择' : '选择节点' }}
+          </a-button>
+          <span v-if="form.ref" class="muted" style="margin-left: 8px">
+            <code>{{ form.ref }}</code>
+          </span>
+          <p class="muted" style="margin: 4px 0 0">
+            挂的是产品清单里的一个节点（可以是目录），保存时后端会去清单里核对它还在不在。
+          </p>
+        </a-form-item>
+
+        <!--
+          不加 `&& form.product`：选择器自己带一个产品下拉（选完会把产品回填到上面那一项），
+          强制「先在表单里选产品才能挑」等于让同一次选择做两遍 —— 而且没有已选产品时
+          `openPicker` 会自动落到第一个可用产品上，本来就没有「不知道拉哪个产品的清单」的问题。
+        -->
+        <a-form-item v-else-if="form.source === 'manual'" label="从产品清单里取">
+          <a-button @click="openPicker('manual')">挑一条</a-button>
+          <p class="muted" style="margin: 4px 0 0">
+            产品报出来的每一条都带着菜单名、图标、权限词与真实路径 —— 挑一条比手抄一遍可靠，
+            手抄错的后果（404 或永远判否）当时都不报错。
+          </p>
+        </a-form-item>
+
+        <a-form-item label="菜单名" required>
+          <a-input v-model:value="form.title" placeholder="数据地图" />
+        </a-form-item>
+
+        <a-form-item v-if="form.source !== 'mounted'" label="这是个目录（只用来放子菜单）">
+          <a-switch v-model:checked="form.isDir" />
+          <p class="muted" style="margin: 4px 0 0">
+            开 = 这一行自己点不开，只是子菜单的容器（侧栏里是个标题/可折叠的父项）。
+          </p>
+        </a-form-item>
+
+        <a-form-item v-if="form.source !== 'mounted' && !form.isDir" label="路径" required>
+          <!--
+            必须写 `:readonly`（全小写）：antd-vue 声明的是 `readonly` 这个 prop，写成
+            `:read-only` 会驼峰化成 `readOnly` 对不上，结果渲染出一个非标准的 dead 属性
+            `read-only="true"` —— 看着锁了、帮助文案也写着只读，但能打字。
+          -->
+          <a-auto-complete
+            v-if="form.source === 'org'"
+            v-model:value="form.path"
+            :readonly="pathLocked"
+            :options="orgPathOptions"
+            placeholder="/org/workbench/projects"
+            style="width: 100%"
+          />
+          <a-input v-else v-model:value="form.path" :readonly="pathLocked" placeholder="/lineage/tables" />
           <p v-if="pathLocked" class="muted" style="margin: 4px 0 0">
-            路径是<b>这个页面在子应用里的真实路由</b>，由产品自己报上来。
-            手改出来的路径点进去就是 404，所以从候选起步时这一项只读；
-            要挂一个产品没上报的页面，请用「直接手填」。
+            路径是<b>这个页面在子应用里的真实路由</b>，刚才从产品清单里取来的，所以只读。
+            要挂一个产品没上报的页面，请改成「org 自己的页面」或先手填。
+          </p>
+          <p v-else-if="form.source === 'org'" class="muted" style="margin: 4px 0 0">
+            本平台的完整路由，可以直接从下拉里选一个现成的页面（也可以手填带
+            <code>{code}</code> 占位符的地址 —— 项目壳里的「成员管理」就是这么配的）。
           </p>
           <p v-else class="muted" style="margin: 4px 0 0">
             该产品里的页面路径。填 <code>/</code> 表示进它的首页。
           </p>
         </a-form-item>
-        <a-form-item label="分组标题">
-          <a-auto-complete
-            v-model:value="form.groupTitle"
-            placeholder="数据地图"
-            :options="groupOptions(form.scope, form.product)"
-          />
-          <p class="muted" style="margin: 4px 0 0">
-            侧栏里同一分组标题的菜单会收在一起。留空 = 不分组。
-            <br />
-            下拉里是「分组管理」里提前建好的分组，<b>也可以直接手打</b> —— 各服务按项目分层动态生成的
-            分组（如仓建设的「建模中心」）不会出现在清单里，但照样能填。
-          </p>
-        </a-form-item>
+
         <a-form-item label="权限词">
           <PermSelect v-model:value="form.perm" :options="optionsOf(form.product)" placeholder="catalog:read" />
           <p class="muted" style="margin: 4px 0 0">
-            决定<b>谁看得见这个入口</b>：词表由该产品自己上报（构建时写进它的 <code>menu.json</code>），
-            所以这里选不到产品不认识的词。「不判权」= 进得来就看得见。
+            决定<b>谁看得见这个入口</b>：词表由该产品自己上报，所以这里选不到产品不认识的词。
+            「不判权」= 进得来就看得见。目录上也可以挂词 —— 整支一起判。
           </p>
           <p v-if="form.product && !optionsOf(form.product).length" class="muted" style="margin: 4px 0 0">
             没拿到「{{ productLabel(form.product) }}」的词表（服务没在运行 / 还没构建过前端 / 「服务注册」
             里没登记页面地址），暂时可以手填。格式是 <code>域:动作</code>，保存时后端会校验。
           </p>
+          <p v-else-if="form.source === 'org'" class="muted" style="margin: 4px 0 0">
+            org 自有菜单的词表没处上报，直接手填。常见的：<code>iam:member</code>（成员管理）。
+          </p>
         </a-form-item>
+
         <a-form-item label="图标">
           <a-select v-model:value="form.icon" allow-clear placeholder="不选则按产品给通用图标">
             <a-select-option v-for="name in iconChoices" :key="name" :value="name">
@@ -442,12 +458,36 @@
             在这里只是换个显示图标，不影响入口能不能点开 —— 真正决定可见性的是上面的权限词。
           </p>
         </a-form-item>
+
         <a-form-item label="排序">
           <a-input-number v-model:value="form.sortOrder" :min="0" style="width: 120px" />
-          <p class="muted" style="margin: 4px 0 0">数字小的排前面。</p>
+          <p class="muted" style="margin: 4px 0 0">数字小的排前面。同一层里比大小。</p>
         </a-form-item>
+
+        <a-form-item v-if="form.isDir" label="空目录策略">
+          <a-radio-group v-model:value="form.emptyPolicy">
+            <a-radio-button value="hide">整支隐藏</a-radio-button>
+            <a-radio-button value="always">保留并置灰</a-radio-button>
+          </a-radio-group>
+          <p class="muted" style="margin: 4px 0 0">
+            这一支在当前人那儿<b>一个可用入口都没有</b>时（模块没开通、没派角色、产品还没报出内容）怎么办。
+            <br />
+            按规范，<b>「数据地图」这一支要选「保留并置灰」</b>：它要求未开通或未派角色时入口仍在、禁用并说明。
+          </p>
+        </a-form-item>
+
+        <a-form-item v-if="form.source === 'org'" label="仅在租户管理员可见">
+          <a-switch v-model:checked="form.adminOnly" />
+          <p class="muted" style="margin: 4px 0 0">
+            开 = 只有租户管理员看得见（如「用户管理」「设置」这些）。只对 org 自己的节点有意义。
+          </p>
+        </a-form-item>
+
         <a-form-item label="启用">
           <a-switch v-model:checked="form.enabled" />
+          <p class="muted" style="margin: 4px 0 0">
+            停用 = 这一支连同子菜单都不出现在侧栏里（子菜单仍在表里，随时可以再启用）。
+          </p>
         </a-form-item>
       </a-form>
     </a-modal>
@@ -456,58 +496,121 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
-import { message } from 'ant-design-vue';
-import { api, type MenuCandidate, type NavGroupEmptyPolicy, type NavGroupRow, type NavItemRow, type NavScope, type PermOption } from '../../api/client';
+import { Modal, message } from 'ant-design-vue';
+import {
+  api,
+  type MenuCandidate,
+  type MenuCandidatesOfProduct,
+  type NavGroupEmptyPolicy,
+  type NavNodeRow,
+  type NavScope,
+  type PermOption,
+} from '../../api/client';
 import { ORG_PAGES } from '../../config/pages';
 import { productLabel } from '../../config/products';
 import { navIcons } from '../../config/navIcons';
 import PageHeader from '../../components/PageHeader.vue';
 import PermSelect from '../../components/PermSelect.vue';
 
-const rows = ref<NavItemRow[]>([]);
-/** 已登记（提前建好）的分组。与菜单项是软约束关系，见页面上的说明。 */
-const groups = ref<NavGroupRow[]>([]);
-/** 已登记了前端地址的产品码 —— 新增菜单时只能从这里选。 */
+/** 菜单表的**全树顶层**（服务端返回嵌套树，`children` 是真层级）。 */
+const rows = ref<NavNodeRow[]>([]);
+/** 已登记了前端地址的产品码 —— 只有它们能被挂载 / 从清单取。 */
 const configuredProducts = ref<string[]>([]);
-const open = ref(false);
-const busy = ref(false);
 const icons = navIcons;
 const iconNames = Object.keys(navIcons).sort();
 
-/**
- * 图标下拉的候选 = 本平台收录的图标 ∪ **当前值**。
- *
- * <p>补当前值是给「产品报了个本平台没收录的图标名」用的：不加的话下拉框会显示空白，
- * 管理员改别处一保存就顺手把图标清掉了。产品与 org 的图标库是两份清单，漂移是常态
- * （`ProjectOutlined` 就是这么漏掉的），所以这里必须兜底而不能假定两边一致。
- */
-const iconChoices = computed(() => {
-  const names = new Set(iconNames);
-  if (form.icon) names.add(form.icon);
-  return [...names].sort();
-});
-
+const hasProducts = computed(() => configuredProducts.value.length > 0);
 const scopeFilter = ref<'' | NavScope>('');
 const scopeChoices = [
   { value: 'workbench', label: '工作台壳' },
   { value: 'project', label: '项目壳' },
 ];
+const productChoices = computed(() =>
+  configuredProducts.value.map((p) => ({ value: p, label: productLabel(p) }))
+);
 
 function scopeLabel(scope: NavScope) {
   return scope === 'project' ? '项目壳' : '工作台壳';
 }
 
 /**
- * 分组名下拉候选（`a-auto-complete` 的 options）。
+ * 合成的**壳根**：不是菜单表里的行，只是让树在「全部」视图下有个顶层分组。
  *
- * <p>按当前「壳 + 产品」过滤 —— 分组就是按这两维归属的，换了壳或产品，
- * 候选清单跟着换。用 `a-auto-complete` 而不是 `a-select` 是刻意的：分组名是<b>软约束</b>，
- * 未登记的名字（各服务动态生成的那些）必须还能手打进去。
+ * <p>字段填成与服务端行同形（而不是少几个字段）是为了让模板里各处 `record.xxx` 不必
+ * 到处判空 —— 壳根唯一可靠的判据就是 id 前缀（见 `isShell`）。
  */
-function groupOptions(scope: NavScope, product: string) {
-  return groups.value
-    .filter((g) => g.scope === scope && g.product === product && g.title)
-    .map((g) => ({ value: g.title }));
+function shellRow(scope: NavScope, children: NavNodeRow[]): NavNodeRow {
+  return {
+    id: `~${scope}`,
+    scope,
+    parentId: '',
+    label: scopeLabel(scope),
+    path: '',
+    icon: '',
+    perm: '',
+    sortOrder: 0,
+    enabled: true,
+    adminOnly: false,
+    product: '',
+    ref: '',
+    mounted: false,
+    emptyPolicy: 'hide',
+    children,
+  };
+}
+
+function isShell(row: NavNodeRow) {
+  return row.id.startsWith('~');
+}
+
+const tableRows = computed<NavNodeRow[]>(() => {
+  const out: NavNodeRow[] = [];
+  for (const scope of ['workbench', 'project'] as NavScope[]) {
+    if (scopeFilter.value && scopeFilter.value !== scope) continue;
+    out.push(shellRow(scope, rows.value.filter((r) => r.scope === scope)));
+  }
+  return out;
+});
+
+/** 展开态：加载后整棵树展开一次（默认收起会让人以为菜单没了好几层）。 */
+const expandedKeys = ref<(string | number)[]>([]);
+
+function collectKeys(list: NavNodeRow[]): string[] {
+  const out: string[] = [];
+  const walk = (nodes: NavNodeRow[]) => {
+    for (const n of nodes) {
+      if (n.children?.length) {
+        out.push(n.id);
+        walk(n.children);
+      }
+    }
+  };
+  walk(list);
+  return out;
+}
+
+const cols = [
+  { title: '菜单', key: 'name' },
+  { title: '路径 / 内容来源', key: 'path' },
+  { title: '权限词', key: 'perm', width: 150 },
+  { title: '图标', key: 'icon', width: 70 },
+  { title: '排序', key: 'sortOrder', width: 66 },
+  { title: '空目录', key: 'emptyPolicy', width: 100 },
+  { title: '', key: 'act', width: 230 },
+];
+
+function rowClass(row: NavNodeRow) {
+  if (isShell(row)) return 'nav-branch-row';
+  return '';
+}
+
+/** 目录 = 自己点不开、只放子菜单。挂载行的这个性质由产品清单里的那个节点决定。 */
+function isDir(row: NavNodeRow) {
+  if (row.mounted) {
+    const node = candNode(row.product, row.ref);
+    return node ? !node.path : false;
+  }
+  return !row.path;
 }
 
 // ---- 权限词词表 ----
@@ -542,706 +645,226 @@ function optionsOf(product: string): PermOption[] {
   return permOptions[product] ?? [];
 }
 
-// ---- 分组管理 ----
-const groupsOpen = ref(false);
-const importing = ref(false);
-const groupOpen = ref(false);
-const groupBusy = ref(false);
-const groupScopeFilter = ref<'' | NavScope>('');
-const groupProductFilter = ref('');
-const groupForm = reactive({
-  id: '',
-  scope: 'workbench' as NavScope,
-  product: '',
-  title: '',
-  sortOrder: 0,
-  emptyPolicy: 'hide' as NavGroupEmptyPolicy,
+// ---- 候选清单（挂载失配判断、可挂载项、批量导入共用一份） ----
+const candidates = ref<MenuCandidatesOfProduct[]>([]);
+const candLoading = ref(false);
+
+const failedReports = computed(() => candidates.value.filter((c) => !c.ok));
+
+async function refreshCandidates() {
+  candLoading.value = true;
+  try {
+    candidates.value = (await api.platform.navCandidates()).products;
+  } catch {
+    // 拉不到就当「没有清单」：失配判断会退化成「无从判断」（不标红），
+    // 页面上的 failedReports 也不会说假话 —— 它读的是同一份 candidates。
+  } finally {
+    candLoading.value = false;
+  }
+}
+
+/** 候选节点索引：`产品 → (节点 id → 节点)`。挂载行的失配判断与目录判断都查它。 */
+const candIndex = computed(() => {
+  const byProduct = new Map<string, Map<string, MenuCandidate>>();
+  for (const p of candidates.value) {
+    if (!p.ok) continue;
+    const index = new Map<string, MenuCandidate>();
+    const walk = (list: MenuCandidate[]) => {
+      for (const m of list) {
+        index.set(m.id, m);
+        walk(m.children ?? []);
+      }
+    };
+    walk(p.menus);
+    byProduct.set(p.product, index);
+  }
+  return byProduct;
 });
 
-const groupCols = [
-  { title: '归属壳', key: 'scope', width: 96 },
-  { title: '产品', key: 'product', width: 130 },
-  { title: '分组名', dataIndex: 'title' },
-  { title: '组间顺序', dataIndex: 'sortOrder', width: 88 },
-  { title: '空组策略', key: 'emptyPolicy', width: 120 },
-  { title: '', key: 'act', width: 140 },
-];
-
-const filteredGroups = computed(() =>
-  groups.value.filter(
-    (g) => (!groupScopeFilter.value || g.scope === groupScopeFilter.value)
-      && (!groupProductFilter.value || g.product === groupProductFilter.value),
-  ),
-);
-
-function openGroups() {
-  groupsOpen.value = true;
-}
-
-function openGroupCreate() {
-  Object.assign(groupForm, {
-    id: '',
-    scope: groupScopeFilter.value || 'workbench',
-    product: groupProductFilter.value || configuredProducts.value[0] || '',
-    title: '',
-    sortOrder: 0,
-    // 默认与现状一致（空分组不渲染）。要「始终出现」必须显式选，见弹窗里的说明。
-    emptyPolicy: 'hide',
-  });
-  groupOpen.value = true;
-}
-
-function openGroupEdit(row: NavGroupRow) {
-  Object.assign(groupForm, {
-    id: row.id,
-    scope: row.scope,
-    product: row.product,
-    title: row.title,
-    sortOrder: row.sortOrder,
-    emptyPolicy: row.emptyPolicy,
-  });
-  groupOpen.value = true;
-}
-
-async function submitGroup() {
-  if (!groupForm.product.trim() || !groupForm.title.trim()) {
-    message.warning('请填写产品和分组名');
-    return;
-  }
-  groupBusy.value = true;
-  const body = {
-    scope: groupForm.scope,
-    product: groupForm.product.trim(),
-    title: groupForm.title.trim(),
-    sortOrder: groupForm.sortOrder ?? 0,
-    emptyPolicy: groupForm.emptyPolicy,
-  };
-  try {
-    if (groupForm.id) {
-      const res = await api.platform.updateNavGroup(groupForm.id, body);
-      // 改名会级联改菜单项里的分组名，把条数说出来 —— 不然管理员不知道侧栏会不会跟着变
-      message.success(res.renamedItems ? `已保存，${res.renamedItems} 条菜单的分组名跟着改了` : '已保存');
-    } else {
-      await api.platform.createNavGroup(body);
-      message.success('已保存');
-    }
-    groupOpen.value = false;
-    await load();
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e));
-  } finally {
-    groupBusy.value = false;
-  }
-}
-
-async function removeGroup(row: NavGroupRow) {
-  try {
-    const res = await api.platform.deleteNavGroup(row.id);
-    await load();
-    // 删除不阻塞、也不清空菜单项的分组名（那等于静默改菜单），所以要把「还有几条在用」说出来
-    if (res.referenced) {
-      message.warning(`已删除分组登记，仍有 ${res.referenced} 条菜单写着「${row.title}」，它们照常显示`);
-    } else {
-      message.success('已删除');
-    }
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e));
-  }
+function candNode(product: string, id: string): MenuCandidate | undefined {
+  return candIndex.value.get(product)?.get(id);
 }
 
 /**
- * 从各服务的候选里把出现过的分组名一次性建成登记项。
+ * 挂载行失配了吗（产品清单里找不到这个 `ref`）。
  *
- * <p>逐条 POST 而不是走后端批量端点：这一步是<b>一次性配置动作</b>（一个租户的
- * 分组撑死十来条），而且下面已经按「已登记集合」预过滤过，不会出现撞唯一约束的 400 风暴。
- * 菜单项的批量端点是因为「一次勾十几条」是常态才必须做的，这里不是。
+ * <p>只在该产品的清单**拉到了**的时候才下结论 —— 拉不到是「无从判断」，标成失配是撒谎。
  */
-async function importGroups() {
-  importing.value = true;
-  try {
-    const res = await api.platform.navCandidates();
-    const existing = new Set(groups.value.map((g) => `${g.scope}/${g.product}/${g.title}`));
-    const seen = new Set<string>();
-    let created = 0;
-    let skipped = 0;
-    let failed = 0;
-    let order = 10;
-    for (const p of res.products) {
-      if (!p.ok) continue;
-      for (const m of p.menus) {
-        // 候选里的 group 是自由文本，空串表示「这个服务说自己不分组」——
-        // 它不是合法的分组名（后端会 400），要显式跳过
-        const title = (m.group || '').trim();
-        if (!title) continue;
-        const key = `${m.scope}/${p.product}/${title}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        if (existing.has(key)) {
-          skipped++;
-          continue;
-        }
-        try {
-          await api.platform.createNavGroup({ scope: m.scope, product: p.product, title, sortOrder: order, emptyPolicy: 'hide' });
-          // 按遇到顺序给 10/20/30…，导入后拖动数字就能调组间顺序
-          order += 10;
-          created++;
-        } catch {
-          failed++;
-        }
-      }
-    }
-    await load();
-    const parts = [`新增 ${created} 个分组`];
-    if (skipped) parts.push(`已登记 ${skipped} 个`);
-    if (failed) parts.push(`失败 ${failed} 个`);
-    message.success(parts.join('，'));
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e));
-  } finally {
-    importing.value = false;
-  }
+function isMismatch(row: NavNodeRow) {
+  if (!row.mounted) return false;
+  const index = candIndex.value.get(row.product);
+  return !!index && !index.has(row.ref);
 }
 
-// ---- 拉取候选 ----
-const fetchOpen = ref(false);
-const fetching = ref(false);
-const submitting = ref(false);
-const candidates = ref<{ product: string; url?: string; ok: boolean; error: string; menus: MenuCandidate[] }[]>([]);
-/** 每个候选的可编辑副本（归属壳、分组、菜单名、权限词、排序都能改；路径只读）。 */
-const draft = reactive<Record<string, { scope: NavScope; group: string; label: string; perm: string; sortOrder: number }>>({});
-const picked = ref(new Set<string>());
-
-/** 右侧清单的列。归属壳往下都能改；路径只读（它必须与子应用的路由一致）。 */
-const pickedCols = [
-  { title: '归属壳', key: 'scope', width: 116 },
-  { title: '分组', key: 'group', width: 132 },
-  { title: '菜单名', key: 'label', width: 150 },
-  { title: '子应用路径', dataIndex: 'path' },
-  { title: '权限词', key: 'perm', width: 128 },
-  { title: '排序', key: 'sort', width: 84 },
-  { title: '', key: 'act', width: 68 },
-];
-
-const fetchableCount = computed(() => candidates.value.filter((c) => c.ok && c.menus.length).length);
-
-/** 候选的扁平表，带上它属于哪个产品。树、右侧清单、批量提交都从它派生。 */
-const allCandidates = computed(() => candidates.value.flatMap((g) => g.menus.map((m) => ({ product: g.product, m }))));
-
-/** 拉取失败的产品：进不了树，在树上方单独说明原因（带着实际请求的地址）。 */
-const failedCandidates = computed(() => candidates.value.filter((c) => !c.ok));
-
-type CandNode = {
-  key: string;
-  title: string;
-  selectable?: boolean;
-  disabled?: boolean;
-  isLeaf?: boolean;
-  children?: CandNode[];
-};
-
-function leafKey(m: MenuCandidate) {
-  return `m:${m.id}`;
+function mountedTip(row: NavNodeRow) {
+  return `挂载：内容按「${productLabel(row.product)}」自报的清单实时取（节点 ${row.ref}）。
+产品改了名字、路径、子菜单，这里会跟着变 —— 不需要任何管理动作。
+取消挂载等于删掉这一行（它的手工子菜单会一起没）。`;
 }
 
+function mismatchTip(row: NavNodeRow) {
+  return `当前能拉到「${productLabel(row.product)}」的清单，但里面没有 id 为 ${row.ref} 的节点 ——
+侧栏里这一支会是空的（按空目录策略隐藏或置灰）。多半是产品侧改了节点 id 的生成规则；
+在产品侧改回来，或把这一行删掉重挂。`;
+}
+
+// ---- 表单 ----
+const open = ref(false);
+const busy = ref(false);
 /**
- * 左侧菜单树 = 产品 → 壳 · 分组 → 菜单项。
+ * 路径是否只读：从产品清单里挑了一条之后只读。
  *
- * <p>分组这一层刻意**不读草稿值**：右侧能把归属壳与分组名改掉，树若跟着重排，
- * 改一个字整棵树就跳一下、勾选位置找不着。树只表达「服务报上来的样子」。
- *
- * <p>已经配过的菜单在树上禁用 —— 同一个壳下同产品同路径只该有一条。
+ * <p>那条路径是**页面在子应用里的真实路由**，手改出来的点进去就是 404；而管理员可能
+ * 只是想改个名字 —— 所以锁的是路径这一项，不是整个表单。编辑已有行时**不锁**：
+ * 产品换了路由后管理员要能回来同步。
  */
-const candTree = computed<CandNode[]>(() =>
-  candidates.value
-    .filter((g) => g.menus.length)
-    .map((g) => {
-      const buckets = new Map<string, { scope: NavScope; group: string; menus: MenuCandidate[] }>();
-      for (const m of g.menus) {
-        const k = `${m.scope}\u0000${m.group}`;
-        const b = buckets.get(k) ?? { scope: m.scope, group: m.group, menus: [] };
-        b.menus.push(m);
-        buckets.set(k, b);
-      }
-      return {
-        key: `p:${g.product}`,
-        title: `${productLabel(g.product)}（${g.menus.length} 项）`,
-        selectable: false,
-        children: [...buckets.values()].map((b) => ({
-          key: `g:${g.product}\u0000${b.scope}\u0000${b.group}`,
-          title: `${scopeLabel(b.scope)} · ${b.group || '未分组'}`,
-          selectable: false,
-          children: b.menus.map((m) => ({
-            key: leafKey(m),
-            title: isConfigured(g.product, m) ? `${m.label}（已配置）` : m.label,
-            isLeaf: true,
-            disabled: isConfigured(g.product, m),
-          })),
-        })),
-      };
-    })
-);
-
-/**
- * 树上的勾选态由**已选集合**推出来，不另存一份。
- *
- * <p>只给叶子 key：rc-tree 在非严格模式下会自己把父节点的全选/半选算出来，
- * 所以「建模中心」这种分组的对勾不必我们维护 —— 组里勾了一半，它自己就是半选。
- */
-const checkedKeys = computed(() => [...picked.value].map((id) => `m:${id}`));
-
-/**
- * 树上勾/取消 → 重算已选集合。
- *
- * <p>不读「这一次改了哪个节点」，而是拿勾选后的**全量 key** 重算：勾分组会连带一整片、
- * 勾叶子只影响自己，两种情形用同一条规则就都对，不必再区分节点是不是叶子。
- *
- * <p>参数类型按 `unknown` 收 —— antd 的 `check` 事件在严格/非严格模式下签名不同，
- * 写死一种会让另一个模式编译不过（与 `product-roles.vue` 同一处理）。
- */
-function onTreeCheck(raw: unknown) {
-  const checked = new Set((Array.isArray(raw) ? raw : []).map(String));
-  const next = new Set<string>();
-  for (const { product, m } of allCandidates.value) {
-    // 已配置的在树上禁用；万一 rc-tree 把它一并报进来，这里再挡一道 ——
-    // 放进右侧会让保存时整条被后端跳过，看起来像「保存没生效」
-    if (checked.has(leafKey(m)) && !isConfigured(product, m)) next.add(m.id);
-  }
-  picked.value = next;
-}
-
-/** 右侧清单 = 已选项，按候选顺序（也就是树上的顺序），并带上产品码供下拉用。 */
-const pickedRows = computed(() =>
-  allCandidates.value.filter(({ m }) => picked.value.has(m.id)).map(({ product, m }) => ({ ...m, product }))
-);
-
-/**
- * 该候选是否已经配过（同一个壳下同产品同路径）。已配置的默认不勾。
- *
- * <p>归属壳取**当前草稿值**而不是候选自报值：管理员把「工作台」改成「项目」之后，
- * 这一行的「已配置」判定要跟着改 —— 否则一条已经挂在项目壳的菜单会被标成可勾，
- * 勾了之后后端按「已配置」跳过，看起来像保存没生效。
- */
-function isConfigured(product: string, record: MenuCandidate) {
-  const scope = draft[record.id]?.scope ?? record.scope;
-  return rows.value.some((r) => r.scope === scope && r.product === product && r.path === record.path);
-}
-
-/** 右侧清单里移除一项（右侧是「取消勾选」的另一个入口，删完树上的勾也跟着灭）。 */
-function unpick(record: MenuCandidate) {
-  const next = new Set(picked.value);
-  next.delete(record.id);
-  picked.value = next;
-}
-
-async function openFetch() {
-  fetchOpen.value = true;
-  fetching.value = true;
-  picked.value = new Set();
-  try {
-    const res = await api.platform.navCandidates();
-    candidates.value = res.products;
-    for (const group of res.products) {
-      // 抽屉里每一行的权限词都是下拉，词表按产品拉一次（并发、失败静默回落手填）
-      if (group.ok) void ensurePermOptions(group.product);
-      for (const m of group.menus) {
-        draft[m.id] = { scope: m.scope, group: m.group, label: m.label, perm: m.perm, sortOrder: m.sort };
-      }
-    }
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e));
-  } finally {
-    fetching.value = false;
-  }
-}
-
-async function submitBatch() {
-  const items = allCandidates.value
-    .filter(({ m }) => picked.value.has(m.id))
-    .map(({ product, m }) => ({
-      product,
-      scope: draft[m.id].scope,
-      groupTitle: draft[m.id].group,
-      label: draft[m.id].label,
-      // 路径只读：它必须与子应用里的路由一致，手改出来的路径点进去就是 404
-      path: m.path,
-      icon: m.icon,
-      perm: draft[m.id].perm,
-      sortOrder: draft[m.id].sortOrder,
-    }));
-  if (!items.length) return;
-
-  submitting.value = true;
-  try {
-    const res = await api.platform.createNavItemsBatch(items);
-    const parts = [`新增 ${res.created.length} 条`];
-    if (res.skipped.length) parts.push(`跳过 ${res.skipped.length} 条（已配置）`);
-    if (res.failed.length) parts.push(`失败 ${res.failed.length} 条`);
-    if (res.failed.length) {
-      // 失败要能对上号，否则管理员只知道「有几条没进去」
-      message.warning(`${parts.join('，')}：第 ${res.failed.map((f) => f.index).join('、')} 项 —— ${res.failed[0].reason}`);
-    } else {
-      message.success(parts.join('，'));
-    }
-    await load();
-    await openFetch();
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e));
-  } finally {
-    submitting.value = false;
-  }
-}
-
-// ---- 手填表单（候选拉不到时的兜底通道） ----
+const pathLocked = ref(false);
 const form = reactive({
   id: '',
-  product: '',
   scope: 'workbench' as NavScope,
-  groupTitle: '',
-  label: '',
-  path: '/',
+  parentId: '',
+  source: 'org' as 'org' | 'manual' | 'mounted',
+  product: '',
+  ref: '',
+  title: '',
+  isDir: false,
+  path: '',
   perm: '',
   icon: '',
   sortOrder: 0,
   enabled: true,
+  adminOnly: false,
+  emptyPolicy: 'hide' as NavGroupEmptyPolicy,
 });
 
-// 表单里换了产品就换一份词表。不监听的话，新建时把产品从 A 改成 B，
-// 下拉里还是 A 的词 —— 选出来的词 B 不认，保存时后端拒，而管理员看不出为什么。
-watch(() => form.product, (p) => { if (p) void ensurePermOptions(p); });
-
-/**
- * 可选产品 = 已登记前端地址的产品 ∪ 当前这条菜单的产品。
- *
- * <p>并上后者是因为编辑一条老菜单时，它的产品可能已经被「服务注册」移除了：
- * 不带上的话下拉框会显示空白，一保存就把产品改成别的。
- */
-const productChoices = computed(() => {
-  const codes = new Set(configuredProducts.value);
-  if (form.product) codes.add(form.product);
-  return [...codes].map((value) => ({ value, label: productLabel(value) }));
+/** 图标下拉的候选 = 本平台收录的图标 ∪ **当前值**（产品可能报了个没收录的图标名）。 */
+const iconChoices = computed(() => {
+  const names = new Set(iconNames);
+  if (form.icon) names.add(form.icon);
+  return [...names].sort();
 });
 
-/** 「从产品取」那一步的产品下拉：**只**列已登记页面地址的产品（这里没有「并上当前值」的理由，与表单不同）。 */
-const pickProductChoices = computed(() =>
-  configuredProducts.value.map((value) => ({ value, label: productLabel(value) })),
-);
-
-const canCreate = computed(() => configuredProducts.value.length > 0);
+/** org 自有页面的路径建议：本平台现成的那些页面（可以手填，所以是 auto-complete）。 */
+const orgPathOptions = Object.values(ORG_PAGES).map((p) => ({ value: p }));
 
 /**
- * 树节点：壳 → 产品 → 分组 → 菜单项。只有叶子是可编辑的菜单项。
- *
- * <p>分支节点把 NavItemRow 的字段填成空值而不是留空缺失，这样模板里各处 `record.xxx`
- * 与平铺表格时完全一样，不必因为「这一列只在叶子上有意义」而到处加判断；
- * 只在真会误导的地方（图标 / 排序 / 状态 / 操作）显式判断 nodeType。
- *
- * <p>叶子的 id 就是原始行的 id —— 编辑、删除用的都是它；分支用 `~` 前缀的合成 id，
- * 与真实 id（`nav-...`）不会撞。
+ * 「父节点」选择器的树：当前壳的节点（编辑时排除自己 —— 选自己会成环）。
+ * 排除一个节点，它的子树自然也跟着不出现。
  */
-type NavTreeNode = NavItemRow & {
-  name: string;
-  nodeType: 'item' | 'branch';
-  depth: number;
-  /** 叶子对应的原始行。 */
-  item?: NavItemRow;
-  /** 分组分支：已登记但这一壳这一产品下一条菜单都没有。 */
-  emptyGroup?: boolean;
-  /** 分组分支：这个分组名只存在于菜单项里，没在「分组管理」里登记过。 */
-  unregisteredGroup?: boolean;
-  children?: NavTreeNode[];
-};
+const parentTree = computed(() => {
+  const editId = form.id;
+  const walk = (list: NavNodeRow[]): Record<string, unknown>[] =>
+    list
+      .filter((n) => n.id !== editId)
+      .map((n) => {
+        const kids = walk(n.children ?? []);
+        return {
+          value: n.id,
+          title: n.label + (isDir(n) ? '（目录）' : ''),
+          ...(kids.length ? { children: kids } : {}),
+        };
+      });
+  return walk(rows.value.filter((r) => r.scope === form.scope));
+});
 
-const SCOPE_ORDER: NavScope[] = ['workbench', 'project'];
-
-function leaf(row: NavItemRow, depth: number): NavTreeNode {
-  return { ...row, name: row.label, nodeType: 'item', depth, item: row };
-}
-
-/** 分支的排序取子树里最小的那个 —— 与侧栏一致（侧栏也是按 sortOrder 排的）。 */
-function branch(id: string, name: string, depth: number, scope: NavScope, children: NavTreeNode[]): NavTreeNode {
-  return {
-    id,
-    product: '',
+function openCreate(parent: NavNodeRow | null) {
+  const scope = parent && !isShell(parent) ? parent.scope : scopeFilter.value || 'workbench';
+  Object.assign(form, {
+    id: '',
     scope,
-    groupTitle: '',
-    label: name,
-    icon: '',
+    parentId: parent && !isShell(parent) ? parent.id : '',
+    source: 'org',
+    product: '',
+    ref: '',
+    title: '',
+    isDir: false,
     path: '',
-    perm: '',
-    sortOrder: children.length ? Math.min(...children.map((c) => c.sortOrder)) : 0,
-    enabled: true,
-    name,
-    nodeType: 'branch',
-    depth,
-    children,
-  };
-}
-
-function bySortThenName(a: NavTreeNode, b: NavTreeNode) {
-  return a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'zh');
-}
-
-/** 这个分组名有没有在「分组管理」里登记过。软约束，所以查不到是正常情况。 */
-function registeredGroup(scope: NavScope, product: string, title: string) {
-  return groups.value.find((g) => g.scope === scope && g.product === product && g.title === title);
-}
-
-/**
- * 树：壳 → 产品 → 分组 → 菜单项。
- *
- * <p>分组层是<b>并集</b>：菜单项里出现的分组名 ∪ 已登记的分组。少了后者，
- * 「提前建好的空分组」在树里就看不见 —— 管理员建完找不到它，会以为没保存成功。
- *
- * <p>产品层同理要并上「只登记了分组、还没有任何菜单项」的产品，否则为一个新产品
- * 预建分组时整个产品节点都不会出现。
- */
-const treeRows = computed<NavTreeNode[]>(() => {
-  const scopeFilterValue = scopeFilter.value;
-  const list = scopeFilterValue ? rows.value.filter((r) => r.scope === scopeFilterValue) : rows.value;
-  const regs = scopeFilterValue ? groups.value.filter((g) => g.scope === scopeFilterValue) : groups.value;
-  const scopes = SCOPE_ORDER.filter(
-    (s) => list.some((r) => r.scope === s) || regs.some((g) => g.scope === s),
-  );
-
-  return scopes.map((scope) => {
-    const inScope = list.filter((r) => r.scope === scope);
-    const regsInScope = regs.filter((g) => g.scope === scope);
-    const products = [...new Set([...inScope.map((r) => r.product), ...regsInScope.map((g) => g.product)])];
-
-    const productNodes = products
-      .map((product) => {
-        const byGroup = new Map<string, NavItemRow[]>();
-        for (const r of inScope.filter((x) => x.product === product)) {
-          const g = r.groupTitle || '';
-          byGroup.set(g, [...(byGroup.get(g) ?? []), r]);
-        }
-        // 已登记但还没有菜单项的分组也要有分支（值为空数组）
-        for (const g of regsInScope.filter((x) => x.product === product)) {
-          if (!byGroup.has(g.title)) byGroup.set(g.title, []);
-        }
-
-        const groupNodes = [...byGroup.entries()]
-          .map(([group, groupRows]) => {
-            const reg = registeredGroup(scope, product, group);
-            const node = branch(
-              `~${scope}/${product}/${group}`,
-              group || '未分组',
-              2,
-              scope,
-              [...groupRows].sort((a, b) => a.sortOrder - b.sortOrder).map((r) => leaf(r, 3)),
-            );
-            if (!groupRows.length) node.emptyGroup = true;
-            else if (!reg) node.unregisteredGroup = true;
-            return node;
-          })
-          // 排序与侧栏一致：登记过的按它的组间顺序在前，没登记的（各服务动态生成的）垫后。
-          // 用登记的 sortOrder 而不是子树最小值，否则「提前建好的空分组」会被算成 0 冒到最前。
-          .sort((a, b) => {
-            const ra = registeredGroup(scope, product, a.name === '未分组' ? '' : a.name);
-            const rb = registeredGroup(scope, product, b.name === '未分组' ? '' : b.name);
-            if (Boolean(ra) !== Boolean(rb)) return ra ? -1 : 1;
-            const oa = ra ? ra.sortOrder : a.sortOrder;
-            const ob = rb ? rb.sortOrder : b.sortOrder;
-            return oa - ob || a.name.localeCompare(b.name, 'zh');
-          });
-
-        return branch(`~${scope}/${product}`, productLabel(product), 1, scope, groupNodes);
-      })
-      .sort(bySortThenName);
-    return branch(`~${scope}`, scopeLabel(scope), 0, scope, productNodes);
-  });
-});
-
-const expandedKeys = ref<string[]>([]);
-
-function collectBranchKeys(nodes: NavTreeNode[]): string[] {
-  return nodes.flatMap((n) => (n.nodeType === 'branch' ? [n.id, ...collectBranchKeys(n.children ?? [])] : []));
-}
-
-// 数据一变就整树展开。用受控的 expandedRowKeys 而不是 defaultExpandAllRows ——
-// 后者只在首次渲染生效，切「归属壳」筛选后新树是收起的。
-watch(treeRows, (list) => { expandedKeys.value = collectBranchKeys(list); }, { immediate: true });
-
-function onExpand(expanded: boolean, record: NavTreeNode) {
-  const next = new Set(expandedKeys.value);
-  if (expanded) next.add(record.id);
-  else next.delete(record.id);
-  expandedKeys.value = [...next];
-}
-
-function rowClass(record: NavTreeNode) {
-  return record.nodeType === 'branch' ? 'nav-branch-row' : '';
-}
-
-const cols = [
-  { title: '菜单 / 目录', key: 'name' },
-  { title: '子应用路径', dataIndex: 'path' },
-  { title: '权限词', dataIndex: 'perm', width: 120 },
-  { title: '图标', key: 'icon', width: 70 },
-  { title: '排序', key: 'sortOrder', width: 66 },
-  { title: '状态', key: 'enabled', width: 76 },
-  { title: '', key: 'act', width: 150 },
-];
-
-async function load() {
-  try {
-    const [items, services, groupRows] = await Promise.all([
-      api.platform.navItems(),
-      api.platform.services(),
-      api.platform.navGroups(),
-    ]);
-    rows.value = items;
-    configuredProducts.value = services.filter((s) => s.frontendUrl).map((s) => s.product);
-    groups.value = groupRows;
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : String(e));
-  }
-}
-
-/**
- * 「新增菜单」第一步：先选产品、再选它报出来的一个页面。
- *
- * <p>为什么不让管理员直接手填：菜单名、图标、分组、权限词、路径这五样里，
- * **后四样产品自己知道**（它的 `navData.ts` 里就写着），手打一份等于让人抄一遍，
- * 抄错的后果是路径 404 或权限词判否 —— 两种都不报错，只在用户点进去时才发现。
- *
- * <p>手填通道<b>保留</b>（弹窗底部的「直接手填」）：产品前端还没构建过时拉不到候选，
- * 那是唯一的出路；编辑已有菜单走的也还是它。
- */
-const pickOpen = ref(false);
-const pickProduct = ref('');
-const pickLoading = ref(false);
-const pickMenus = ref<MenuCandidate[]>([]);
-const pickError = ref('');
-
-/** 子应用路径是否只读 —— 从候选预填时只读，见模板里的说明。 */
-const pathLocked = ref(false);
-
-const pickCols = [
-  { title: '归属壳', key: 'scope', width: 96 },
-  { title: '分组', dataIndex: 'group', width: 130 },
-  { title: '菜单名', dataIndex: 'label', width: 160 },
-  { title: '子应用路径', dataIndex: 'path' },
-  { title: '权限词', dataIndex: 'perm', width: 140 },
-  { title: '', key: 'configured', width: 76 },
-  { title: '', key: 'act', width: 76 },
-];
-
-function openCreate() {
-  pickProduct.value = configuredProducts.value[0] ?? '';
-  pickMenus.value = [];
-  pickError.value = '';
-  pickOpen.value = true;
-  if (pickProduct.value) void loadPickMenus();
-}
-
-async function loadPickMenus() {
-  if (!pickProduct.value) return;
-  pickLoading.value = true;
-  pickError.value = '';
-  pickMenus.value = [];
-  void ensurePermOptions(pickProduct.value);
-  try {
-    const res = await api.platform.navCandidates();
-    const found = res.products.find((p) => p.product === pickProduct.value);
-    if (!found) {
-      // 「服务注册」里没有这个产品：说清去哪儿补，而不是只显示一个空列表
-      pickError.value = `「服务注册」里没有登记 ${productLabel(pickProduct.value)} 的页面地址，没法从它取候选`;
-    } else if (!found.ok) {
-      pickError.value = found.error;
-    } else {
-      pickMenus.value = found.menus;
-    }
-  } catch (e) {
-    pickError.value = e instanceof Error ? e.message : String(e);
-  } finally {
-    pickLoading.value = false;
-  }
-}
-
-/** 这条候选在当前产品 + 它自报的壳下是不是已经配过了（同壳同产品同路径）。 */
-function alreadyConfigured(m: MenuCandidate) {
-  return rows.value.some((r) => r.scope === m.scope && r.product === pickProduct.value && r.path === m.path);
-}
-
-/** 用候选预填表单 —— 默认值全部取自产品，管理员可以改（`path` 除外，见模板）。 */
-function chooseCandidate(m: MenuCandidate) {
-  Object.assign(form, {
-    id: '',
-    product: pickProduct.value,
-    scope: m.scope,
-    groupTitle: m.group ?? '',
-    label: m.label,
-    path: m.path,
-    perm: m.perm ?? '',
-    icon: m.icon ?? '',
-    sortOrder: m.sort ?? 0,
-    enabled: true,
-  });
-  pathLocked.value = true;
-  pickOpen.value = false;
-  open.value = true;
-}
-
-/** 兜底：不经过候选直接手填（产品前端还没构建过时用）。 */
-function openBlankForm() {
-  Object.assign(form, {
-    id: '',
-    product: pickProduct.value || configuredProducts.value[0] || '',
-    scope: 'workbench',
-    groupTitle: '',
-    label: '',
-    path: '/',
     perm: '',
     icon: '',
     sortOrder: 0,
     enabled: true,
+    adminOnly: false,
+    emptyPolicy: 'hide',
   });
   pathLocked.value = false;
-  pickOpen.value = false;
   open.value = true;
 }
 
-function openEdit(row: NavItemRow) {
+function openEdit(row: NavNodeRow) {
   Object.assign(form, {
     id: row.id,
-    product: row.product,
     scope: row.scope,
-    groupTitle: row.groupTitle,
-    label: row.label,
+    parentId: row.parentId ?? '',
+    source: row.mounted ? 'mounted' : row.product ? 'manual' : 'org',
+    product: row.product,
+    ref: row.ref,
+    title: row.label,
+    isDir: isDir(row),
     path: row.path,
     perm: row.perm,
     icon: row.icon,
     sortOrder: row.sortOrder,
     enabled: row.enabled,
+    adminOnly: row.adminOnly,
+    emptyPolicy: row.emptyPolicy ?? 'hide',
   });
-  // 编辑已有菜单时路径可改（管理员可能在产品换了路由后回来同步），
-  // 只有「从候选起步」那条路锁定它 —— 那种情况下候选给的路径就是对的，改了必错。
   pathLocked.value = false;
   void ensurePermOptions(row.product);
   open.value = true;
 }
 
+// 切换来源时解锁路径：只读是「这一条刚从清单里取来」的临时状态，换了来源就作废。
+// 不解锁的话，从「手工复制」切回「org 自己的页面」后路径框还是打不进字。
+//
+// `flush: 'sync'`：`onPickSelect` 里是「先设 source，紧接着把 pathLocked 置真」，
+// 默认的 pre-flush 让这个回调在下一个 tick 才跑，会把刚置上的只读又抹掉
+// （表现是「从清单里挑了一条，路径居然还能改」）。
+watch(
+  () => form.source,
+  () => {
+    pathLocked.value = false;
+  },
+  { flush: 'sync' }
+);
+
+/** 手工行的路径不允许留空（目录才会空），保存时补一个 `/` 兜底。 */
 async function submit() {
-  if (!form.product.trim() || !form.label.trim()) {
-    message.warning('请填写产品和菜单名');
+  if (!form.title.trim()) {
+    message.warning('请填写菜单名');
+    return;
+  }
+  if (form.source !== 'org' && !form.product) {
+    message.warning('请选择产品');
+    return;
+  }
+  if (form.source === 'mounted' && !form.ref) {
+    message.warning('请选择要挂载的产品节点');
+    return;
+  }
+  if (form.source !== 'mounted' && !form.isDir && !form.path.trim()) {
+    message.warning('请填写路径，或把这一条设成目录');
     return;
   }
   busy.value = true;
   const body = {
-    product: form.product.trim(),
     scope: form.scope,
-    groupTitle: form.groupTitle.trim(),
-    label: form.label.trim(),
-    path: form.path.trim() || '/',
+    parentId: form.parentId || '',
+    title: form.title.trim(),
+    // 目录 = 空路径（服务端就是这么判的）；挂载行的路径由产品清单决定，不传。
+    path: form.source === 'mounted' || form.isDir ? '' : form.path.trim() || '/',
     perm: form.perm.trim(),
     icon: form.icon || '',
     sortOrder: form.sortOrder ?? 0,
     enabled: form.enabled,
+    adminOnly: form.source === 'org' ? form.adminOnly : false,
+    product: form.source === 'org' ? '' : form.product,
+    ref: form.source === 'mounted' ? form.ref : '',
+    mounted: form.source === 'mounted',
+    emptyPolicy: form.emptyPolicy,
   };
   try {
-    if (form.id) await api.platform.updateNavItem(form.id, body);
-    else await api.platform.createNavItem(body);
+    if (form.id) await api.platform.updateNavNode(form.id, body);
+    else await api.platform.createNavNode(body);
     open.value = false;
     message.success('已保存');
     await load();
@@ -1252,13 +875,356 @@ async function submit() {
   }
 }
 
-async function remove(id: string) {
+/**
+ * 删除（连同整棵子树）。先弹一次确认 —— 服务端删的是整支，删错了没法撤销。
+ *
+ * <p>确认框里报出**本地算的**子孙条数；服务端返回的 `subtree` 是权威值，两者不一致时
+ * 以服务端为准（并发下别人可能刚往这支里加了子菜单），所以删除后照常刷新。
+ */
+function remove(row: NavNodeRow) {
+  const kids = countSubtree(row) - 1;
+  Modal.confirm({
+    title: `删除「${row.label}」？`,
+    content: kids
+      ? `这一支下面还有 ${kids} 个子菜单，会一起删掉。`
+      : '这一条没有子菜单。',
+    okText: '删除',
+    okType: 'danger',
+    cancelText: '取消',
+    onOk: async () => {
+      try {
+        await api.platform.deleteNavNode(row.id);
+        await load();
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+}
+
+function countSubtree(row: NavNodeRow): number {
+  return 1 + (row.children ?? []).reduce((n, k) => n + countSubtree(k), 0);
+}
+
+// ---- 产品节点选择器（挂载 / 从产品清单挑一条） ----
+const pickOpen = ref(false);
+/** `create` = 选完直接建挂载行；`mounted` = 回填表单的挂载字段；`manual` = 回填手工复制的字段。 */
+const pickTarget = ref<'create' | 'mounted' | 'manual'>('create');
+const pickScope = ref<NavScope>('workbench');
+const pickProduct = ref('');
+const pickLoading = ref(false);
+const pickTree = ref<Record<string, unknown>[]>([]);
+const pickError = ref('');
+
+/**
+ * 收起选择器。
+ *
+ * <p>从表单里点进来的（`mounted` / `manual`）取消后要**回到表单** —— 否则管理员填了一半的
+ * 那一屏就凭空没了。工具栏上那个入口（`create`）背后没有表单可回。
+ */
+function onPickCancel() {
+  if (pickTarget.value !== 'create') open.value = true;
+}
+
+function openPicker(target: 'create' | 'mounted' | 'manual') {
+  pickTarget.value = target;
+  pickScope.value = form.scope;
+  pickProduct.value = form.product || configuredProducts.value[0] || '';
+  pickTree.value = [];
+  pickError.value = '';
+  // 先收掉表单那一屏：两个弹窗叠着时，后开的这一个会被前一个的遮罩盖住
+  // （antd 的 z-index 由它自己管，靠调数字硬压过去是治标）。选完或取消后表单会重开。
+  open.value = false;
+  pickOpen.value = true;
+  if (pickProduct.value) void loadPickMenus();
+}
+
+async function loadPickMenus() {
+  if (!pickProduct.value) return;
+  pickLoading.value = true;
+  pickError.value = '';
+  pickTree.value = [];
+  void ensurePermOptions(pickProduct.value);
   try {
-    await api.platform.deleteNavItem(id);
+    const res = await api.platform.navCandidates();
+    candidates.value = res.products;
+    const found = res.products.find((p) => p.product === pickProduct.value);
+    if (!found) {
+      // 「服务注册」里没有这个产品：说清去哪儿补，而不是只显示一个空列表
+      pickError.value = `「服务注册」里没有登记 ${productLabel(pickProduct.value)} 的页面地址，没法从它取候选`;
+    } else if (!found.ok) {
+      pickError.value = found.error;
+    } else {
+      pickTree.value = toPickTree(found.menus);
+    }
+  } catch (e) {
+    pickError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    pickLoading.value = false;
+  }
+}
+
+function toPickTree(list: MenuCandidate[]): Record<string, unknown>[] {
+  return list.map((m) => {
+    const kids = toPickTree(m.children ?? []);
+    return {
+      key: m.id,
+      title: `${m.label}${m.path ? `（${m.path}）` : '（目录）'}`,
+      ...(kids.length ? { children: kids } : {}),
+    };
+  });
+}
+
+/** 点一个节点：直接建挂载行，或回填表单（挂载 / 手工复制两种来源）。 */
+async function onPickSelect(keys: (string | number)[]) {
+  const id = String(keys[0] ?? '');
+  if (!id) return;
+  const node = candNode(pickProduct.value, id);
+  if (!node) return;
+
+  if (pickTarget.value === 'mounted' || pickTarget.value === 'manual') {
+    form.source = pickTarget.value;
+    // 归属壳也按产品的建议值填上（它只是建议，管理员照样能改 —— 同一条路径
+    // 挂到两个壳上是合法用法）
+    form.scope = node.scope;
+    form.product = pickProduct.value;
+    form.ref = pickTarget.value === 'mounted' ? id : '';
+    form.isDir = !node.path;
+    // 名字/图标/权限词按产品的说法预填，管理员还能改
+    if (!form.title.trim()) form.title = node.label;
+    if (!form.icon) form.icon = node.icon;
+    if (!form.perm.trim()) form.perm = node.perm;
+    if (pickTarget.value === 'manual') {
+      // 手工复制要落一个真实路径 —— 它现在就是产品报的那条，所以锁住（见表单里的说明）
+      form.path = node.path;
+      pathLocked.value = true;
+    }
+    pickOpen.value = false;
+    open.value = true;
+    return;
+  }
+
+  pickOpen.value = false;
+  busy.value = true;
+  try {
+    await api.platform.createNavNode({
+      scope: pickScope.value,
+      parentId: '',
+      title: node.label,
+      path: '',
+      perm: node.perm,
+      icon: node.icon,
+      sortOrder: node.sort,
+      enabled: true,
+      product: pickProduct.value,
+      ref: id,
+      mounted: true,
+      emptyPolicy: 'hide',
+    });
+    message.success('已挂载');
     await load();
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    busy.value = false;
   }
+}
+
+// ---- 从服务拉取（批量导入为手工行） ----
+const fetchOpen = ref(false);
+const fetching = ref(false);
+const submitting = ref(false);
+const checkedKeys = ref<(string | number)[]>([]);
+/** 勾选的 key 集合（`产品 + 节点 id`）。半选的父节点不进来 —— 它们由「透明层」逻辑兜住。 */
+const picked = ref<Set<string>>(new Set());
+const draft = reactive<Record<string, { scope: NavScope; title: string; perm: string; sortOrder: number }>>({});
+
+function candKey(product: string, id: string) {
+  return `${product}/${id}`;
+}
+
+/** key → 节点（导入时逐个建，需要知道各自的 path 与父子关系）。 */
+const candByKey = computed(() => {
+  const out = new Map<string, { product: string; node: MenuCandidate }>();
+  for (const p of candidates.value) {
+    for (const m of flattenCand(p.menus)) out.set(candKey(p.product, m.id), { product: p.product, node: m });
+  }
+  return out;
+});
+
+function flattenCand(list: MenuCandidate[]): MenuCandidate[] {
+  const out: MenuCandidate[] = [];
+  const walk = (l: MenuCandidate[]) => {
+    for (const m of l) {
+      out.push(m);
+      walk(m.children ?? []);
+    }
+  };
+  walk(list);
+  return out;
+}
+
+/** 左树：产品 → 该产品自报的菜单树（产品根也 checkable = 整产品导入）。 */
+const candTree = computed(() =>
+  candidates.value
+    .filter((p) => p.ok && p.menus.length)
+    .map((p) => ({
+      key: `p:${p.product}`,
+      title: productLabel(p.product),
+      children: toPickTree(p.menus).map((n) => ({ ...n, key: candKey(p.product, String(n.key)) })),
+    }))
+);
+
+const failedCandidates = computed(() => candidates.value.filter((c) => !c.ok));
+const fetchableCount = computed(() => candidates.value.filter((c) => c.ok && c.menus.length).length);
+
+const pickedCols = [
+  { title: '归属壳', key: 'scope', width: 116 },
+  { title: '菜单名', key: 'title', width: 170 },
+  { title: '路径', key: 'path', width: 190 },
+  { title: '权限词', key: 'perm', width: 160 },
+  { title: '排序', key: 'sort', width: 80 },
+  { title: '', key: 'act', width: 76 },
+];
+
+const pickedRows = computed(() =>
+  [...picked.value]
+    .map((key) => {
+      const hit = candByKey.value.get(key);
+      return hit ? { key, product: hit.product, node: hit.node } : null;
+    })
+    .filter((r): r is { key: string; product: string; node: MenuCandidate } => !!r)
+);
+
+/**
+ * 勾选变化的处理。
+ *
+ * <p>`checkedKeys` 在非严格模式下由 rc-tree 算好（勾父带全子孙、部分勾父进 `halfChecked`），
+ * 我们只收**选中的**那些；没选中的中间节点在导入时当「透明层」处理（见 `walkImport`），
+ * 所以「只勾孙子、不勾父亲」也能落成一个挂到顶层的孙子。
+ */
+function onTreeCheck(keys: (string | number)[] | { checked: (string | number)[] }) {
+  const checked = Array.isArray(keys) ? keys : keys.checked;
+  const next = new Set<string>();
+  for (const k of checked) {
+    const key = String(k);
+    // 产品根节点（`p:xxx`）展开成它的全部节点
+    if (key.startsWith('p:')) {
+      const product = key.slice(2);
+      const found = candidates.value.find((p) => p.product === product);
+      for (const m of flattenCand(found?.menus ?? [])) next.add(candKey(product, m.id));
+      continue;
+    }
+    next.add(key);
+  }
+  // 只为新进来的 key 建草稿：改过的值不该被一次勾选重置
+  for (const key of next) {
+    if (draft[key]) continue;
+    const hit = candByKey.value.get(key);
+    if (!hit) continue;
+    draft[key] = {
+      scope: hit.node.scope,
+      title: hit.node.label,
+      perm: hit.node.perm,
+      sortOrder: hit.node.sort ?? 0,
+    };
+  }
+  picked.value = next;
+  checkedKeys.value = checked;
+}
+
+function unpick(key: string) {
+  const next = new Set(picked.value);
+  next.delete(key);
+  picked.value = next;
+  checkedKeys.value = [...next];
+}
+
+async function openFetch() {
+  fetchOpen.value = true;
+  checkedKeys.value = [];
+  picked.value = new Set();
+  fetching.value = true;
+  try {
+    candidates.value = (await api.platform.navCandidates()).products;
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e));
+  } finally {
+    fetching.value = false;
+  }
+}
+
+/**
+ * 导入：把勾中的候选**抄成手工行**（要「跟着产品变」请用挂载）。
+ *
+ * <p>逐条建而不是批量端点 —— V23 后端没有批量接口，而嵌套导入本来就需要「父建完拿到
+ * id 才能建子」，串行是最直白的写法。失败即中断，已建的留在那儿（管理员看得到、
+ * 也能删），不静默回滚 —— 回滚要一堆补偿删除，反而更容易留下半成品。
+ */
+async function submitBatch() {
+  submitting.value = true;
+  let created = 0;
+  try {
+    for (const product of candidates.value.filter((p) => p.ok)) {
+      created += await walkImport(product.product, product.menus, '');
+    }
+    message.success(`已导入 ${created} 项`);
+    fetchOpen.value = false;
+    await load();
+  } catch (e) {
+    message.error(`已导入 ${created} 项后中断：${e instanceof Error ? e.message : String(e)}`);
+    await load();
+  } finally {
+    submitting.value = false;
+  }
+}
+
+async function walkImport(product: string, list: MenuCandidate[], parentId: string): Promise<number> {
+  let n = 0;
+  for (const node of list) {
+    const key = candKey(product, node.id);
+    const picked_ = picked.value.has(key);
+    if (picked_) {
+      const d = draft[key];
+      const created = await api.platform.createNavNode({
+        scope: d?.scope ?? node.scope,
+        parentId,
+        title: (d?.title ?? node.label).trim() || node.label,
+        path: node.path,
+        perm: d?.perm ?? node.perm,
+        icon: node.icon,
+        sortOrder: d?.sortOrder ?? node.sort ?? 0,
+        enabled: true,
+        product,
+        mounted: false,
+        emptyPolicy: 'hide',
+      });
+      n += 1;
+      // 子节点挂到**刚建出来的这一行**下（产品的层级照搬）
+      n += await walkImport(product, node.children ?? [], created.id);
+    } else {
+      // 没选中：当透明层，子节点上提到当前父节点（「只勾孙子不勾父亲」也能落下来）
+      n += await walkImport(product, node.children ?? [], parentId);
+    }
+  }
+  return n;
+}
+
+// ---- 加载 ----
+async function load() {
+  try {
+    const [nodes, services] = await Promise.all([api.platform.navNodes(), api.platform.services()]);
+    rows.value = nodes;
+    configuredProducts.value = services.filter((s) => s.frontendUrl).map((s) => s.product);
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e));
+    return;
+  }
+  // 展开一次整棵树（过滤后仍保留已展开的壳）
+  expandedKeys.value = [...collectKeys(rows.value), ...tableRows.value.map((r) => r.id)];
+  // 有挂载行时才去拉产品清单：一份挂载都没有时「失配」不可能发生，
+  // 没必要为此在每次打开这一页时都去打一圈产品（某个产品挂了就是一次次等满超时）。
+  if (rows.value.some((r) => r.mounted) || hasProducts.value) await refreshCandidates();
 }
 
 onMounted(load);
@@ -1272,7 +1238,7 @@ onMounted(load);
   flex-wrap: wrap;
   margin: 0 0 12px;
 }
-/* 分支行（壳 / 产品 / 分组）与叶子区分开：层次靠缩进，身份靠底色与字重 */
+/* 壳根行与叶子区分开：层次靠缩进，身份靠底色与字重 */
 :deep(.nav-branch-row) > td {
   background: #f2f3f5;
   font-weight: 600;
@@ -1280,8 +1246,10 @@ onMounted(load);
 :deep(.nav-branch-row:hover) > td {
   background: #e9ebee;
 }
-.node-branch {
+/* 目录：字重略重 + 灰一点，与「点得开的叶子」区分 */
+.node-dir {
   color: rgba(0, 0, 0, 0.72);
+  font-weight: 500;
 }
 /* 左树右选：左边固定宽（树的名字都很短），右边吃掉剩下的宽度放可编辑的清单 */
 .pick-split {

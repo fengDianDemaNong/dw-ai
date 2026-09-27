@@ -1,6 +1,6 @@
 /** 生产控制台只调 API。未配置 VITE_API_BASE_URL 时：开发态走 Vite `/api` 代理，已登录则同源。 */
 import { LOGIN_PATH } from '../config/paths';
-import { currentLocation, isEmbed, openOrgLogin } from '../config/product';
+import { currentLocation, isEmbed, openOrgLogin, orgOriginExplicit } from '../config/product';
 import { isMultiTenant, isStandalone } from '../config/runtime';
 import type {
   DataGrade,
@@ -267,7 +267,42 @@ function asciiHeader(v: string) {
   return '';
 }
 
-async function req<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * 组织平台的**接口**基址 —— 本进程后端没有的那些租户/平台端点直连那里。
+ *
+ * <p>为什么拿「前端地址」当接口基址：配置里另有 `orgBaseUrl`，但开发态 UI 5171 与
+ * API 18080 本就不是一个端口，配它反而两边都不对。而 5171 的 vite 把 `/api` 代理到了
+ * 18080，生产态 nginx 又把两者发在同源 —— 所以前端地址在两种形态下都能当接口基址用
+ * （`config/product.ts` 里 `orgOrigin` 的注释有同一结论）。
+ *
+ * <p>只在 multi 下启用：standard/standalone 没有「组织平台」这一层，这些端点本就该由
+ * 本进程提供（见 `hasLocalAccounts` 那套口径），换基址只会把 404 变成跨站请求。
+ *
+ * <p>取不到明确来源时返回 undefined（留在本进程拿 404），**不用** `orgOrigin` 的兜底值 ——
+ * 理由见 `orgOriginExplicit` 的说明。
+ */
+function orgApiBase(): string | undefined {
+  if (!isMultiTenant()) return undefined;
+  return orgOriginExplicit();
+}
+
+/**
+ * 这个路径的端点是不是在组织平台。
+ *
+ * <p>`/api/tenants/**`（租户下的用户/项目/外观/大模型/提示词/知识库）与 `/api/platform/**`
+ * （平台管理）两组的实现在组织平台，**本进程后端一个都没有** —— 本进程的 controller 只认
+ * `/api/auth`、`/api/me`、`/api/jobs`、`/api/query`、`/api/runtime`，以及 `/api` 下的
+ * session / projects / knowledge-manuals。
+ *
+ * <p>按路径前缀判、而不是在每个调用点传一遍基址：前缀是准的（本进程确实不认这两组），
+ * 也不怕将来新增调用点时漏改。
+ */
+function isOrgScoped(path: string): boolean {
+  return path.startsWith('/api/tenants/') || path.startsWith('/api/platform/');
+}
+
+async function req<T>(path: string, init?: RequestInit, base?: string): Promise<T> {
+  const target = base ?? (isOrgScoped(path) ? orgApiBase() : undefined);
   const anon = ANON_AUTH.test(path);
   if (!anon && isIdle()) {
     expireIdle();
@@ -275,12 +310,12 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!anon && tokenExpiringSoon()) await refreshAccess();
   try {
-    return await doFetch<T>(path, init);
+    return await doFetch<T>(path, init, target);
   } catch (e) {
     if (!anon && isAuthFailure(e)) {
       // 嵌入态先问宿主（见 renewFromHost 里为什么不能反着来）
-      if (await renewFromHost()) return doFetch<T>(path, init);
-      if (await refreshAccess()) return doFetch<T>(path, init);
+      if (await renewFromHost()) return doFetch<T>(path, init, target);
+      if (await refreshAccess()) return doFetch<T>(path, init, target);
       // 三条路都走不通了。multi 下当场回组织平台重新登录（原页带上）：这次 401 往往
       // 只是令牌到期，页面本身没毛病，让他落回原处比让各处分别显示一句「请求错误 401」有用。
       //
@@ -292,14 +327,14 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   }
 }
 
-async function doFetch<T>(path: string, init?: RequestInit): Promise<T> {
+async function doFetch<T>(path: string, init?: RequestInit, base?: string): Promise<T> {
   const token = authToken();
   const tenant = asciiHeader(sessionStorage.getItem('dw-ai.tenantId') ?? '');
   const project = asciiHeader(sessionStorage.getItem('dw-ai.projectId') ?? '');
   const tenantCode = asciiHeader(sessionStorage.getItem('dw-ai.tenantCode') ?? '');
   const projectCode = asciiHeader(sessionStorage.getItem('dw-ai.projectCode') ?? '');
   const userId = asciiHeader(sessionStorage.getItem('dw-ai.userId') ?? '');
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(`${base ?? API_BASE}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
