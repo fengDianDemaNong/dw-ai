@@ -144,6 +144,17 @@ export type EmbedBoot = {
    * 静默的，且每加一个部署都要重新构建一次前端。
    */
   services?: ProductService[];
+  /**
+   * 宿主壳当前那一套外观（主题 / 菜单位置 / 菜单栏颜色）。
+   *
+   * <p>被嵌的产品在**嵌入态**下不再读自己那份 —— 它画在宿主的框里，两套主题不一致时
+   * 里外会拼成两种颜色（裁定：「跟着壳变」）。所以由壳随启动参数推过去，子应用存下来
+   * 当权威（见 `dw-model/ui/src/stores/prefs.ts` 的 `loadTenantAppearance`）。
+   *
+   * <p>只在**下一次 iframe 加载**时生效：不做运行期推送 —— 改外观的那一页本身不挂
+   * iframe，改完再进产品页就是新的一次加载。另一个标签页里改的不会实时传到已加载的 iframe。
+   */
+  appearance?: { theme: string; menuPos: string; menuColor: string };
   embed?: boolean;
 };
 

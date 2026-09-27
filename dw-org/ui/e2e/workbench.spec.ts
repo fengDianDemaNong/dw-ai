@@ -320,6 +320,48 @@ async function tenantAdminToken(page: Page): Promise<string> {
   return (await res.json()).token as string;
 }
 
+/** 星河租户的 id（平台管理员的租户列表里取）。 */
+async function xingheTenantId(page: Page): Promise<string> {
+  const res = await page.request.get('/api/v1/platform/tenants', {
+    headers: { Authorization: `Bearer ${await adminToken(page)}` },
+  });
+  const tenant = ((await res.json()) as { id: string; code: string }[]).find((t) => t.code === 'xinghe');
+  expect(tenant, '找不到星河租户').toBeTruthy();
+  return tenant!.id;
+}
+
+/**
+ * 改星河租户**某个壳**的外观（走真实接口，与设置页那个 PUT 同一个）。
+ *
+ * <p>用**张三**的令牌而不是平台管理员：这是租户管理员面的接口，multi 下平台管理员
+ * 不凭 `X-Tenant-Code` 进租户。而 `X-Tenant-Code` 本身是必须的 —— 少了它服务端判不出
+ * 这是哪个组织，直接 403「请先选择组织」（实测）。
+ *
+ * <p>`shell` **必填**：工作台壳与项目壳各存各的那一行。漏传会落到老口径
+ * （服务端为 dw-model 保留的兼容面）—— 表现是「改了没生效」，而且两个壳互相看不见对方
+ * 的改动。所以这里不给默认值，调用方必须写清改的是哪个壳。
+ *
+ * <p>改完服务端就生效了，但**页面要重新加载**才看得到 —— 外观是在 bootstrap 时读进
+ * `stores/prefs` 的（{@code loadTenantAppearance}），调用方自己负责再 `login`/`goto`。
+ */
+async function setAppearance(
+  page: Page,
+  shell: 'workbench' | 'project',
+  appearance: { theme?: string; menuPos?: 'drawer' | 'left' | 'top'; menuColor?: string } = {}
+) {
+  const res = await page.request.put(
+    `/api/v1/tenants/${await xingheTenantId(page)}/appearance?shell=${shell}`,
+    {
+      headers: {
+        Authorization: `Bearer ${await tenantAdminToken(page)}`,
+        'X-Tenant-Code': 'xinghe',
+      },
+      data: { theme: 'cyan', menuPos: 'left', menuColor: 'ink', ...appearance },
+    }
+  );
+  expect(res.ok(), `改外观失败（${shell}）：${res.status()} ${await res.text()}`).toBeTruthy();
+}
+
 /**
  * 造一个**普通租户成员**，并给他在该租户第一个项目下派好产品角色。
  *
@@ -545,6 +587,30 @@ async function startMenuStub(initial: string): Promise<{ base: string; body: str
 }
 
 test.describe.serial('工作台前端流程', () => {
+  /**
+   * 把星河租户**两个壳**的菜单风格都钉成 `left`，让存量用例与风格解耦。
+   *
+   * <p>项目壳的默认风格是 `drawer`（`DEFAULT_PROJECT_APPEARANCE.menuPos`，PRD §4 写的默认值），
+   * 而本文件里有一批用例是按「左侧栏」写的（`page.locator('aside nav')`，{@link openNav}
+   * 的第一条回落也是它）。drawer 下压根没有 `aside` —— 不钉住的话，项目壳那几条会一起红，
+   * 每条都要重新判断是「改动坏了」还是「风格变了」。
+   *
+   * <p>**两个壳都要钉**：外观按壳分开存之后，只钉工作台的话进项目壳的用例读到的仍是
+   * 项目那套的默认值（drawer）。工作台那份其实不必钉（非项目壳的 drawer 会被折算成
+   * left），但钉上才让「两个壳互不影响」那条用例有个确定的起点。
+   *
+   * <p>专门覆盖 drawer 的用例自己会先改过去、结束再改回来（见本文件末尾「收起」那条）。
+   */
+  test.beforeAll(async ({ browser }) => {
+    const page = await browser.newPage();
+    try {
+      await setAppearance(page, 'workbench', { menuPos: 'left' });
+      await setAppearance(page, 'project', { menuPos: 'left' });
+    } finally {
+      await page.close();
+    }
+  });
+
   test('登录张三进入项目管理', async ({ page }) => {
     await login(page, '张三', '123456');
     await expect(page).toHaveURL(/\/projects/);
@@ -1622,6 +1688,192 @@ test.describe.serial('工作台前端流程', () => {
       if (originalWh) await registerService(page, 'warehouse', originalWh);
       await mdStub.close();
       await whStub.close();
+    }
+  });
+
+  /**
+   * 项目壳的「收起」（drawer）风格：顶栏 + 抽屉 + 快捷栏 —— 0.2.0 原型的三件。
+   *
+   * <p>量一下抽屉的位置是为了守住一个**定位**前提：`.drawer` 是 `absolute` + `top: 100%`，
+   * 而本仓库此前没有任何 `position: relative` 的祖先（含 html/body/#app），包含块会一直
+   * 退到视口 —— 抽屉整个落到屏幕外，表现是「点了汉堡什么都没发生」。所以要求它贴在顶栏下沿。
+   */
+  test('项目壳：收起风格下的顶栏、抽屉与快捷栏', async ({ page }) => {
+    await setAppearance(page, 'project', { menuPos: 'drawer' });
+    try {
+      await login(page, '张三', '123456');
+      await openNav(page, '项目管理');
+      await btn(page.locator('.projects-grid .proj').first(), '进入项目').click();
+      await expect(page).toHaveURL(/\/org\/project\//);
+
+      // 顶栏在、常驻侧栏不在 —— drawer 的全部意义就在这里
+      const bar = page.locator('.bar');
+      await expect(bar).toBeVisible();
+      // 租户名（`canBackHome` 为真时是可点的 `<a class="home">`，否则只是一行字 ——
+      // 两种都算数，这里断言的是「名字在顶栏里」）。
+      await expect(bar.locator('.home, .tenant-name').first()).toContainText('星河');
+      await expect(page.locator('aside.sidebar')).toHaveCount(0);
+      // 项目首页不在任何主菜单里，所以快捷栏不出现（快捷栏是「当前主菜单的快捷项」）
+      await expect(page.locator('.shortcut')).toHaveCount(0);
+
+      // 汉堡在顶栏里；点开抽屉，抽屉挂在顶栏正下方
+      await bar.locator('.burger').click();
+      const drawer = bar.locator('.drawer');
+      await expect(drawer).toBeVisible();
+      await expect(drawer.locator('.cats')).toBeVisible();
+      const barBox = (await bar.boundingBox())!;
+      const drawerBox = (await drawer.boundingBox())!;
+      expect(drawerBox.y, '抽屉要挂在顶栏正下方，而不是屏幕外').toBeGreaterThanOrEqual(
+        barBox.y + barBox.height - 1
+      );
+
+      // 抽屉里点「项目」这个有子项的分类 → 右侧出面板 → 点「成员管理」
+      await drawer.locator('.cat').filter({ hasText: '项目' }).first().hover();
+      const panel = drawer.locator('.panel');
+      await expect(panel.getByText('成员管理', { exact: true })).toBeVisible();
+      await panel.getByText('成员管理', { exact: true }).click();
+      await expect(page).toHaveURL(/\/members$/);
+
+      // 进到主菜单里的页面 → 左侧出现快捷栏，列的就是这一支下面的项
+      const shortcut = page.locator('.shortcut');
+      await expect(shortcut).toBeVisible();
+      await expect(shortcut.getByText('外观', { exact: true })).toBeVisible();
+
+      // 收起：`<` 按钮把它折起来，并把状态记进 localStorage
+      await shortcut.locator('.fold').click();
+      await expect(page.locator('.shortcut')).toHaveClass(/collapsed/);
+      expect(await page.evaluate(() => localStorage.getItem('dw-ai.shortcutCollapsed'))).toBe('1');
+    } finally {
+      await setAppearance(page, 'project', { menuPos: 'left' });
+    }
+  });
+
+  /**
+   * 项目壳的「设置 → 外观」：PRD §4 第 7 条。
+   *
+   * <p>作用域是 `'project'` —— 与工作台「设置」那套（`'workbench'`）**各存各的**，
+   * 改哪边都不影响另一边（见下面「外观按壳隔离」那条）。所以这里断言的是
+   * 「这个入口进得去、表单在」，而不是它自己另存了一份。
+   */
+  test('项目壳：设置 → 外观', async ({ page }) => {
+    await login(page, '张三', '123456');
+    await openNav(page, '项目管理');
+    await btn(page.locator('.projects-grid .proj').first(), '进入项目').click();
+    await expect(page).toHaveURL(/\/org\/project\//);
+
+    await openNav(page, '外观');
+    await expect(page).toHaveURL(/\/org\/project\/[^/]+\/settings\/nav$/);
+    await expect(page.getByRole('heading', { name: '外观' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '主题' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '菜单栏颜色' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '菜单风格' })).toBeVisible();
+  });
+
+  /**
+   * 工作台壳与项目壳的外观**各管各的** —— 专为这次拆分写的一条。
+   *
+   * <p>此前两者共用一行（`scope='tenant'`）：在项目「设置 → 外观」里改菜单风格或主题，
+   * 工作台跟着变。这里把两套**同时**设成互不相同的值，再分别进两个壳看：菜单风格看
+   * `aside` / `.bar` 谁在，主题看 `documentElement.dataset.theme`。
+   *
+   * <p>两个壳设的都是与 `beforeAll` 不同的值（left→drawer、cyan→dark），
+   * 否则「读到的其实是 beforeAll 钉的那份」会让断言假绿。
+   */
+  test('外观按壳隔离：改项目不影响工作台', async ({ page }) => {
+    await setAppearance(page, 'workbench', { theme: 'green', menuPos: 'left', menuColor: 'ink' });
+    await setAppearance(page, 'project', { theme: 'dark', menuPos: 'drawer', menuColor: 'ink' });
+    try {
+      await login(page, '张三', '123456');
+
+      // 工作台壳：左侧栏在、项目壳那条顶栏不在；主题是工作台那份
+      await expect(page).toHaveURL(/\/projects/);
+      await expect(page.locator('aside.sidebar')).toBeVisible();
+      await expect(page.locator('.bar')).toHaveCount(0);
+      expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('green');
+
+      // 进项目壳（SPA 内导航，不重新加载）：反过来 —— 顶栏在、常驻侧栏不在，
+      // 主题换成项目那份。这一步是「同一次会话里换壳就换外观」的判据。
+      await openNav(page, '项目管理');
+      await btn(page.locator('.projects-grid .proj').first(), '进入项目').click();
+      await expect(page).toHaveURL(/\/org\/project\//);
+      await expect(page.locator('.bar')).toBeVisible();
+      await expect(page.locator('aside.sidebar')).toHaveCount(0);
+      expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('dark');
+
+      // 回工作台：又变回绿色。走一次真实加载（而不是后退），顺带证明工作台那份
+      // 没有被「最后一次用过的值」覆盖掉。
+      await page.goto('/org/workbench/projects');
+      await expect(page.locator('aside.sidebar')).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe('green');
+    } finally {
+      await setAppearance(page, 'workbench', { theme: 'cyan', menuPos: 'left', menuColor: 'ink' });
+      await setAppearance(page, 'project', { theme: 'cyan', menuPos: 'left', menuColor: 'ink' });
+    }
+  });
+
+  /**
+   * 项目切换器：守在顶栏**右侧**，而且换项目**不换页面**。
+   *
+   * <p>两条都是用户报的。第二条是真缺陷：`onPick` 里无条件
+   * `router.push('/org/project/{新码}')` —— 切完项目就被丢到项目首页（菜单里第一条
+   * 能嵌的产品页面），正在看的那一页没了。
+   *
+   * <p>为什么拿「成员管理」当那一页：它是项目壳**自己**的页面，不依赖产品菜单与服务
+   * 注册，两个项目下都存在 —— 能干净地验「子路径原样保留」，不会把「菜单没配」和
+   * 「路径丢了」混在一起。
+   *
+   * <p>临时项目自己造、自己删：`ProjectSwitcher` 在只有一个项目时**不渲染**
+   * （`options.length > 1`），借库里已有的项目则会把用例绑死在某个特定库上。
+   */
+  test('项目切换：换项目不换页面，切换器在顶栏右侧', async ({ page }) => {
+    test.setTimeout(120_000);
+    const tid = await xingheTenantId(page);
+    const headers = {
+      Authorization: `Bearer ${await tenantAdminToken(page)}`,
+      'X-Tenant-Code': 'xinghe',
+    };
+    const altCode = `e2e_alt_${stamp}`;
+
+    const created = await page.request.post(`/api/v1/tenants/${tid}/projects`, {
+      headers,
+      data: { code: altCode, name: `E2E临时项目${stamp}` },
+    });
+    expect(created.ok(), `建临时项目失败：${created.status()} ${await created.text()}`).toBeTruthy();
+    const altId = (await created.json()).id as string;
+
+    try {
+      await login(page, '张三', '123456');
+      await openNav(page, '项目管理');
+      // 进**另一个**项目：若进的就是待会儿要切过去的那个，`onPick` 会因为
+      // 「选中的就是当前项目」直接返回，用例会变成什么都没验。
+      await btn(
+        page.locator('.projects-grid .proj').filter({ hasNotText: altCode }).first(),
+        '进入项目'
+      ).click();
+      await expect(page).toHaveURL(/\/org\/project\//);
+
+      // 走到项目壳里的一页（不是首页）
+      await openNav(page, '成员管理');
+      await expect(page).toHaveURL(/\/members$/);
+
+      // 切换器在顶栏的**右半边** —— 它原先挤在左上角租户名旁边，看着像「租户」的一部分
+      const bar = page.locator('.bar');
+      const switcher = bar.locator('.ant-select:visible').first();
+      await expect(switcher).toBeVisible();
+      const barBox = (await bar.boundingBox())!;
+      const swBox = (await switcher.boundingBox())!;
+      expect(swBox.x, '项目切换器应当靠顶栏右侧').toBeGreaterThan(barBox.x + barBox.width / 2);
+
+      // 换项目：只有项目码变，子路径（/members）不动
+      await switcher.click();
+      await page.locator(OPEN_OPTION).filter({ hasText: altCode }).first().click();
+      await expect(page).toHaveURL(new RegExp(`/org/project/${altCode}/members$`), {
+        timeout: 15_000,
+      });
+      // 停在原来那一页，而不是被弹回项目首页
+      await expect(page.getByRole('heading', { name: /成员管理/ })).toBeVisible();
+    } finally {
+      await page.request.delete(`/api/v1/tenants/${tid}/projects/${altId}`, { headers });
     }
   });
 });

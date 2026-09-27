@@ -551,6 +551,22 @@ export async function loadNav() {
 }
 
 /**
+ * 重新拉一次菜单，并把这次拉取登记到 {@link navReady} 上。
+ *
+ * <p>`loadNav()` 自己只写 `navTree`、不碰 `navPending` —— 「登记」是调用方的语义：
+ * 只有**改变了菜单结论**的动作才该登记（登录、离开项目、切换项目），
+ * 否则会把别人「等菜单就位」的等待接到一次与它无关的拉取上。
+ *
+ * <p>切换项目要用它：菜单的结论依赖当前项目（服务端按这个人**在这个项目下**的角色
+ * 过滤权限词），而切换是**就地**完成的 —— 页面组件被 vue-router 复用、不会重新
+ * `onMounted`，各处兜底的那次 `loadNav()` 不会替我们跑（见 `ProjectSwitcher.onPick`）。
+ */
+export function reloadNav(): Promise<void> {
+  navPending = loadNav();
+  return navPending;
+}
+
+/**
  * 等最近一次服务目录拉取结束。
  *
  * <p>「进入项目」要用目录里的地址，而目录是登录后才异步拉的。不等的话，
@@ -691,6 +707,23 @@ export const isTenantAdmin = computed(() => state.tenantRole === 'admin');
 export const canWriteSpec = computed(() => can('warehouse', 'spec:write'));
 export const canWriteModel = computed(() => can('warehouse', 'model:write'));
 export const canPublishModel = computed(() => can('warehouse', 'model:publish'));
+
+/**
+ * 「返回工作台」这个入口对当前用户是否成立。
+ *
+ * <p>项目壳 bar 里的租户名（可点回工作台）与用户面板下拉里的那一条共用这一份判据。
+ * 原先只写在 `UserPanel.vue` 里，bar 也要用 —— 各写一遍迟早走散。
+ *
+ * <p>multi 下人人都有：项目壳路由的 meta 是 member（见 `router/index.ts` 的 `/org/project/:code`），
+ * 普通成员本来就能进去 —— 进得去就得能出来。standard 仍只给租户管理员：那一档里
+ * 工作台是管理界面。判据与 model 的 `config/pages.ts` 的 `canBackToWorkbench` 同义。
+ *
+ * <p>原先这里是 `isRealTenantAdmin && project`，相当于<b>所有</b>模式都只给管理员。
+ * 侧栏那条「返回工作台」撤掉之后（见 V24 迁移），过严的判据会把普通成员困在项目里。
+ */
+export const canBackHome = computed(
+  () => Boolean(currentProject.value) && (isMultiTenant() || isRealTenantAdmin.value)
+);
 
 /**
  * 项目壳默认落在哪一页：第一条**能嵌**且**已登记页面地址**的项目菜单。

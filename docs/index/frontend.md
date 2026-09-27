@@ -1,12 +1,12 @@
 # 前端 / TypeScript（三个 UI + 共享引擎）
 
-> 由 `bin/gen-index.sh` 于 2026-09-23 15:45:01 生成（HEAD `194259f`）。**不要手工编辑**，改完代码重跑脚本即可。
+> 由 `bin/gen-index.sh` 于 2026-09-27 18:15:33 生成（HEAD `04d51fd`）。**不要手工编辑**，改完代码重跑脚本即可。
 > **路径 = 小节标题里的模块名 + `/ui/src/`（`engine` 片段为 `packages/engine/src/`） + 下表路径**。路由表在各 UI 的 `ui/src/router/` 下，需要完整 path → 组件映射时直接读那个文件。
 
 
 ## dw-org
 
-源码根 `dw-org/ui/src`，共 54 个文件。
+源码根 `dw-org/ui/src`，共 67 个文件。
 
 ### dw-org · router（路由）
 
@@ -14,14 +14,20 @@
 
 ### dw-org · pages（页面）
 
+- `pages/admin/nav-items.vue`
+- `pages/admin/product-roles.vue`
 - `pages/admin/services.vue`
 - `pages/admin/tenants.vue`
 - `pages/admin/users.vue`
 - `pages/auth-callback.vue`
+- `pages/embed.vue`
 - `pages/forbidden.vue`
 - `pages/login.vue`
 - `pages/no-project.vue`
 - `pages/org-users.vue`
+- `pages/project-appearance.vue` — 项目「设置 → 外观」（PRD §4 第 7 条：设置是最后一个主菜单，内含外观）。
+- `pages/project-home.vue`
+- `pages/project-members.vue`
 - `pages/projects.vue`
 - `pages/select-tenant.vue`
 - `pages/sys/knowledge.vue`
@@ -35,10 +41,14 @@
 ### dw-org · components（组件）
 
 - `components/AppNav.vue`
-- `components/AppSidebar.vue`
+- `components/AppShortcut.vue`
 - `components/AppearancePickers.vue`
 - `components/KnowledgeManual.vue`
+- `components/MenuStylePicker.vue`
+- `components/NavNode.vue`
 - `components/PageHeader.vue`
+- `components/PermSelect.vue`
+- `components/ProductEmbed.vue`
 - `components/ProjectSwitcher.vue`
 - `components/SqlBlock.vue`
 - `components/UserPanel.vue`
@@ -50,7 +60,7 @@
 ### dw-org · stores（状态）
 
 - `stores/app.ts`
-- `stores/prefs.ts`
+- `stores/prefs.ts` — 外观的作用域 —— 一个壳一份，互不影响： `platform` 平台后台 / `workbench` 租户工作台 / `project` 租户项目壳 （一个租户下的所有项目共用一份）。
 
 ### dw-org · engine（引擎）
 
@@ -66,18 +76,21 @@
 ### dw-org · config（配置）
 
 - `config/aiPrompts.ts`
+- `config/appConfig.ts` — 运行时配置：我要调的后端地址（apiBaseUrl）与我自己对外的地址（baseUrl）。
 - `config/grades.ts`
 - `config/iam.ts` — 权限矩阵（`ROLE_PERMS`）与判权函数（`roleHas`）在共享包里 —— 工作台、仓建设、 数据地图三个前端都要用它画菜单，各抄一份的话加一个产品得改三处，而漏掉的那一处 不会编译报错，只在运行时判否。
 - `config/knowledge.ts`
 - `config/layerPolicies.ts`
 - `config/layers.ts`
-- `config/nav.ts`
+- `config/nav.ts` — 子菜单。
 - `config/navIcons.ts`
+- `config/navMount.ts` — 收下被嵌产品**运行期**报上来的菜单树，并把它并进壳的侧栏树。
 - `config/pages.ts` — 组织平台只做租户管理，只有 multi。
 - `config/paths.ts`
 - `config/product.ts`
+- `config/products.ts` — 产品码与中文名。
 - `config/runtime.ts`
-- `config/sysNav.ts`
+- `config/sysNav.ts` — 两个租户壳。
 - `config/version.ts`
 
 ### dw-org · auth（鉴权）
@@ -95,12 +108,12 @@
 ### dw-org · (顶层)
 
 - `App.vue`
-- `main.ts`
+- `main.ts` — 运行时配置必须在任何请求之前读到：后端地址此前是构建时烘焙进产物的常量， 现在改由 /config.json 注入（见 config/appConfig.ts 的优先级说明）。
 - `vite-env.d.ts` — / <reference types="vite/client" />
 
 ## dw-model
 
-源码根 `dw-model/ui/src`，共 89 个文件。
+源码根 `dw-model/ui/src`，共 91 个文件。
 
 ### dw-model · router（路由）
 
@@ -118,7 +131,6 @@
 - `pages/forbidden.vue`
 - `pages/knowledge.vue`
 - `pages/login.vue`
-- `pages/map/embed.vue`
 - `pages/materialize.vue`
 - `pages/members.vue`
 - `pages/model/copilot.vue`
@@ -195,16 +207,19 @@
 ### dw-model · config（配置）
 
 - `config/aiPrompts.ts`
+- `config/appConfig.ts` — 运行时配置：我要调的后端地址（apiBaseUrl）与我自己对外的地址（baseUrl）。
+- `config/embed.ts`
 - `config/grades.ts`
 - `config/iam.ts` — 权限矩阵（`ROLE_PERMS`）与判权函数（`roleHas`）在共享包里 —— 工作台、仓建设、 数据地图三个前端都要用它画菜单，各抄一份的话加一个产品得改三处，而漏掉的那一处 不会编译报错，只在运行时判否。
 - `config/knowledge.ts`
 - `config/layerPolicies.ts`
-- `config/layers.ts`
+- `config/layers.ts` — 产品**内置认识**的层码：`layerIcon` / `layerTone` 给它们配了图标与配色， 层页面（`pages/model/dwd-overview.vue` 那套）也按它们渲染。
 - `config/nav.ts` — 进这一页需要本项目下的哪个权限（见 `@dw-ai/engine` 的 `ROLE_PERMS`）。
+- `config/navData.ts` — 导航的**纯数据**（`nav.ts` 只剩组装与过滤逻辑）。
 - `config/navIcons.ts`
-- `config/pages.ts` — 三个产品的页面归属。
+- `config/pages.ts` — 页面归属。
 - `config/paths.ts`
-- `config/product.ts`
+- `config/product.ts` — 后端 `GET /api/auth/config` 告知的组织平台**前端**地址，见 orgOrigin 的第 2 级。
 - `config/runtime.ts` — ?mode= 只在开发态生效（规格 06-runtime-modes：不要靠前端 ?mode= 当生产开关）。
 - `config/sysNav.ts` — 工作台菜单。
 - `config/version.ts`
@@ -224,12 +239,12 @@
 ### dw-model · (顶层)
 
 - `App.vue`
-- `main.ts`
+- `main.ts` — 运行时配置必须在任何请求之前读到：后端地址此前是构建时烘焙进产物的常量， 现在改由 /config.json 注入（见 config/appConfig.ts 的优先级说明）。
 - `vite-env.d.ts` — / <reference types="vite/client" />
 
 ## dw-lineage
 
-源码根 `dw-lineage/ui/src`，共 74 个文件。
+源码根 `dw-lineage/ui/src`，共 76 个文件。
 
 ### dw-lineage · router（路由）
 
@@ -308,9 +323,11 @@
 ### dw-lineage · config（配置）
 
 - `config/api.ts` — 后端基址。
+- `config/appConfig.ts` — 运行时配置：我要调的后端地址（apiBaseUrl）与我自己对外的地址（baseUrl）。
 - `config/embed.ts`
-- `config/iam.ts` — 本进程的产品码。
+- `config/iam.ts` — 从子路径 `@dw-ai/engine/iam` 取，**不是**包根 `@dw-ai/engine`。
 - `config/nav.ts` — 导航结构。
+- `config/navData.ts` — 导航的**纯数据**（`nav.ts` 只剩组装与过滤逻辑）。
 - `config/navIcons.ts` — 菜单图标表。
 - `config/pages.ts` — 本地登录页。
 - `config/runtime.ts` — ?mode= 只在开发态生效（规格 06-runtime-modes：不要靠前端 ?mode= 当生产开关）。
@@ -320,7 +337,7 @@
 
 - `utils/common.ts` — 创建表名到最高层级的映射
 - `utils/graphUtil.ts` — 放大 @param graph
-- `utils/request.ts`
+- `utils/request.ts` — 后端地址，见 config/api 的说明。
 
 ### dw-lineage · types（类型）
 
@@ -343,7 +360,7 @@
 
 ## engine
 
-源码根 `packages/engine/src`，共 20 个文件。
+源码根 `packages/engine/src`，共 21 个文件。
 
 ### engine · config（配置）
 
@@ -355,10 +372,11 @@
 - `access.ts`
 - `aiPrompts.ts`
 - `ddl.ts`
+- `embedNav.ts` — 嵌壳协议：**子应用把自己的运行期菜单树报给宿主**。
 - `fieldLogic.ts`
 - `iam.ts` — 产品码，与产品 SKU 对应。
 - `impact.ts`
-- `index.ts`
+- `index.ts` — 嵌壳协议的消息契约（子应用 → 宿主的运行期菜单树）。
 - `knowledge.ts`
 - `knowledgeIo.ts`
 - `materialize.ts`

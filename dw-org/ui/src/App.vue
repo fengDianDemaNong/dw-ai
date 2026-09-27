@@ -17,6 +17,7 @@ import {
   applyMenuColor,
   applyTheme,
   DEFAULT_APPEARANCE,
+  scopeOfRoute,
   themePrimary,
   type Appearance,
 } from './stores/prefs';
@@ -25,10 +26,16 @@ dayjs.locale('zh-cn');
 
 const route = useRoute();
 
+/**
+ * 当前生效的那套外观。三个壳各取各的（平台 / 工作台 / 项目），
+ * 所以同一个浏览器标签页里换壳，主题与菜单栏颜色会跟着换。
+ */
 const active = computed<Appearance>(() => {
-  if (route.matched.some((r) => r.meta.shell === 'admin')) return appearanceOf('platform');
-  if (app.currentTenantId) return appearanceOf('tenant', app.currentTenantId);
-  return DEFAULT_APPEARANCE;
+  const scope = scopeOfRoute(route.matched);
+  if (scope === 'platform') return appearanceOf('platform');
+  // 租户壳要先有租户上下文才谈得上一份外观（登录页、选租户页都还没有）。
+  if (!app.currentTenantId) return DEFAULT_APPEARANCE;
+  return appearanceOf(scope, app.currentTenantId);
 });
 
 watch(

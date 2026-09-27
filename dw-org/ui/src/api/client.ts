@@ -763,9 +763,17 @@ export const api = {
       }),
     deleteProject: (tenantId: string, projectId: string) =>
       req<void>(`/api/v1/tenants/${tenantId}/projects/${projectId}`, { method: 'DELETE' }),
-    appearance: (tenantId: string) => req<Appearance>(`/api/v1/tenants/${tenantId}/appearance`),
-    putAppearance: (tenantId: string, body: Appearance) =>
-      req<Appearance>(`/api/v1/tenants/${tenantId}/appearance`, { method: 'PUT', body: JSON.stringify(body) }),
+    /**
+     * 外观。`shell` 选哪一套：`workbench`（工作台壳）/ `project`（项目壳）。
+     * **不带 = 老口径**（服务端 scope='tenant'）—— dw-model 前端就是这个用法。
+     */
+    appearance: (tenantId: string, shell?: 'workbench' | 'project') =>
+      req<Appearance>(`/api/v1/tenants/${tenantId}/appearance${shell ? `?shell=${shell}` : ''}`),
+    putAppearance: (tenantId: string, body: Appearance, shell?: 'workbench' | 'project') =>
+      req<Appearance>(`/api/v1/tenants/${tenantId}/appearance${shell ? `?shell=${shell}` : ''}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
     llm: (tenantId: string) => req<LlmConfigDto>(`/api/v1/tenants/${tenantId}/llm`),
     putLlm: (tenantId: string, body: Record<string, unknown>) =>
       req<LlmConfigDto>(`/api/v1/tenants/${tenantId}/llm`, { method: 'PUT', body: JSON.stringify(body) }),

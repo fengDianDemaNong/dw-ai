@@ -296,43 +296,81 @@ public class TenantAdminService {
     projectService.deleteProject(projectId);
   }
 
-  public ApiModels.AppearanceDto getAppearance(String tenantId) {
+  /**
+   * 各壳的出厂外观 —— **默认值只有这一处**（前端对应 dw-org/ui/src/stores/prefs.ts）。
+   * 别在 get/put 里再写字面量：分散成好几处，拆壳时迟早左右手不一致。
+   *
+   * <p>`tenant` 是老口径，即 dw-model 独立打开时读的那份（它不带 shell 参数）。
+   */
+  private static ApiModels.AppearanceDto defaultAppearance(String scope) {
+    if ("workbench".equals(scope)) return new ApiModels.AppearanceDto("cyan", "left", "ink");
+    return new ApiModels.AppearanceDto("cyan", "drawer", "ink");
+  }
+
+  /**
+   * 把请求里的 `shell` 参数归一成 `appearance_prefs.scope` 的取值。
+   *
+   * <p>空 = 老口径 `tenant`：`/api/tenants/{id}/appearance` 还有第二个消费者（dw-model 前端），
+   * 它不带这个参数 —— 所以「不带」必须**保持拆分之前的行为**，不能默认成 workbench。
+   */
+  private static String appearanceScope(String shell) {
+    if (blank(shell)) return "tenant";
+    if ("workbench".equals(shell) || "project".equals(shell)) return shell;
+    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "shell 只能是 workbench 或 project");
+  }
+
+  /**
+   * `drawer` 是**项目壳专有**的：工作台壳与平台壳没有那条顶栏，抽屉没有定位锚点
+   * （SystemLayout.vue 会把非项目壳的 drawer 折算成 left）。库里存下非法组合会让工作台
+   * 「设置 → 外观」的菜单风格 picker **一项都不高亮** —— 所以在写入口就归一，
+   * 而不是只靠前端不列那个选项（dw-model 也在 PUT 这个端点）。
+   */
+  private static String normalizeMenuPos(String scope, String pos) {
+    return !"project".equals(scope) && "drawer".equals(pos) ? "left" : pos;
+  }
+
+  public ApiModels.AppearanceDto getAppearance(String tenantId, String shell) {
     requireTenant(tenantId);
+    String scope = appearanceScope(shell);
     AppearancePrefEntity e = prefs.selectOne(Wrappers.<AppearancePrefEntity>lambdaQuery()
-        .eq(AppearancePrefEntity::getScope, "tenant")
+        .eq(AppearancePrefEntity::getScope, scope)
         .eq(AppearancePrefEntity::getTenantId, tenantId));
-    if (e == null) return new ApiModels.AppearanceDto("cyan", "drawer", "ink");
-    return PlatformService.toAppearance(e, "drawer");
+    if (e == null) return defaultAppearance(scope);
+    return PlatformService.toAppearance(e, defaultAppearance(scope).menuPos());
   }
 
   @Transactional
-  public ApiModels.AppearanceDto putAppearance(String tenantId, ApiModels.AppearanceDto body) {
+  public ApiModels.AppearanceDto putAppearance(String tenantId, String shell, ApiModels.AppearanceDto body) {
     requireTenant(tenantId);
     access.requireUser();
     if (!access.canAccessTenant(TenantContext.user(), tenantId)) {
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "无权修改外观");
     }
+    String scope = appearanceScope(shell);
+    // 注意：AppearancePrefEntity（dw-common）没有 @TableId，update/select 必须显式带
+    // 「scope + tenantId」两个条件 —— 顺手换成 updateById/deleteById 会全表命中。
     AppearancePrefEntity e = prefs.selectOne(Wrappers.<AppearancePrefEntity>lambdaQuery()
-        .eq(AppearancePrefEntity::getScope, "tenant")
+        .eq(AppearancePrefEntity::getScope, scope)
         .eq(AppearancePrefEntity::getTenantId, tenantId));
     if (e == null) {
+      ApiModels.AppearanceDto d = defaultAppearance(scope);
       e = new AppearancePrefEntity();
-      e.setScope("tenant");
+      e.setScope(scope);
       e.setTenantId(tenantId);
-      e.setTheme("cyan");
-      e.setMenuPos("drawer");
-      e.setMenuColor("ink");
+      e.setTheme(d.theme());
+      e.setMenuPos(d.menuPos());
+      e.setMenuColor(d.menuColor());
       prefs.insert(e);
     }
     if (body != null) {
       if (!blank(body.theme())) e.setTheme(body.theme());
-      if (!blank(body.menuPos())) e.setMenuPos(body.menuPos());
+      if (!blank(body.menuPos())) e.setMenuPos(normalizeMenuPos(scope, body.menuPos()));
       if (!blank(body.menuColor())) e.setMenuColor(body.menuColor());
       prefs.update(e, Wrappers.<AppearancePrefEntity>lambdaQuery()
-          .eq(AppearancePrefEntity::getScope, "tenant")
+          .eq(AppearancePrefEntity::getScope, scope)
           .eq(AppearancePrefEntity::getTenantId, tenantId));
     }
-    return PlatformService.toAppearance(e, "drawer");
+    return PlatformService.toAppearance(e, defaultAppearance(scope).menuPos());
   }
 
   public ApiModels.AppearanceDto publicAppearance(String tenantId) {

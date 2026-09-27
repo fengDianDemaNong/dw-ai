@@ -5,37 +5,15 @@
       :subtitle="
         scope === 'platform'
           ? '只改平台管理后台的主题和菜单位置，不会带到任何租户的工作台或项目。'
-          : '本组织工作台与项目的外观、大模型，以及 AI 提示词。与平台管理后台互不影响。'
+          : '只改本组织工作台的菜单与主题，以及大模型、AI 提示词。项目「设置 → 外观」是另一套，互不影响。'
       "
     />
 
     <AppearancePickers :scope="scope" :tenant-id="tenantId" />
 
-    <section class="card mt">
-      <h3>菜单风格</h3>
-      <p class="muted">
-        {{
-          scope === 'platform'
-            ? '仅平台管理：主菜单在左侧或顶部。'
-            : '本组织工作台用左侧或顶部；项目还可选收起（点左上角弹出）。'
-        }}
-      </p>
-      <div class="styles">
-        <button
-          v-for="s in styleOptions"
-          :key="s.id"
-          type="button"
-          class="style"
-          :class="{ on: appearance.menuPos === s.id }"
-          @click="setMenuPos(scope, s.id, tenantId)"
-        >
-          <b>{{ s.label }}</b>
-          <span>{{ s.desc }}</span>
-        </button>
-      </div>
-    </section>
+    <MenuStylePicker class="mt" :scope="scope" :tenant-id="tenantId" />
 
-    <section v-if="scope === 'tenant'" class="card mt">
+    <section v-if="scope === 'workbench'" class="card mt">
       <h3>大模型</h3>
       <p class="muted">
         给本组织的规范助手、建模 AI 设计等对话使用。密钥加密存在服务端，接口不会回传明文。未开启时走内置草案。
@@ -64,7 +42,7 @@
       </a-form>
     </section>
 
-    <section v-if="scope === 'tenant'" class="card mt">
+    <section v-if="scope === 'workbench'" class="card mt">
       <h3>AI 会改什么、走哪些接口</h3>
       <p class="muted">
         对话本身只换文本，确认后才写当前<strong>项目</strong>的数据。提示词按组织共用，注入的是当前项目摘要。
@@ -87,7 +65,7 @@
       </a-table>
     </section>
 
-    <section v-if="scope === 'tenant'" class="card mt">
+    <section v-if="scope === 'workbench'" class="card mt">
       <h3>AI 提示词</h3>
       <p class="muted">
         三个槽位覆盖产品默认，不从零写整套逻辑。代发前由服务端替换占位符。
@@ -145,31 +123,27 @@ import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { message } from 'ant-design-vue';
 import AppearancePickers from '../../components/AppearancePickers.vue';
+import MenuStylePicker from '../../components/MenuStylePicker.vue';
 import PageHeader from '../../components/PageHeader.vue';
 import { api } from '../../api/client';
 import { AI_OPS_WITHOUT_SLOT, AI_PROMPT_PLACEHOLDERS, AI_PROMPT_SLOTS, DEFAULT_AI_PROMPTS } from '../../config/aiPrompts';
 import { app } from '../../stores/app';
 import type { AiPromptSlot } from '../../types';
 import {
-  appearanceOf,
   LLM_PROVIDERS,
   llmOf,
   loadTenantLlm,
-  MENU_STYLE_OPTIONS,
+  scopeOfRoute,
   setLlm,
-  setMenuPos,
   type AppearanceScope,
   type LlmConfig,
   type LlmProvider,
 } from '../../stores/prefs';
 
 const route = useRoute();
-const scope = computed<AppearanceScope>(() => (route.path.includes('/platform') ? 'platform' : 'tenant'));
-const tenantId = computed(() => (scope.value === 'tenant' ? app.currentTenantId : null));
-const appearance = computed(() => appearanceOf(scope.value, tenantId.value));
-const styleOptions = computed(() =>
-  scope.value === 'platform' ? MENU_STYLE_OPTIONS.filter((s) => s.id !== 'drawer') : MENU_STYLE_OPTIONS
-);
+/** 这一页只在平台后台与工作台两处出现（项目那套在 `pages/project-appearance.vue`）。 */
+const scope = computed<AppearanceScope>(() => scopeOfRoute(route.matched));
+const tenantId = computed(() => (scope.value === 'platform' ? null : app.currentTenantId));
 const providerOpts = LLM_PROVIDERS.map((p) => ({ value: p.value, label: p.label }));
 
 const llm = reactive<LlmConfig>({ ...llmOf(tenantId.value) });
@@ -291,41 +265,6 @@ async function savePrompts() {
 h3 {
   margin: 0 0 12px;
   font-size: 14px;
-}
-
-.styles {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.style {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--card);
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
-}
-
-.style.on {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 20%, transparent);
-}
-
-.style b {
-  font-size: 14px;
-}
-
-.style span {
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--muted);
 }
 
 .mt {

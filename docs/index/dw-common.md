@@ -1,7 +1,7 @@
 # dw-common（共享 DTO / 公共契约）
 
-> 由 `bin/gen-index.sh` 于 2026-09-23 15:45:01 生成（HEAD `194259f`）。**不要手工编辑**，改完代码重跑脚本即可。
-> 共 33 个类。**路径 = 源码根 `dw-common/src/main/java/` + 下表路径**；分组标题是包名（已省略 `com/dwai/platform/` 这类公共前缀）。测试清单见 [tests.md](tests.md)。
+> 由 `bin/gen-index.sh` 于 2026-09-27 18:15:33 生成（HEAD `04d51fd`）。**不要手工编辑**，改完代码重跑脚本即可。
+> 共 36 个类。**路径 = 源码根 `dw-common/src/main/java/` + 下表路径**；分组标题是包名（已省略 `com/dwai/platform/` 这类公共前缀）。测试清单见 [tests.md](tests.md)。
 
 
 ## meta/dto
@@ -40,6 +40,10 @@
 - `com/dwai/platform/meta/mapper/UserMapper.java` — UserMapper [数据访问]
 - `com/dwai/platform/meta/mapper/UserTenantMapper.java` — UserTenantMapper [数据访问]
 
+## meta/seed
+
+- `com/dwai/platform/meta/seed/SeedMain.java` — SeedMain 手动灌演示数据。 · `main`
+
 ## meta/support
 
 - `com/dwai/platform/meta/support/AiCaps.java` — AiCaps
@@ -48,4 +52,6 @@
 - `com/dwai/platform/meta/support/JsonbStringTypeHandler.java` — JsonbStringTypeHandler
 - `com/dwai/platform/meta/support/Jsons.java` — Jsons
 - `com/dwai/platform/meta/support/Perms.java` — Perms
+- `com/dwai/platform/meta/support/RunModes.java` — RunModes 运行模式的回落链。
+- `com/dwai/platform/meta/support/SeedDb.java` — SeedDb 演示数据 seed 的库型判定与脚本定位。
 

@@ -1,16 +1,23 @@
 # 测试清单
 
-> 由 `bin/gen-index.sh` 于 2026-09-23 15:45:01 生成（HEAD `194259f`）。**不要手工编辑**，改完代码重跑脚本即可。
+> 由 `bin/gen-index.sh` 于 2026-09-27 18:15:33 生成（HEAD `04d51fd`）。**不要手工编辑**，改完代码重跑脚本即可。
 > 只列类名与一句话职责；具体断言请打开文件。**路径 = 小节标题里的模块名 + `/` + 下表路径**。跑测试见各模块 `api/pom.xml`。
 
 
-## dw-org（7 个）
+## dw-org（14 个）
 
+- `api/src/test/java/com/dwai/platform/AppearanceShellContractTest.java`
 - `api/src/test/java/com/dwai/platform/AuthSmokeTest.java`
 - `api/src/test/java/com/dwai/platform/CrossServiceDesignGuardTest.java` — 把技术方案 §2 的三条<b>禁止项</b>变成源码级的守卫。
 - `api/src/test/java/com/dwai/platform/InternalContractTest.java`
 - `api/src/test/java/com/dwai/platform/InternalModuleTokenTest.java`
+- `api/src/test/java/com/dwai/platform/MenuCandidateContractTest.java`
+- `api/src/test/java/com/dwai/platform/NavNodeTest.java`
+- `api/src/test/java/com/dwai/platform/NavTreeMountTest.java`
+- `api/src/test/java/com/dwai/platform/PermWordsTest.java` — 权限词的<b>形状</b>规则，以及「三份词表不许漂移」的守卫。
 - `api/src/test/java/com/dwai/platform/PlatformAdminContractTest.java`
+- `api/src/test/java/com/dwai/platform/ProductRoleTest.java`
+- `api/src/test/java/com/dwai/platform/ProjectMemberContractTest.java`
 - `api/src/test/java/com/dwai/platform/RunModeSmokeTest.java` — dw-org 的运行模式护栏：<b>组织平台只有 multi 一种模式</b>。
 - `api/src/test/java/com/dwai/platform/SchemaBootstrapTest.java`
 
@@ -24,7 +31,7 @@
 - `api/src/test/java/com/dwai/platform/RunModeSmokeTest.java` — 三模式冒烟：dw-model 在 <b>standalone / standard / multi</b> 三种启动模式下都必须能起来， 且关键行为符合设计（见 docs/tech/07-0.2.0.md §3.3、§4）。
 - `api/src/test/java/com/dwai/platform/SchemaBootstrapTest.java`
 
-## dw-lineage（70 个）
+## dw-lineage（73 个）
 
 - `api/src/test/java/SQLLineageMergerTest.java`
 - `api/src/test/java/TestSqlSplit.java`
@@ -32,9 +39,12 @@
 - `api/src/test/java/com/dwai/lineage/cli/SqlCliTest.java` — sql-cli 的纯逻辑部分。
 - `api/src/test/java/conf/LineagePropertiesRunModeTest.java` — runMode() 归一化的取值表。
 - `api/src/test/java/controller/DataCatalogApiTest.java`
+- `api/src/test/java/controller/EmbedFramePolicyTest.java`
+- `api/src/test/java/controller/EmbedFramePolicyUnsetTest.java`
 - `api/src/test/java/controller/InternalModuleTokenTest.java` — 服务间接口（/internal/v1/**）的门禁：静态共享密钥。
 - `api/src/test/java/controller/LocalAuthApiTest.java`
 - `api/src/test/java/controller/LocalUserApiTest.java`
+- `api/src/test/java/controller/MenuJsonContractTest.java` — 菜单候选（`ui/public/menu.json`）必须覆盖 GET /api/manifest 的 menus， 且同一页面的权限词要一致。
 - `api/src/test/java/controller/RemoteMetaBrowseApiTest.java`
 - `api/src/test/java/controller/RemoteMetaBrowseLiveIT.java`
 - `api/src/test/java/controller/RunModeSmokeTest.java` — 三模式冒烟：数据地图（dw-lineage）在 <b>standalone / standard / multi</b> 下都必须能起来。

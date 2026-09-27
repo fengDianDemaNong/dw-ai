@@ -27,6 +27,25 @@ export interface NavItem {
  * <p>以前这里还有 `navGroups` / `buildNavGroups()` / `activeNavGroup()` 三样，已随
  * `nav_groups` 一起删掉 —— 留着一个恒空的常量，下一个人会当它是可用入口。
  */
+/** 子树里有没有这一条路径。 */
+function subtreeHasPath(item: NavItem, hit: string): boolean {
+  if (item.path === hit) return true;
+  return (item.children ?? []).some((kid) => subtreeHasPath(kid, hit));
+}
+
+/**
+ * 当前路由落在哪个**顶层主菜单**里（快捷栏用它决定显示哪一组）。
+ *
+ * <p>分两步：先按 {@link activeNavPath} 求最长前缀命中的那条路径，再回到顶层找包含它的
+ * 那一支。不能像原型那样只在顶层取 `path.startsWith` —— V23 起顶层节点自己通常是个
+ * **目录**（`path` 为空、内容在 `children`），拿当前路由去比它的 `path` 一条也命中不了。
+ */
+export function activeTopItem(path: string, items: NavItem[]): NavItem | undefined {
+  const hit = activeNavPath(path, items);
+  if (!hit) return undefined;
+  return items.find((item) => subtreeHasPath(item, hit));
+}
+
 export function activeNavPath(path: string, items: NavItem[]): string | undefined {
   let best: string | undefined;
   const walk = (nodes: NavItem[]) => {

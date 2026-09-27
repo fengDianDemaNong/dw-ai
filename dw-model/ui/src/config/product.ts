@@ -21,11 +21,33 @@ export function isWarehouseUi(): boolean {
 export const ORG_UI_KEY = 'dw-ai.orgUiUrl';
 const HOST_ORIGIN_KEY = 'dw-ai.hostOrigin';
 const EMBED_KEY = 'dw-ai.embed';
+const HOST_APPEARANCE_KEY = 'dw-ai.hostAppearance';
 
 /** 上游壳在 `#boot=` 里自报的 origin（见 {@link consumeBootHash}）。 */
 export function storedHostOrigin(): string | undefined {
   if (typeof window === 'undefined') return undefined;
   return sessionStorage.getItem(HOST_ORIGIN_KEY) || undefined;
+}
+
+/**
+ * 宿主壳推过来的那一套外观（见 {@link consumeBootHash}）。
+ *
+ * <p>嵌在门户里时它比本产品自己那份**权威**：页面画在宿主的框里，两套主题不一致时
+ * 里外会拼成两种颜色 —— 所以嵌入态下由外面那一圈决定（见 `stores/prefs.ts` 的
+ * `loadTenantAppearance`）。
+ *
+ * <p>存 sessionStorage 而不是只留在内存：子应用内部一跳转 `#boot=` 就没了，
+ * 而每次重新加载外观都要读得到它。
+ */
+export function hostAppearance(): { theme?: string; menuPos?: string } | undefined {
+  if (typeof window === 'undefined') return undefined;
+  const raw = sessionStorage.getItem(HOST_APPEARANCE_KEY);
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw) as { theme?: string; menuPos?: string };
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -143,6 +165,7 @@ export function consumeBootHash(): void {
       userId?: string;
       roles?: unknown;
       hostOrigin?: string;
+      appearance?: { theme?: string; menuPos?: string };
     };
     // 壳给的「我在本项目各产品的角色」。存下来供侧栏按角色收口。
     if (boot.roles) sessionStorage.setItem('dw-ai.roles', JSON.stringify(boot.roles));
@@ -155,6 +178,8 @@ export function consumeBootHash(): void {
     if (boot.projectCode) sessionStorage.setItem('dw-ai.projectCode', boot.projectCode);
     if (boot.userId) sessionStorage.setItem('dw-ai.userId', boot.userId);
     if (boot.hostOrigin) sessionStorage.setItem(HOST_ORIGIN_KEY, boot.hostOrigin);
+    // 宿主壳那套外观：嵌入态下它就是本产品的观感（见 hostAppearance 的说明）。
+    if (boot.appearance) sessionStorage.setItem(HOST_APPEARANCE_KEY, JSON.stringify(boot.appearance));
   } catch {
     /* 忽略损坏的启动参数 */
   }

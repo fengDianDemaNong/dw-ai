@@ -101,7 +101,16 @@ public class PlatformService {
     // 不预置项目：新租户从「一个项目都没有」开始，由租户管理员进去后自建。
     // 之前这里自动插一个「默认项目」（id 还是建租户那一刻的时间戳），结果是每个租户
     // 都凭空多出一个没人建过的项目，管理员还得先删掉它才能开始干活。
+    //
+    // 外观种三行，与 V26 迁移之后的存量租户形状一致：
+    //   tenant    —— 老口径，dw-model 前端独立打开时读的那份（它不带 shell 参数）；
+    //   workbench —— 工作台壳（org 的「设置 → 外观」）；
+    //   project   —— 项目壳（项目「设置 → 外观」，一个租户下所有项目共用一份）。
+    // 缺哪一行功能也不坏（getAppearance 有一样的 fallback），但库里留空档会让
+    // 「这个租户的外观到底存在哪」得翻代码才知道。
     upsertPref("tenant", t.getId());
+    upsertPref("workbench", t.getId());
+    upsertPref("project", t.getId());
     return auth.toTenant(t);
   }
 
@@ -344,9 +353,18 @@ public class PlatformService {
     e.setScope(scope);
     e.setTenantId(tenantId);
     e.setTheme("cyan");
-    e.setMenuPos("tenant".equals(scope) ? "drawer" : "left");
+    e.setMenuPos(defaultMenuPos(scope));
     e.setMenuColor("ink");
     prefs.insert(e);
+  }
+
+  /**
+   * 各 scope 的出厂菜单位置。`project` 与老口径的 `tenant` 用 `drawer`（项目壳默认就是
+   * 从顶栏挂下来的抽屉）；`workbench` 与 `platform` 用 `left` —— 它们没有项目壳那条顶栏，
+   * 抽屉是 absolute + top:100% 挂在顶栏下面的，没有锚点会落到视口外面。
+   */
+  private static String defaultMenuPos(String scope) {
+    return "workbench".equals(scope) || "platform".equals(scope) ? "left" : "drawer";
   }
 
   static ApiModels.AppearanceDto toAppearance(AppearancePrefEntity e, String defaultPos) {

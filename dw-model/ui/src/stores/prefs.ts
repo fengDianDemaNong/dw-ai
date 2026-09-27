@@ -1,5 +1,6 @@
 import { reactive, readonly } from 'vue';
 import { api, useRemoteApi } from '../api/client';
+import { hostAppearance, isEmbed } from '../config/product';
 import { isMultiTenant } from '../config/runtime';
 
 export type ThemeId = 'cyan' | 'dark' | 'blue' | 'green' | 'orange';
@@ -84,6 +85,14 @@ export async function loadPlatformAppearance() {
 }
 
 export async function loadTenantAppearance(tenantId: string | null | undefined) {
+  // 嵌在门户里时外观**跟着壳变**：页面画在宿主的框里，两套主题不一致会拼成两种颜色。
+  // 宿主那套随 `#boot=` 推过来（见 `config/product.ts`），比本产品自己那份
+  // （独立打开时留下的）权威 —— 所以嵌入态下先看它，有就不问接口了。
+  const host = hostAppearance();
+  if (isEmbed() && host) {
+    state.tenant = { theme: (host.theme as ThemeId) || 'cyan', menuPos: host.menuPos === 'top' ? 'top' : 'left' };
+    return;
+  }
   if (!useRemoteApi() || !tenantId) return;
   try {
     const a = await api.org.appearance(tenantId);

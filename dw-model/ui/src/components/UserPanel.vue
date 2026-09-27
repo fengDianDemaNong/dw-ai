@@ -6,7 +6,7 @@
       :class="[menuPos, { collapsed }]"
       :title="collapsed ? sessionAccount?.displayName : undefined"
     >
-      <span class="av">{{ initial }}</span>
+      <span class="av"><UserOutlined /></span>
       <span v-if="!collapsed" class="who">
         <b>{{ sessionAccount?.displayName }}</b>
         <small>{{ contextLine }}</small>
@@ -15,7 +15,7 @@
     <template #overlay>
       <div class="sheet">
         <div class="bio">
-          <div class="av lg">{{ initial }}</div>
+          <div class="av lg"><UserOutlined /></div>
           <div>
             <b>{{ sessionAccount?.displayName }}</b>
             <p>账号 {{ sessionAccount?.username }}</p>
@@ -79,6 +79,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { message } from 'ant-design-vue';
+import { UserOutlined } from '@ant-design/icons-vue';
 import { useRemoteApi } from '../api/client';
 import { PROJECT_ROLE_LABEL, TENANT_ROLE_LABEL } from '../config/iam';
 import { LOGIN_PATH, SYS_HOME } from '../config/paths';
@@ -132,7 +133,6 @@ const profileName = ref('');
 const pwdCur = ref('');
 const pwdNext = ref('');
 const pwdAgain = ref('');
-const initial = computed(() => (sessionAccount.value?.displayName ?? '?').slice(0, 1));
 const appVersion = APP_VERSION;
 
 const contextLine = computed(() => {

@@ -1,14 +1,13 @@
 # dw-model（仓建设 · 后端）
 
-> 由 `bin/gen-index.sh` 于 2026-09-23 15:45:01 生成（HEAD `194259f`）。**不要手工编辑**，改完代码重跑脚本即可。
-> 共 56 个类。**路径 = 源码根 `dw-model/api/src/main/java/` + 下表路径**；分组标题是包名（已省略 `com/dwai/platform/` 这类公共前缀）。测试清单见 [tests.md](tests.md)。
+> 由 `bin/gen-index.sh` 于 2026-09-27 18:15:33 生成（HEAD `04d51fd`）。**不要手工编辑**，改完代码重跑脚本即可。
+> 共 54 个类。**路径 = 源码根 `dw-model/api/src/main/java/` + 下表路径**；分组标题是包名（已省略 `com/dwai/platform/` 这类公共前缀）。测试清单见 [tests.md](tests.md)。
 
 
 ## (根包)
 
 - `com/dwai/platform/DwaiApplication.java` — DwaiApplication [启动类] · `main`
 - `com/dwai/platform/DwaiProperties.java` — DwaiProperties [配置绑定] · `@ConfigurationProperties(dwai)`
-- `com/dwai/platform/SeedMain.java` — SeedMain · `main`
 
 ## auth
 
@@ -27,13 +26,12 @@
 
 ## db
 
-- `com/dwai/platform/db/MetaDb.java` — MetaDb
 - `com/dwai/platform/db/MetaDbEnvironmentPostProcessor.java` — MetaDbEnvironmentPostProcessor [启动期处理]
 
 ## internal
 
 - `com/dwai/platform/internal/OrgClient.java` — OrgClient [组件]
-- `com/dwai/platform/internal/WarehouseHeartbeat.java` — WarehouseHeartbeat [组件]
+- `com/dwai/platform/internal/OrgProjectPuller.java` — OrgProjectPuller [组件] 组织平台 → 本模块的<b>项目镜像 + 许可</b>按需拉取。
 - `com/dwai/platform/internal/WarehouseInternalController.java` — WarehouseInternalController [HTTP 接口] · 前缀 `/internal/v1` → `PUT /projects/{projectCode}`, `DELETE /projects/{projectCode}`
 
 ## meta

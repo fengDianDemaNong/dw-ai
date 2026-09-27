@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -68,14 +69,22 @@ public class TenantAdminController {
     tenants.deleteProject(id, projectId);
   }
 
+  /**
+   * 外观。`shell` 选哪一套：`workbench`（工作台壳）/ `project`（项目壳）。
+   * **不带 = 老口径**（`scope='tenant'`）—— dw-model 前端就是这个用法，别改默认值。
+   */
   @GetMapping("/appearance")
-  public ApiModels.AppearanceDto appearance(@PathVariable String id) {
-    return tenants.getAppearance(id);
+  public ApiModels.AppearanceDto appearance(
+      @PathVariable String id, @RequestParam(required = false) String shell) {
+    return tenants.getAppearance(id, shell);
   }
 
   @PutMapping("/appearance")
-  public ApiModels.AppearanceDto putAppearance(@PathVariable String id, @RequestBody ApiModels.AppearanceDto body) {
-    return tenants.putAppearance(id, body);
+  public ApiModels.AppearanceDto putAppearance(
+      @PathVariable String id,
+      @RequestParam(required = false) String shell,
+      @RequestBody ApiModels.AppearanceDto body) {
+    return tenants.putAppearance(id, shell, body);
   }
 
   @GetMapping("/llm")

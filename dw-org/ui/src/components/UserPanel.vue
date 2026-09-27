@@ -6,7 +6,7 @@
       :class="[menuPos, { collapsed, light: chromeLight }]"
       :title="collapsed ? sessionAccount?.displayName : undefined"
     >
-      <span class="av">{{ initial }}</span>
+      <span class="av"><UserOutlined /></span>
       <span v-if="!collapsed" class="who">
         <b>{{ sessionAccount?.displayName }}</b>
         <small>{{ contextLine }}</small>
@@ -15,7 +15,7 @@
     <template #overlay>
       <div class="sheet">
         <div class="bio">
-          <div class="av lg">{{ initial }}</div>
+          <div class="av lg"><UserOutlined /></div>
           <div>
             <b>{{ sessionAccount?.displayName }}</b>
             <p>账号 {{ sessionAccount?.username }}</p>
@@ -80,20 +80,21 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { message } from 'ant-design-vue';
+import { UserOutlined } from '@ant-design/icons-vue';
 import { useRemoteApi } from '../api/client';
 import { PROJECT_ROLE_LABEL, TENANT_ROLE_LABEL } from '../config/iam';
 import { ADMIN_HOME, LOGIN_PATH, SELECT_TENANT, SYS_HOME } from '../config/paths';
 import { APP_VERSION } from '../config/version';
 import { isMultiTenant } from '../config/runtime';
-import { appearanceOf, type MenuPos } from '../stores/prefs';
+import { appearanceOf, scopeOfRoute, type MenuPos } from '../stores/prefs';
 import {
+  canBackHome,
   currentProject,
   currentProjectRole,
   currentTenant,
   leaveProject,
   leaveTenant,
   isPlatformAdmin,
-  isRealTenantAdmin,
   logout,
   resetDemo,
   refreshMyTenants,
@@ -118,24 +119,17 @@ const remote = useRemoteApi();
 const multi = isMultiTenant();
 const orgWord = multi ? '租户' : '组织';
 const tenants = computed(() => selectableTenants());
-const onAdmin = computed(() => route.path.includes('/platform'));
-const canSwitchTenant = computed(() => multi && !onAdmin.value && tenants.value.length > 1);
 /**
- * 「返回工作台」这个入口对当前用户是否成立。
- *
- * <p>multi 下人人都有：项目壳路由的 meta 是 member（见 `router/index.ts` 的 `/org/project/:code`），
- * 普通成员本来就能进去 —— 进得去就得能出来。standard 仍只给租户管理员：那一档里
- * 工作台是管理界面。判据与 model 的 `config/pages.ts` 的 `canBackToWorkbench` 同义。
- *
- * <p>原先这里是 `isRealTenantAdmin && project`，相当于<b>所有</b>模式都只给管理员。
- * 侧栏那条「返回工作台」撤掉之后（见 V24 迁移），这个过严的判据会把普通成员困在项目里 ——
- * 所以两处要一起改。
+ * 当前在哪个壳。用 `meta.shell` 判（与 `SystemLayout` 取菜单树**同源**），不按路径字符串猜：
+ * `route.path.includes('/platform')` 在产品子路径里出现 `/platform` 时会误判成平台后台
+ * （嵌入页 `/org/embed/x/platform/y` 就命中）。
  */
-const canBackHome = computed(() => Boolean(project.value) && (multi || isRealTenantAdmin.value));
+const shell = computed(() => scopeOfRoute(route.matched));
+const onAdmin = computed(() => shell.value === 'platform');
+const canSwitchTenant = computed(() => multi && !onAdmin.value && tenants.value.length > 1);
 const chromeLight = computed(() => {
   if (props.light) return true;
-  const scope = onAdmin.value ? 'platform' : 'tenant';
-  return appearanceOf(scope, tenant.value?.id).menuColor === 'light';
+  return appearanceOf(shell.value, tenant.value?.id).menuColor === 'light';
 });
 
 onMounted(() => {
@@ -149,7 +143,6 @@ const profileName = ref('');
 const pwdCur = ref('');
 const pwdNext = ref('');
 const pwdAgain = ref('');
-const initial = computed(() => (sessionAccount.value?.displayName ?? '?').slice(0, 1));
 const appVersion = APP_VERSION;
 
 const contextLine = computed(() => {

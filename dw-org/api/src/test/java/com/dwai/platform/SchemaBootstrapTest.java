@@ -148,9 +148,10 @@ class SchemaBootstrapTest {
         Integer seeded = db.queryForObject(
                 "select count(*) from nav_nodes where id like 'nav-sys%' or id like 'nav-proj%'",
                 Integer.class);
-        assertEquals(8, seeded == null ? 0 : seeded,
-                "种子应当是 6 条工作台壳（系统管理 + 5 项）+ 2 条项目壳"
-                        + "（项目壳第 3 条「返回工作台」已在 V24 删掉——那个入口现在只在用户面板里）");
+        assertEquals(9, seeded == null ? 0 : seeded,
+                "种子应当是 6 条工作台壳（系统管理 + 5 项）+ 3 条项目壳"
+                        + "（项目壳第 3 条「返回工作台」已在 V24 删掉——那个入口现在只在用户面板里；"
+                        + "V25 补了第 4 条「外观」）");
 
         assertEquals("/org/project/{code}/members", db.queryForObject(
                         "select path from nav_nodes where id = 'nav-proj-members'", String.class),
@@ -158,6 +159,12 @@ class SchemaBootstrapTest {
         assertEquals("iam:member", db.queryForObject(
                         "select perm from nav_nodes where id = 'nav-proj-members'", String.class),
                 "「成员管理」的可见性由这个权限词决定");
+        assertEquals("/org/project/{code}/settings/nav", db.queryForObject(
+                        "select path from nav_nodes where id = 'nav-proj-appearance'", String.class),
+                "V25 的「外观」同样是模板路径（前端 project-appearance.vue 就挂在这个地址上）");
+        assertEquals(Boolean.FALSE, db.queryForObject(
+                        "select admin_only from nav_nodes where id = 'nav-proj-appearance'", Boolean.class),
+                "外观全员可改本组织（PRD §4 第 7 条），不该只有租户管理员看得见");
         assertEquals(Boolean.TRUE, db.queryForObject(
                         "select admin_only from nav_nodes where id = 'nav-sys-users'", Boolean.class),
                 "「用户管理」只有租户管理员可见（原先由 buildSysNav 的入参在前端算）");

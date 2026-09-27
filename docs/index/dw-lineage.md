@@ -1,6 +1,6 @@
 # dw-lineage（数据地图 · 后端）
 
-> 由 `bin/gen-index.sh` 于 2026-09-23 15:45:01 生成（HEAD `194259f`）。**不要手工编辑**，改完代码重跑脚本即可。
+> 由 `bin/gen-index.sh` 于 2026-09-27 18:15:33 生成（HEAD `04d51fd`）。**不要手工编辑**，改完代码重跑脚本即可。
 > 共 192 个类。**路径 = 源码根 `dw-lineage/api/src/main/java/` + 下表路径**；分组标题是包名（已省略 `com/dwai/platform/` 这类公共前缀）。测试清单见 [tests.md](tests.md)。
 
 
@@ -120,8 +120,8 @@
 
 ## internal
 
-- `com/dwai/lineage/internal/LineageHeartbeat.java` — LineageHeartbeat [组件]
 - `com/dwai/lineage/internal/OrgClient.java` — OrgClient [组件]
+- `com/dwai/lineage/internal/OrgProjectPuller.java` — OrgProjectPuller [组件] 组织平台 → 本模块的<b>项目镜像</b>按需拉取。
 
 ## persistence
 

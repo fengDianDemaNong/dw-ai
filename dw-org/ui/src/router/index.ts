@@ -123,6 +123,14 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '成员管理' },
       },
       {
+        // 项目「设置 → 外观」（PRD §4 第 7 条）。与 `members` 一样只占固定的一段，
+        // 排在 `embed/...` 之前 —— 否则会先被通配吃掉。
+        path: 'settings/nav',
+        name: 'project-appearance',
+        component: () => import('../pages/project-appearance.vue'),
+        meta: { title: '外观' },
+      },
+      {
         path: 'embed/:product/:pathMatch(.*)*',
         name: 'project-embed',
         component: () => import('../pages/embed.vue'),

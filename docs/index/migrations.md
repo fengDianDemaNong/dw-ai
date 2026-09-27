@@ -1,6 +1,6 @@
 # 数据库迁移（Flyway）
 
-> 由 `bin/gen-index.sh` 于 2026-09-23 15:45:01 生成（HEAD `194259f`）。**不要手工编辑**，改完代码重跑脚本即可。
+> 由 `bin/gen-index.sh` 于 2026-09-27 18:15:33 生成（HEAD `04d51fd`）。**不要手工编辑**，改完代码重跑脚本即可。
 > **改迁移前必读**：`mysql/` 那份同时喂 H2（测试）与真 MySQL（部署），H2 认而 MySQL 不认的写法在测试里查不出来。
 已知坑与替代写法写在 `dw-org/api/src/main/resources/db/migration/mysql/V8__grant_project_roles.sql` 顶部注释里；
 约定本身见 `docs/adr/0002-schema-single-source.md`。
@@ -37,7 +37,18 @@
 - `V13__service_registry.sql` — V13 · service registry
 - `V14__refresh_tokens.sql` — V14 · refresh tokens
 - `V15__member_product_roles.sql` — V15 · member product roles
+- `V16__service_registry_frontend_url.sql` — V16 · service registry frontend url
+- `V17__nav_items.sql` — V17 · nav items
+- `V18__nav_items_scope.sql` — V18 · nav items scope
+- `V19__nav_groups.sql` — V19 · nav groups
 - `V1__schema.sql` — V1 · schema
+- `V20__product_roles.sql` — V20 · product roles
+- `V21__nav_groups_mounted.sql` — V21 · nav groups mounted
+- `V22__nav_groups_drop_product.sql` — V22 · nav groups drop product
+- `V23__nav_nodes.sql` — V23 · nav nodes
+- `V24__nav_drop_proj_back.sql` — V24 · nav drop proj back
+- `V25__nav_project_appearance.sql` — V25 · nav project appearance
+- `V26__appearance_split_workbench_project.sql` — V26 · appearance split workbench project
 - `V8__grant_project_roles.sql` — V8 · grant project roles
 - `V9__ai_caps_and_prompts.sql` — V9 · ai caps and prompts
 
@@ -61,7 +72,18 @@
 - `V13__service_registry.sql` — V13 · service registry
 - `V14__refresh_tokens.sql` — V14 · refresh tokens
 - `V15__member_product_roles.sql` — V15 · member product roles
+- `V16__service_registry_frontend_url.sql` — V16 · service registry frontend url
+- `V17__nav_items.sql` — V17 · nav items
+- `V18__nav_items_scope.sql` — V18 · nav items scope
+- `V19__nav_groups.sql` — V19 · nav groups
 - `V1__schema.sql` — V1 · schema
+- `V20__product_roles.sql` — V20 · product roles
+- `V21__nav_groups_mounted.sql` — V21 · nav groups mounted
+- `V22__nav_groups_drop_product.sql` — V22 · nav groups drop product
+- `V23__nav_nodes.sql` — V23 · nav nodes
+- `V24__nav_drop_proj_back.sql` — V24 · nav drop proj back
+- `V25__nav_project_appearance.sql` — V25 · nav project appearance
+- `V26__appearance_split_workbench_project.sql` — V26 · appearance split workbench project
 - `V8__grant_project_roles.sql` — V8 · grant project roles
 - `V9__ai_caps_and_prompts.sql` — V9 · ai caps and prompts
 
