@@ -20,11 +20,48 @@ public class TenantAdminController {
   private final TenantAdminService tenants;
   private final AiPromptService prompts;
   private final KnowledgeService knowledge;
+  private final ModulePolicyService modules;
+  private final ComputeService computes;
 
-  public TenantAdminController(TenantAdminService tenants, AiPromptService prompts, KnowledgeService knowledge) {
+  public TenantAdminController(
+      TenantAdminService tenants, AiPromptService prompts, KnowledgeService knowledge,
+      ModulePolicyService modules, ComputeService computes) {
     this.tenants = tenants;
     this.prompts = prompts;
     this.knowledge = knowledge;
+    this.modules = modules;
+    this.computes = computes;
+  }
+
+  /** 工作台「模块管理」：本组织在平台开通范围内的启停与可见范围。 */
+  @GetMapping("/modules")
+  public List<ApiModels.ModuleRowDto> modules(@PathVariable String id) {
+    return modules.list(id);
+  }
+
+  /** 全量覆盖保存（空数组 = 清空全部策略，回到「没配过」）。 */
+  @PutMapping("/modules")
+  public List<ApiModels.ModuleRowDto> putModules(
+      @PathVariable String id, @RequestBody List<ApiModels.ModulePolicyDto> body) {
+    return modules.put(id, body);
+  }
+
+  /** 工作台「计算资源」：本组织自己的调度集群与数仓引擎。 */
+  @GetMapping("/compute")
+  public ApiModels.ComputeDto compute(@PathVariable String id) {
+    return computes.get(id);
+  }
+
+  @PutMapping("/compute")
+  public ApiModels.ComputeDto putCompute(
+      @PathVariable String id, @RequestBody ApiModels.ComputePutReq body) {
+    return computes.put(id, body);
+  }
+
+  /** 用已保存的配置探一次活。失败也回 200（结论写在 {@code schedulerStatus} 里）。 */
+  @PostMapping("/compute/test")
+  public ApiModels.ComputeDto testCompute(@PathVariable String id) {
+    return computes.test(id);
   }
 
   @GetMapping("/users")

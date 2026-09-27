@@ -484,6 +484,42 @@ async function setModules(page: Page, tenantId: string, modules: string[]) {
   await page.request.patch(`/api/v1/platform/tenants/${tenantId}`, { headers, data: { modules } });
 }
 
+/** 租户内的管理端点：**必须**用租户管理员令牌（平台管理员拿到的是 403「无权进入该组织」）。 */
+async function tenantAdminHeaders(page: Page) {
+  return {
+    Authorization: `Bearer ${await tenantAdminToken(page)}`,
+    'X-Tenant-Code': 'xinghe',
+  };
+}
+
+/**
+ * 直接改本租户的模块策略（走真实接口，与「模块管理」页同一个）。
+ *
+ * <p>传空数组 = 清空 = 回到「没配过」—— `finally` 里就用它还原。**不能只把开关切回去**：
+ * 库里的行一旦写下去，「没配过」和「配成全开」在生效侧就不是一回事（前者的可见范围根本不判，
+ * 后者按默认档真的开始过滤）。
+ */
+async function putModulePolicies(
+  page: Page,
+  tenantId: string,
+  policies: { product: string; enabled: boolean; visibleTo: string }[]
+) {
+  const res = await page.request.put(`/api/v1/tenants/${tenantId}/modules`, {
+    headers: await tenantAdminHeaders(page),
+    data: policies,
+  });
+  expect(res.ok(), `改模块策略失败：${res.status()} ${await res.text()}`).toBeTruthy();
+}
+
+/** 直接改本租户的计算资源（走真实接口，与「计算资源」页同一个）。 */
+async function putCompute(page: Page, tenantId: string, body: Record<string, unknown>) {
+  const res = await page.request.put(`/api/v1/tenants/${tenantId}/compute`, {
+    headers: await tenantAdminHeaders(page),
+    data: body,
+  });
+  expect(res.ok(), `改计算资源失败：${res.status()} ${await res.text()}`).toBeTruthy();
+}
+
 /** 某个产品当前登记的页面地址（{@link registerService} 是覆盖语义，还原时要先记下来）。 */
 async function frontendUrlOf(page: Page, product: string): Promise<string | undefined> {
   const headers = { Authorization: `Bearer ${await adminToken(page)}` };
@@ -1874,6 +1910,138 @@ test.describe.serial('工作台前端流程', () => {
       await expect(page.getByRole('heading', { name: /成员管理/ })).toBeVisible();
     } finally {
       await page.request.delete(`/api/v1/tenants/${tid}/projects/${altId}`, { headers });
+    }
+  });
+
+  /**
+   * 工作台「模块管理」：把平台开通的模块**真的**从项目侧栏上拿下来。
+   *
+   * <p>这条钉的是三层控制的最后一层 —— 平台开通（许可）∩ 本组织启用（策略）∩ 当前人可见。
+   * 前两层以前就有，第三层（可见范围）是 V27 新加的。
+   *
+   * <p>同时钉住「始终出现」的那一支：数据地图形态的节点（`emptyPolicy: always`）在模块
+   * 被关掉时**保留并置灰**，而不是整条消失 —— 抹掉会让人以为壳里没这项。
+   *
+   * <p><b>策略是持久化的，且菜单树是全局的</b>：这条用例会短暂影响验证库里所有租户的侧栏
+   * （几秒），`finally` 里把策略清空（不是「切回全开」—— 那与「没配过」在生效侧不是一回事）
+   * 并删掉自建节点。Playwright 这里是 `workers: 1`，不存在与其他用例并行打架的问题。
+   */
+  test('工作台：模块管理关掉产品后，项目壳侧栏该入口消失', async ({ page }) => {
+    test.setTimeout(120_000);
+    const plainPath = `/lineage/mp-plain-${stamp}`;
+    const alwaysPath = `/lineage/mp-always-${stamp}`;
+    const plainLabel = `模块验证·普通入口-${stamp}`;
+    const alwaysLabel = `模块验证·始终出现-${stamp}`;
+
+    await requireRegisteredFrontend(page, 'metadata');
+    await configureNavItems(page, [
+      { product: 'metadata', scope: 'project', label: plainLabel, path: plainPath },
+    ]);
+    // 「始终出现」的那一支：不可见时保留并置灰（数据地图就是这个配置形态）
+    await createNavNode(page, {
+      scope: 'project',
+      parentId: '',
+      title: alwaysLabel,
+      path: alwaysPath,
+      product: 'metadata',
+      emptyPolicy: 'always',
+    });
+    const tid = await xingheTenantId(page);
+
+    try {
+      await login(page, '张三', '123456');
+
+      await openNav(page, '模块管理', '/org/workbench/modules');
+      await expect(page.getByRole('heading', { name: '模块管理' })).toBeVisible();
+      const row = page.locator('.ant-table-row').filter({ hasText: '数据地图' }).first();
+      await expect(row, '表格里应当列出平台已开通的模块').toBeVisible({ timeout: 15_000 });
+
+      // 关掉它 —— 即存，没有「保存」按钮
+      const sw = row.locator('.ant-switch').first();
+      if (!((await sw.getAttribute('class')) ?? '').includes('ant-switch-checked')) {
+        // 上一次跑没还原干净时先切回开着，下面那一步才有意义
+        await sw.click();
+        await expect(sw).toHaveClass(/ant-switch-checked/, { timeout: 15_000 });
+      }
+      await sw.click();
+      await expect(sw).not.toHaveClass(/ant-switch-checked/, { timeout: 15_000 });
+
+      // 进项目壳看侧栏
+      await openNav(page, '项目管理');
+      await btn(page.locator('.projects-grid .proj').first(), '进入项目').click();
+      await expect(page).toHaveURL(/\/org\/project\//, { timeout: 20_000 });
+
+      const nav = page.locator('aside nav');
+      // 先等置灰那一项出现（= 菜单已经渲染完），再断言另一条不在 ——
+      // 反过来的话，「还没有菜单」会让 toHaveCount(0) 立刻通过。
+      await expect(
+        nav.locator('span.item.off').filter({ hasText: alwaysLabel }),
+        '承诺「始终出现」的入口应当保留并置灰，而不是整条消失'
+      ).toHaveCount(1, { timeout: 20_000 });
+      await expect(
+        nav.getByText(plainLabel, { exact: true }),
+        '本组织关掉的模块，它的入口不该还在侧栏上'
+      ).toHaveCount(0);
+    } finally {
+      await putModulePolicies(page, tid, []);
+      await clearNavItems(page, [plainPath, alwaysPath]);
+    }
+  });
+
+  /**
+   * 工作台「计算资源」：Token 只进不出。
+   *
+   * <p>这条的重点不是「能不能存」，而是<b>存进去之后页面上再也看不到明文</b> ——
+   * 明文框清空、提示改成「已存有 Token」、整页文本里不含那个串。后者是防泄漏的那道门：
+   * 将来有人给 DTO 加个字段就会红在这里。
+   *
+   * <p>地址故意填一个必然连不上的（回环保留端口）：这样「测试连接」走的是一条
+   * <b>预期失败</b>路径 —— 连不上是结论，不是错误，按钮点完页面要说清原因。
+   */
+  test('工作台：计算资源存下 Token 后不再回显明文', async ({ page }) => {
+    test.setTimeout(150_000);
+    const tid = await xingheTenantId(page);
+    const secret = `ds-e2e-${stamp}`;
+
+    try {
+      await login(page, '张三', '123456');
+      await openNav(page, '计算资源', '/org/workbench/compute');
+      await expect(page.getByRole('heading', { name: '计算资源' })).toBeVisible();
+
+      await field(page, 'API 基址').fill('http://127.0.0.1:1/ds');
+      await field(page, 'Access Token').fill(secret);
+      await btn(page, '保存').click();
+      await expect(page.locator('.ant-message').getByText('已保存')).toBeVisible({ timeout: 15_000 });
+
+      await expect(field(page, 'Access Token'), '明文框存完就该清空').toHaveValue('');
+      await expect(page.getByText('本组织已存有 Token（加密保存，不会回显）')).toBeVisible();
+      expect(
+        await page.locator('body').innerText(),
+        '页面上任何地方都不该出现明文 Token'
+      ).not.toContain(secret);
+
+      // 引擎开关落库：刷新之后还在
+      const hive = page.locator('.ant-table-row').filter({ hasText: 'Hive' }).first();
+      await hive.locator('.ant-switch').first().click();
+      await expect(hive.locator('.ant-tag').first()).toHaveText('已启用', { timeout: 15_000 });
+
+      await page.reload();
+      await expect(page.getByRole('heading', { name: '计算资源' })).toBeVisible({ timeout: 20_000 });
+      await expect(
+        page.locator('.ant-table-row').filter({ hasText: 'Hive' }).first().locator('.ant-tag').first(),
+        '引擎启停要真的落库，不能只是本地状态'
+      ).toHaveText('已启用', { timeout: 15_000 });
+
+      // 用**存着的**配置探活：这个地址连不上，结论要显示出来而不是报「平台坏了」
+      await btn(page, '测试连接').click();
+      await expect(page.locator('.ant-tag').filter({ hasText: '未通过' })).toBeVisible({
+        timeout: 30_000,
+      });
+      await expect(page.getByText('连不上', { exact: false }).first()).toBeVisible();
+    } finally {
+      // 地址与引擎还原。**Token 没有清除接口**（设计如此：只进不出），所以这次 e2e 会在
+      // 验证库里留下一个连不上的假 Token —— 它是这一条自己造的，不影响任何真实环境。
+      await putCompute(page, tid, { schedulerEnabled: false, schedulerBaseUrl: '', engines: [] });
     }
   });
 });

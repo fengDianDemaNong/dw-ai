@@ -12,6 +12,8 @@ export const ORG_PAGES = {
   workbench: `${ORG_HOME}/workbench/projects`,
   users: `${ORG_HOME}/workbench/users`,
   roles: `${ORG_HOME}/workbench/roles`,
+  modules: `${ORG_HOME}/workbench/modules`,
+  compute: `${ORG_HOME}/workbench/compute`,
   knowledge: `${ORG_HOME}/workbench/knowledge`,
   settings: `${ORG_HOME}/workbench/settings`,
   platformTenants: `${ORG_HOME}/platform/tenants`,

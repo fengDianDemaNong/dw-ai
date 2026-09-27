@@ -2,6 +2,7 @@ package com.dwai.platform.meta;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.dwai.platform.internal.ServiceRegistry;
+import com.dwai.platform.meta.dto.ApiModels;
 import com.dwai.platform.meta.entity.NavNodeEntity;
 import com.dwai.platform.meta.entity.TenantLicenseEntity;
 import com.dwai.platform.meta.mapper.NavNodeMapper;
@@ -58,6 +59,23 @@ import java.util.UUID;
  *       某个产品挂了就空掉；展开为空的挂载节点按 {@code empty_policy} 处理。</li>
  * </ol>
  *
+ * <h2>第三层：租户自己的模块策略（V27）</h2>
+ *
+ * <p>许可（{@code tenant_licenses.modules}）是<b>平台</b>给这个租户开通的上限，只有平台
+ * 管理员能改；{@code tenant_licenses.module_policies}（工作台「模块管理」页写的）是租户
+ * 在这个上限之内的第二层：本组织启用哪些、每个模块给谁看。项目侧栏 = 平台已开通 ∩
+ * 租户已启用 ∩ 当前人可见，就是这里实现的。
+ *
+ * <p><b>无策略 = 不判</b>（{@link #policiesOf} 返回空 map 就是这种情况）：老租户没有这一行，
+ * 升级后侧栏必须逐字不变。这是这一层唯一的向后兼容命门 —— 页面上的「默认值」只是
+ * <b>显示的初值</b>（供管理员一进来就有个合理的起点），保存之后才真正生效。两者刻意
+ * 不对称，别顺手「统一」：把生效默认也按 {@code role_holders} 判，会悄悄拿走一批人
+ * 今天看得到的入口，而表现只是「侧栏少了一条」，不会有任何报错。
+ *
+ * <p>与许可的<b>fail 方向也不同</b>：许可那一份是 fail-closed（{@link #licensedProducts}，
+ * 没有行 = 一个都没开）；策略这一份即使读到脏数据也只会「少挡一点」而不是把侧栏打空
+ * （解析时逐项丢弃非法项，见 {@link #policiesOf}）。
+ *
  * <h2>不满足条件时的两种表现，与 V18 迁移的既有口径一致</h2>
  *
  * <ul>
@@ -93,6 +111,21 @@ public class NavNodeService {
    * 表现为接口 200、行为却按某个没人预期的默认值走。
    */
   public static final Set<String> EMPTY_POLICIES = Set.of("always", "hide");
+
+  /**
+   * {@code visibleTo} 的白名单 —— 模块可见范围的四档。
+   *
+   * <p>与 {@link #SCOPES} / {@link #EMPTY_POLICIES} 同样的「写入时就拒绝」：写进一个谁也不认
+   * 的档名，表现为接口 200、权限<b>看起来</b>配了却按默认放行，是最难查的一种坏法。
+   *
+   * <p>四档的判据见 {@link Render#visible}。默认档是 {@code role_holders}
+   * （warehouse 例外，见 {@link #defaultVisibleTo}）。
+   */
+  public static final Set<String> VISIBLE_TO =
+      Set.of("tenant_admin", "project_admin", "role_holders", "all_members");
+
+  /** 默认可见范围档（页面显示的初值，见 {@link #defaultVisibleTo}）。 */
+  public static final String DEFAULT_VISIBLE_TO = "role_holders";
 
   /** 空目录策略里「对用户承诺更强」的那一个。 */
   public static final String ALWAYS = "always";
@@ -576,7 +609,8 @@ public class NavNodeService {
             .orderByAsc(NavNodeEntity::getTitle));
     if (rows.isEmpty()) return List.of();
 
-    Render r = new Render(projectId, licensedProducts(tenantId), access.isRealTenantAdmin());
+    Render r = new Render(
+        projectId, licensedProducts(tenantId), access.isRealTenantAdmin(), policiesOf(tenantId));
 
     // 先把「挂载展开会吐出来的路径」收齐。接管判据就是它 —— 见方法注释最后一段：
     // 只有保证有替代品的才敢吞。放在正式渲染之前，是因为手工行要先知道哪些被接管了。
@@ -587,7 +621,7 @@ public class NavNodeService {
 
     Map<String, List<NavNodeEntity>> byParent = new HashMap<>();
     for (NavNodeEntity n : rows) {
-      if (!r.licensed.contains(nz(n.getProduct())) && isProductNode(n)) continue;
+      if (isProductNode(n) && !r.shows(n)) continue;
       byParent.computeIfAbsent(nz(n.getParentId()), k -> new ArrayList<>()).add(n);
     }
 
@@ -611,6 +645,11 @@ public class NavNodeService {
     if (isProductNode(n)) {
       String product = n.getProduct();
       if (r.taken.contains(slot(product, n.getScope(), n.getPath()))) return null;
+      // 本组织没启用 / 你看不到 —— 走到这一步的只剩「承诺了始终出现」的那一支
+      // （其余的在 treeFor 里就已经不出现），所以这里是置灰而不是抹掉。
+      if (!r.available(product)) {
+        return unavailable(toRow(n), r.unavailableReason(product));
+      }
       if (hasPermWord(n.getPerm()) && !r.roleHas(product, n.getPerm())) return null;
     } else if (Boolean.TRUE.equals(n.getAdminOnly()) && !r.tenantAdmin) {
       return null;
@@ -660,12 +699,19 @@ public class NavNodeService {
    * {@code hide} 整枝不出现。不会因为某个产品挂了就让侧栏空掉。
    */
   private Map<String, Object> renderMounted(NavNodeEntity n, Render r) {
-    Map<String, Object> pn = r.productNode(n.getProduct(), n.getRef());
     Map<String, Object> row = toRow(n);
     row.put("mounted", true);
     // 挂载行自己也要带地址：产品拉不到时它是这一支唯一的外壳，
     // 前端要能把它当「这个产品的入口」用（与手工行同一口径）。
     row.put("frontendUrl", frontendUrl(n.getProduct()));
+
+    // 不可用时**不拉产品清单**：这一支要渲染成置灰的空目录，拉回来也没用 —— 而每一次
+    // 清单拉取在拉不到时都要等一次超时，侧栏是每个页面都画的。
+    if (!r.available(n.getProduct())) {
+      return unavailable(row, r.unavailableReason(n.getProduct()));
+    }
+
+    Map<String, Object> pn = r.productNode(n.getProduct(), n.getRef());
 
     List<Map<String, Object>> kids = new ArrayList<>();
     if (pn != null) {
@@ -750,6 +796,17 @@ public class NavNodeService {
 
   /** {@code always} 空目录里的占位项：这一支照常出现，但里面没得点。 */
   private static Map<String, Object> emptyPlaceholder() {
+    return emptyPlaceholder("该产品未对本租户开通，或你还没有对应角色");
+  }
+
+  /**
+   * 同上，但由调用方给出<b>具体成因</b>。
+   *
+   * <p>V27 之后「这一支为什么是空的」有三种成因：平台没开通、本组织没启用、你不在可见范围内。
+   * 一律套用上面那句默认文案，会把第三种说成第一种 —— 管理员照着「未开通」去平台后台查，
+   * 而那边明明开着。
+   */
+  private static Map<String, Object> emptyPlaceholder(String reason) {
     Map<String, Object> row = new LinkedHashMap<>();
     // 空串是有意的：它不是一个可去的地址。前端的高亮必须跳过 disabled 项，
     // 否则空串会成为「最短前缀」命中任意路径（见 config/nav.ts）。
@@ -758,8 +815,26 @@ public class NavNodeService {
     // 图标名必须取自前端 config/navIcons.ts —— 写一个不在表里的名字不会报错，只会静默不渲染图标
     row.put("icon", "BlockOutlined");
     row.put("disabled", true);
-    row.put("disabledReason", "该产品未对本租户开通，或你还没有对应角色");
+    row.put("disabledReason", reason);
     row.put("children", List.of());
+    return row;
+  }
+
+  /**
+   * 一个「留在树里、但这个人用不了」的节点：置灰 + 说明 + 空目录。
+   *
+   * <p>只有承诺了「始终出现」的节点才走得到这里（见 {@link Render#shows}），也就是数据地图
+   * 那一支。一般的产品节点不可用是<b>整条不出现</b>（{@code treeFor} 的过滤），两者不是一回事：
+   * 前者是「这一支本该在这里，只是你用不了」，后者是「这个产品与你无关」。
+   *
+   * <p>{@code path} 必须清掉 —— 留着原路径会让前端把它画成一个可点的入口，点进去恰好是
+   * 一个 403，比置灰更糟。
+   */
+  private static Map<String, Object> unavailable(Map<String, Object> row, String reason) {
+    row.put("path", "");
+    row.put("disabled", true);
+    row.put("disabledReason", reason);
+    row.put("children", List.of(emptyPlaceholder(reason)));
     return row;
   }
 
@@ -802,6 +877,54 @@ public class NavNodeService {
   }
 
   /**
+   * 该租户<b>显式配过</b>的模块策略，按 product 索引（消费面）。
+   *
+   * <p>读的是与 {@link #licensedProducts} 同一行，但<b>fail 方向刻意相反</b>：许可那份
+   * 没有行 = 一个都没开（fail-closed，那是「能开什么」的上限，宁可少不可多）；策略这份
+   * 没有行 = <b>什么都不判</b>（不让一份缺失的配置把侧栏打空）。两者都是有意的，别合并。
+   *
+   * <p><b>逐项丢弃非法项，而不是整份拒</b>：{@code product} 不在许可模块表里、或
+   * {@code visibleTo} 是个不认识的档名，都只跳过这一项。整份拒会让一行脏数据把该租户
+   * 全部模块策略一起废掉，而表现是「明明配了却没反应」，没有任何报错。
+   *
+   * <p>「策略里出现平台没开通的模块」不在这里挡：{@link Render#shows} 先判许可，
+   * 没开通的产品根本走不到读策略那一步，于是自然无效（写侧另有 400，见
+   * {@code ModulePolicyService}）。
+   */
+  private Map<String, ApiModels.ModulePolicyDto> policiesOf(String tenantId) {
+    TenantLicenseEntity lic = licenses.selectById(tenantId);
+    if (lic == null) return Map.of();
+    List<Map<String, Object>> raw = Jsons.maps(lic.getModulePolicies());
+    if (raw.isEmpty()) return Map.of();
+    Map<String, ApiModels.ModulePolicyDto> out = new LinkedHashMap<>();
+    for (Map<String, Object> item : raw) {
+      String product = str(item.get("product"));
+      if (!ProductCodes.LICENSE_MODULES.contains(product)) continue;
+      String visibleTo = str(item.get("visibleTo"));
+      if (!visibleTo.isEmpty() && !VISIBLE_TO.contains(visibleTo)) continue;
+      // 缺 enabled / 缺 visibleTo 都按默认补 —— 一份写得半全的策略不该整项失效。
+      out.put(product, new ApiModels.ModulePolicyDto(
+          product,
+          !Boolean.FALSE.equals(item.get("enabled")),
+          visibleTo.isEmpty() ? defaultVisibleTo(product) : visibleTo));
+    }
+    return out;
+  }
+
+  /**
+   * 某个模块的默认可见范围（照原型）。
+   *
+   * <p>warehouse 是 {@code all_members}、其余是 {@code role_holders}：数仓建模是每个项目
+   * 都会用到的底座，再收一道会让人进了项目却看不到建模入口。
+   *
+   * <p><b>这只是「页面显示的初值」</b> —— 生效侧「没配过 = 不判」（见类注释第三层），
+   * 两者不对称是刻意的：把生效默认也按这里判，升级后一批人今天看得到的入口会静默消失。
+   */
+  private static String defaultVisibleTo(String product) {
+    return "warehouse".equals(product) ? "all_members" : DEFAULT_VISIBLE_TO;
+  }
+
+  /**
    * {@code (product, scope, path)} 的拼接键 —— 接管判据用的就是它。
    *
    * <p>用 {@code \u0000} 分隔而不是 {@code :}/{@code /}：产品码、壳名、路径都可能含这些
@@ -831,14 +954,82 @@ public class NavNodeService {
     private final String projectId;
     private final List<String> licensed;
     private final boolean tenantAdmin;
+    /**
+     * 这个租户<b>显式配过</b>的模块策略，按 product 索引。
+     *
+     * <p><b>缺项 = 没配过 = 不判</b>（见类注释第三层）—— 这是老租户升级后侧栏不变的唯一依据，
+     * 所以这里只装「库里真有的那些」，不预先用默认值补全（补全就等于默认生效了）。
+     */
+    private final Map<String, ApiModels.ModulePolicyDto> policies;
     private final Map<String, String> roleByProduct = new HashMap<>();
     private final Map<String, List<Map<String, Object>>> reported = new HashMap<>();
     private final Set<String> taken = new LinkedHashSet<>();
 
-    Render(String projectId, List<String> licensed, boolean tenantAdmin) {
+    Render(String projectId, List<String> licensed, boolean tenantAdmin,
+        Map<String, ApiModels.ModulePolicyDto> policies) {
       this.projectId = projectId;
       this.licensed = licensed;
       this.tenantAdmin = tenantAdmin;
+      this.policies = policies;
+    }
+
+    /**
+     * 这个产品节点该不该留在树里。
+     *
+     * <p>三级依次判：平台未开通（既有行为）→ 本组织未启用 → 当前人不可见。
+     * 后两级不通过时<b>默认整条不出现</b>；只有承诺了「始终出现」的（{@code empty_policy
+     * = always}，即数据地图那一支，见 {@link #ALWAYS} 的注释）才留在树里、交给
+     * {@code render} 置灰说明。
+     *
+     * <p>判据挂在 {@code empty_policy} 上而不是硬编产品码：那条策略的注释里写的就是
+     * 「数据地图那一支始终出现，未开通或未派角色时置灰并说明」，复用它，将来别的产品
+     * 想要同样的待遇只需要改配置。
+     */
+    boolean shows(NavNodeEntity n) {
+      String product = nz(n.getProduct());
+      if (!licensed.contains(product)) return false;
+      if (available(product)) return true;
+      return ALWAYS.equals(n.getEmptyPolicy());
+    }
+
+    /**
+     * 这个产品这次渲染里<b>可用</b> = 本组织启用了 且 当前人看得见。
+     *
+     * <p>没配过策略的产品一律可用 —— 见 {@link #policies} 的注释。
+     */
+    boolean available(String product) {
+      ApiModels.ModulePolicyDto pol = policies.get(product);
+      if (pol == null) return true;
+      if (!pol.enabled()) return false;
+      return visible(product, pol.visibleTo());
+    }
+
+    /** 四档见 {@link #VISIBLE_TO}。 */
+    private boolean visible(String product, String visibleTo) {
+      if (visibleTo == null || visibleTo.isBlank()) return true;
+      if (tenantAdmin) return true;
+      // `visibleTo` 是**项目内**的概念（「谁能在项目侧栏里看见它」）。工作台壳还没有项目
+      // 上下文（X-Project-Id 为空）时判不了，这里**不判**而不是判否：判否会让工作台里挂着的
+      // 那几个产品入口对所有人消失，而表现只是「侧栏少了一条」——不会有任何报错。
+      if (projectId == null || projectId.isBlank()) return true;
+      return switch (visibleTo) {
+        case "all_members" -> access.isProjectMember(projectId);
+        case "role_holders" -> access.currentRole(projectId, product).isPresent();
+        case "project_admin" -> access.isProductAdmin(projectId, product);
+        case "tenant_admin" -> false;
+        // 写入时已按 VISIBLE_TO 归一；读到没见过的档名时**不判**而不是判否 ——
+        // 一行脏数据不该让某个产品对所有人消失。
+        default -> true;
+      };
+    }
+
+    /** 置灰时给出的成因，与 {@link #shows} 的两级一一对应。 */
+    String unavailableReason(String product) {
+      ApiModels.ModulePolicyDto pol = policies.get(product);
+      if (pol != null && !pol.enabled()) {
+        return "本组织未启用该模块（工作台 › 模块管理）";
+      }
+      return "你不在本组织允许看见该模块的范围内（工作台 › 模块管理）";
     }
 
     boolean roleHas(String product, String perm) {

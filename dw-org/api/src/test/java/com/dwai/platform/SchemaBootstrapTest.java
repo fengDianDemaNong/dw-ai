@@ -35,13 +35,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 })
 class SchemaBootstrapTest {
 
-    /** dw-org 全库应有的表（跨 V1~V23 全部迁移）。 */
+    /** dw-org 全库应有的表（跨 V1~V27 全部迁移）。 */
     private static final List<String> EXPECTED_TABLES = List.of(
             "tenants", "users", "user_tenants", "projects", "project_members",
             "platform_access", "tenant_grants", "tenant_licenses", "tenant_llm",
             "appearance_prefs", "tenant_ai_prompts", "tenant_knowledge_articles",
             "refresh_tokens", "service_registry", "nav_nodes",
-            "product_roles", "product_role_perms");
+            "product_roles", "product_role_perms", "tenant_compute");
 
     /**
      * 关键列的存在性断言 —— 只建了表、列漏了是另一种失败形态。
@@ -66,7 +66,16 @@ class SchemaBootstrapTest {
             "product_roles", List.of("id", "product", "code", "label", "hint",
                     "is_admin", "builtin", "sort_order"),
             "product_role_perms", List.of("role_id", "perm"),
-            "tenant_licenses", List.of("tenant_id", "modules", "ai_caps"));
+            // module_policies 是 V27 新增的（租户侧的模块启停 + 可见范围）。漏了它不会报错，
+            // 症状是「模块管理页保存成功、侧栏毫无变化」—— 实体映射到一个不存在的列，
+            // 只在真跑到那条 SQL 时才炸，而迁移测试全绿。
+            "tenant_licenses", List.of("tenant_id", "modules", "ai_caps", "module_policies"),
+            // tenant_compute 是 V27 新增的（租户自己的调度集群 + 引擎启停）。
+            // token 那一列是加密存的，scheduler_note 是「测试连接」的结论原文 ——
+            // 少任何一个，页面上那一格就永远是空的，而接口照样 200。
+            "tenant_compute", List.of("tenant_id", "scheduler_enabled", "scheduler_base_url",
+                    "scheduler_token_enc", "scheduler_status", "scheduler_tested_at",
+                    "scheduler_note", "engines", "updated_at"));
 
     /**
      * V23 的 {@code (scope, parent_id, title)} 唯一约束真的建出来了。
@@ -148,10 +157,10 @@ class SchemaBootstrapTest {
         Integer seeded = db.queryForObject(
                 "select count(*) from nav_nodes where id like 'nav-sys%' or id like 'nav-proj%'",
                 Integer.class);
-        assertEquals(9, seeded == null ? 0 : seeded,
-                "种子应当是 6 条工作台壳（系统管理 + 5 项）+ 3 条项目壳"
+        assertEquals(11, seeded == null ? 0 : seeded,
+                "种子应当是 8 条工作台壳（系统管理 + 7 项）+ 3 条项目壳"
                         + "（项目壳第 3 条「返回工作台」已在 V24 删掉——那个入口现在只在用户面板里；"
-                        + "V25 补了第 4 条「外观」）");
+                        + "V25 补了第 4 条「外观」；V27 补了「模块管理」「计算资源」）");
 
         assertEquals("/org/project/{code}/members", db.queryForObject(
                         "select path from nav_nodes where id = 'nav-proj-members'", String.class),

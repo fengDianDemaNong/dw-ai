@@ -348,6 +348,20 @@ public class ProductRoleService {
         .ne(ProductRoleEntity::getId, keepId));
   }
 
+  /**
+   * 这个角色是不是该产品的<b>管理角色</b>（{@code is_admin}）。
+   *
+   * <p>模块可见范围的 {@code project_admin} 档要的就是它 —— 「项目管理员」在产品语义里
+   * 不是一个独立身份，而是「持有了那个 {@code is_admin} 角色的人」。
+   *
+   * <p>找不到这个角色（产品码/角色码对不上）时返回 false，不抛异常：调用方是侧栏渲染，
+   * 与 {@code AccessService.currentRole} 同一条取舍 —— 配置对不上不该把整个壳打成 500。
+   */
+  public boolean isAdminRole(String product, String role) {
+    ProductRoleEntity e = find(product, role);
+    return e != null && Boolean.TRUE.equals(e.getIsAdmin());
+  }
+
   private long countHolders(String product, String code) {
     return members.selectCount(new LambdaQueryWrapper<ProjectMemberEntity>()
         .eq(ProjectMemberEntity::getProduct, product)

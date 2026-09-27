@@ -353,6 +353,39 @@ export type LlmConfigDto = {
   hasKey: boolean;
 };
 
+/**
+ * 工作台「模块管理」的一行。
+ *
+ * `explicit = false` 表示**从未配过**这一项，`enabled` / `visibleTo` 只是页面上的初值；
+ * 生效侧对没配过的模块不判（见 `NavNodeService` 第三层注释），保存之后才真正开始判。
+ * 页面据此给一句提示，否则「显示全开、实际不判」会让人以为保存过。
+ */
+export type ModulePolicyRow = {
+  product: string;
+  enabled: boolean;
+  visibleTo: string;
+  frontendUrl: string;
+  explicit: boolean;
+};
+
+export type ComputeEngineRow = { kind: string; enabled: boolean };
+
+/**
+ * 计算资源。
+ *
+ * **没有 token 字段** —— 服务端只回 `hasToken` 布尔，明文（含掩码）都不出服务端；
+ * 类型层面就没有它，杜绝某天顺手把响应接上请求又把密文写回去。
+ */
+export type ComputeConfig = {
+  schedulerEnabled: boolean;
+  schedulerBaseUrl: string;
+  hasToken: boolean;
+  schedulerStatus: string;
+  schedulerTestedAt: string;
+  schedulerNote: string;
+  engines: ComputeEngineRow[];
+};
+
 export type TableVersion = {
   id: string;
   tableId: string;
@@ -777,6 +810,31 @@ export const api = {
     llm: (tenantId: string) => req<LlmConfigDto>(`/api/v1/tenants/${tenantId}/llm`),
     putLlm: (tenantId: string, body: Record<string, unknown>) =>
       req<LlmConfigDto>(`/api/v1/tenants/${tenantId}/llm`, { method: 'PUT', body: JSON.stringify(body) }),
+    // 模块策略与计算资源：只在各自的页面里按需拉（两者都只有租户管理员进得来，
+    // 塞进每次登录都拉的 session 只是白拉一遍，见 stores/app.ts 的 session 注释）。
+    modules: (tenantId: string) => req<ModulePolicyRow[]>(`/api/v1/tenants/${tenantId}/modules`),
+    putModules: (tenantId: string, body: { product: string; enabled: boolean; visibleTo: string }[]) =>
+      req<ModulePolicyRow[]>(`/api/v1/tenants/${tenantId}/modules`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    compute: (tenantId: string) => req<ComputeConfig>(`/api/v1/tenants/${tenantId}/compute`),
+    putCompute: (
+      tenantId: string,
+      body: {
+        schedulerEnabled?: boolean;
+        schedulerBaseUrl?: string;
+        schedulerToken?: string;
+        engines?: ComputeEngineRow[];
+      }
+    ) =>
+      req<ComputeConfig>(`/api/v1/tenants/${tenantId}/compute`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    // 测试连接：失败也回 200，结论在 schedulerStatus / schedulerNote 里。
+    testCompute: (tenantId: string) =>
+      req<ComputeConfig>(`/api/v1/tenants/${tenantId}/compute/test`, { method: 'POST' }),
     grants: (tenantId: string) => req<Grant[]>(`/api/v1/tenants/${tenantId}/grants`),
     createGrant: (
       tenantId: string,

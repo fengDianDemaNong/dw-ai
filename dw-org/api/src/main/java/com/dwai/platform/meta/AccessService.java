@@ -385,6 +385,55 @@ public class AccessService {
   }
 
   /**
+   * 这个人是不是**这个项目的成员** —— 不论他在这个产品里有没有角色。
+   *
+   * <p>与 {@link #currentRole} 的区别就是「有没有角色」这一层：模块的可见范围里
+   * {@code all_members}（全部项目成员）与 {@code role_holders}（持有该产品角色的人）
+   * 两档的<b>唯一差别</b>就是它，所以必须分开判 —— 拿 {@code currentRole} 非空当
+   * 「是成员」会让这两档变成同一档，而那正是最容易被配错、也最难被发现的一处。
+   *
+   * <p>{@code project_members} 是按 {@code (project, user, product)} 分行存的，所以
+   * <b>故意不带 {@code product} 条件</b>：任意一行都说明这个人在这个项目里。
+   *
+   * <p>判据取宽：平台授权（{@code tenant_grants}）覆盖到该项目的也算成员 —— 他们
+   * 未必有 {@code project_members} 行，但确实进得来这个项目。漏掉这一支的表现是
+   * 「平台管理员配了 all_members，被授权的人仍看不见」，而配的人自己（管理员）看得见，
+   * 于是没人报。
+   *
+   * <p>与 {@link #currentRole} 一样，standalone 下没有真实用户，一律算成员 ——
+   * 那边的「角色」本来就是造出来的，这里跟着同一条取舍走。
+   */
+  public boolean isProjectMember(String projectId) {
+    if (props.isStandalone()) return true;
+    if (projectId == null || projectId.isBlank()) return false;
+    String user = TenantContext.user();
+    if (user == null || user.isBlank()) return false;
+    try {
+      String tid = TenantContext.tenantId();
+      if (tid != null && grantCoversProject(user, tid, projectId)) return true;
+      return members.selectCount(Wrappers.<ProjectMemberEntity>lambdaQuery()
+          .eq(ProjectMemberEntity::getProjectId, projectId)
+          .eq(ProjectMemberEntity::getUserId, user)) > 0;
+    } catch (ResponseStatusException e) {
+      return false;
+    }
+  }
+
+  /**
+   * 这个人是不是**这个项目里该产品的管理员** —— 模块可见范围 {@code project_admin} 档的判据。
+   *
+   * <p>「项目管理员」在产品语义里不是一个独立身份，而是「持有了那个 {@code is_admin}
+   * 角色的人」（见 {@code ProductRoleService.isAdminRole}）。
+   *
+   * <p>租户管理员不必在这里再 OR 一次：{@link #currentRole} 对他们短路返回 {@code admin}，
+   * 而每个产品的管理角色码就是 {@code admin} —— 短路本身已经覆盖。
+   */
+  public boolean isProductAdmin(String projectId, String product) {
+    String role = currentRole(projectId, product).orElse(null);
+    return role != null && productRoles.isAdminRole(product, role);
+  }
+
+  /**
    * 这个角色在这个产品里认不认这个权限词 —— 就是 {@link #requirePerm} 的布尔版，
    * 以产品角色表为准、表里没有该角色则回落硬编码矩阵，<b>口径与判权完全同一处</b>。
    *

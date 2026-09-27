@@ -76,6 +76,10 @@ class NavNodeTest {
     private static final Set<String> SEED_IDS = Set.of(
             "nav-sys", "nav-sys-users", "nav-sys-roles", "nav-sys-projects",
             "nav-sys-knowledge", "nav-sys-settings",
+            // V27 加的两个工作台入口。**必须列进来**：清理逻辑按「不在 SEED_IDS 里 = 本用例
+            // 自己建的」来删，漏了它们会被当垃圾删掉，而后面的用例再读侧栏就少两行 ——
+            // 症状是「别的用例随机变红」，不是本类报错。
+            "nav-sys-modules", "nav-sys-compute",
             "nav-proj", "nav-proj-members");
 
     /** 工作台壳的 org 自有入口（非管理员也看得到的那一条）—— 好几条用例拿它当锚点。 */

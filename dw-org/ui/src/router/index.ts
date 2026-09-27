@@ -74,6 +74,9 @@ const routes: RouteRecordRaw[] = [
       { path: 'projects', name: 'sys-projects', component: () => import('../pages/projects.vue'), meta: { title: '项目管理' } },
       { path: 'users', name: 'sys-users', component: () => import('../pages/org-users.vue'), meta: { title: '用户管理' } },
       { path: 'roles', name: 'sys-roles', component: () => import('../pages/sys/roles.vue'), meta: { title: '角色管理' } },
+      // 顺序跟侧栏（nav_nodes 的 sort_order 35/36）对齐，可读性而已 —— 路由表本身不排序。
+      { path: 'modules', name: 'sys-modules', component: () => import('../pages/sys/modules.vue'), meta: { title: '模块管理' } },
+      { path: 'compute', name: 'sys-compute', component: () => import('../pages/sys/compute.vue'), meta: { title: '计算资源' } },
       { path: 'knowledge', name: 'sys-knowledge', component: () => import('../pages/sys/knowledge.vue'), meta: { title: '知识库' } },
       { path: 'settings', name: 'sys-settings', component: () => import('../pages/sys/settings.vue'), meta: { title: '设置' } },
     ],

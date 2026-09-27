@@ -100,6 +100,8 @@ class NavTreeMountTest {
     private static final Set<String> SEED_IDS = Set.of(
             "nav-sys", "nav-sys-users", "nav-sys-roles", "nav-sys-projects",
             "nav-sys-knowledge", "nav-sys-settings",
+            // V27 加的两个工作台入口，理由同 NavNodeTest.SEED_IDS：漏了会被当本用例自建的行删掉。
+            "nav-sys-modules", "nav-sys-compute",
             "nav-proj", "nav-proj-members");
 
     private static final String PRODUCT = "metadata";

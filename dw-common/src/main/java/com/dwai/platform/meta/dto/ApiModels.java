@@ -80,6 +80,55 @@ public final class ApiModels {
 
   public record LlmDto(boolean enabled, String provider, String baseUrl, String model, boolean hasKey, String apiKey) {}
 
+  /**
+   * 模块策略 —— 租户在平台开通范围内的第二层控制（{@code tenant_licenses.module_policies}）。
+   *
+   * <p>与 {@code modules}（平台给的上限）是<b>两个独立的开关</b>：平台重新开通某模块后，
+   * 租户之前关掉的状态保留。
+   *
+   * @param visibleTo 四档之一：{@code tenant_admin} / {@code project_admin} /
+   *                  {@code role_holders}（默认）/ {@code all_members}（warehouse 默认）
+   */
+  public record ModulePolicyDto(String product, boolean enabled, String visibleTo) {}
+
+  /**
+   * 模块管理页的一行（只列<b>平台已开通</b>的模块 —— 上限之外的根本不该出现）。
+   *
+   * <p>不带模块名与说明文案：那是前端 {@code config/iam.ts} 的 {@code MODULE_OPTIONS}
+   * 的事，服务端再各带一份就多了一个会漂的真相。前端按 {@code product} 查表。
+   *
+   * @param frontendUrl 该产品的页面地址，来自服务注册表（{@code GET /api/services}）。
+   *                    <b>没有在线状态</b>：心跳已删除，只有「已登记地址 / 平台未注册」两态。
+   * @param explicit    true = 库里有这个模块的策略行；false = 从未配过，{@code enabled} /
+   *                    {@code visibleTo} 是<b>显示的初值</b>。生效侧「没配过 = 不判」，
+   *                    与这里显示的值刻意不对称（见 {@code NavNodeService} 第三层注释），
+   *                    前端据此给一句「保存后生效」的提示。
+   */
+  public record ModuleRowDto(
+      String product, boolean enabled, String visibleTo, String frontendUrl, boolean explicit) {}
+
+  /** 数仓引擎的一行。连接信息本版不做，只有启停。 */
+  public record ComputeEngineDto(String kind, boolean enabled) {}
+
+  /**
+   * 计算资源（租户自己的 DS 集群 + 数仓引擎）。
+   *
+   * <p>{@code hasToken} 代替 Token 明文 —— 回传路径（含错误体、日志）一律不带明文，
+   * 照 {@link LlmDto} 那套。
+   */
+  public record ComputeDto(
+      boolean schedulerEnabled, String schedulerBaseUrl, boolean hasToken,
+      String schedulerStatus, String schedulerTestedAt, String schedulerNote,
+      List<ComputeEngineDto> engines) {}
+
+  /**
+   * 存计算资源。{@code schedulerToken} <b>为空即保持原值</b>（照 {@code putLlm} 的模式）——
+   * 页面上那格永远显示不出明文，用户不改它就不该被清掉。
+   */
+  public record ComputePutReq(
+      Boolean schedulerEnabled, String schedulerBaseUrl, String schedulerToken,
+      List<ComputeEngineDto> engines) {}
+
   public record GrantDto(
       String id, String tenantId, String code, String kind, String expiresAt, boolean valid, String createdAt,
       java.util.List<String> modules, java.util.List<String> projectIds,
