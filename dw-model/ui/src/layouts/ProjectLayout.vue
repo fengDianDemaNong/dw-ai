@@ -29,10 +29,13 @@ import { useRouter } from 'vue-router';
 import AppNav from '../components/AppNav.vue';
 import ProjectSwitcher from '../components/ProjectSwitcher.vue';
 import { buildNavGroups } from '../config/nav';
+import { PRODUCT, toEmbedNodes } from '../config/navData';
+import { postNavTree } from '../config/embed';
 import { SYS_HOME } from '../config/paths';
 import {
   app,
   can,
+  currentProject,
   currentTenant,
   ensureProjectSnapshot,
   hasAiCap,
@@ -81,6 +84,29 @@ watch(
   () => {
     void ensureProjectSnapshot();
   }
+);
+
+/**
+ * 把自己这份菜单报给壳。
+ *
+ * <p>`groups` 就是本组件画侧栏用的那一份，**嵌入态下照样算**（上面的 `embed` 只决定
+ * 要不要画 `<AppNav>`）—— 所以这里没有第二套规则，报的就是用户在独立打开本产品时
+ * 会看到的东西。壳那边拿它补「挂载节点」下缺的运行期项（典型是「分层规范」里登记的
+ * 那些层，静态清单 `menu.json` 表达不了）。
+ *
+ * <p>`immediate`：首屏就报一次，不等分层数据加载完 —— 那时报的是默认项，加载完
+ * 再报一次覆盖。壳收到两次没有代价（按 id 合并，不是追加）。
+ *
+ * <p>`project` 带上项目 code：壳拿它跟当前项目比对，不一致就丢弃。切项目时 iframe
+ * 不重建，消息可能在切换的空档里到达，不比对会把 A 项目的分层画到 B 项目上。
+ */
+watch(
+  groups,
+  (list) => {
+    if (!embed) return;
+    postNavTree('project', currentProject.value?.code ?? '', toEmbedNodes(PRODUCT, 'project', list));
+  },
+  { immediate: true }
 );
 
 function back() {

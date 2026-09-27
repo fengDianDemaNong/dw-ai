@@ -56,28 +56,14 @@ const ACTIONS = new Set(['read', 'write', 'admin', 'publish', 'member']);
 const PERM_SHAPE = /^[a-z][a-z0-9]*:[a-z]+$/;
 
 /**
- * 一个候选节点的稳定 id。
+ * 候选 id 的规则**不在这里** —— 它是 `navData.ts` 导出的 {@link candidateId} /
+ * {@link groupCandidateId}（下面用 `mod.` 取）。
  *
- * <p><b>这个 id 是挂载的引用键</b>：组织平台的菜单行拿 `ref` 记住它（见 dw-org 的
- * `nav_nodes.ref` 与 `NavNodeService.requireMountable`）。改了规则，已经挂载的行就找不到
- * 对应的节点，那一支在侧栏里降级成空目录 —— 不报错，只在有人去看侧栏时才发现是坏的。
- * 所以规则在这里钉死：
- *
- * <ul>
- *   <li><b>可点的页面</b>（有 `path`）：`{产品}:{壳}{路径}` —— 与 V22 及更早**逐字相同**，
- *       产品升级到「能报树」这一版时，已挂载的页面不会失配。</li>
- *   <li><b>组目录</b>：`{产品}:{壳}:group:{组名}` —— 与 dw-org 把老格式清单折成树时
- *       拼出来的 id 逐字相同（`MenuCandidateService.foldGroups`），于是「org 先上、
- *       产品还没发版」这段时间里挂上的组目录，在产品发版后**仍然是同一个 id**。</li>
- *   <li><b>产品自己加的中间节点</b>：`{产品}:{壳}:dir:{祖先label/…/自己label}` ——
- *       这类节点没有 path 可用，而 label 是产品自己在 `navData.ts` 里写的、比顺序号稳定。
- *       **改一个祖先的 label 会让整支的 id 变**，这是已知代价（重新挂一次即可）。</li>
- * </ul>
+ * <p>原先脚本里自己写了一份。改到共用是因为多了一个消费者：子应用要把**运行期**算出来
+ * 的菜单报给壳（`config/embed.ts` 的 `postNavTree`），壳拿报上来的 id 去对 `nav_nodes.ref`。
+ * 两边各留一份的话，规则漂移的症状是**静默失配** —— 侧栏里那一支莫名其妙是空的。
+ * 规则本身（含「为什么这么定」）写在 `navData.ts` 那两个函数上，这里不重复。
  */
-function candidateId(product, scope, parents, item) {
-  if (item.path) return `${product}:${scope}:${item.path}`;
-  return `${product}:${scope}:dir:${[...parents, item.label].join('/')}`;
-}
 
 /** 候选树摊平成一维（只用于构建期校验与计数；写进文件的仍是树）。 */
 function flatten(list) {
@@ -149,7 +135,7 @@ try {
       // 管理员已经调过的顺序不会因为一次升级而漂移。
       sort += SORT_STEP;
       return {
-        id: candidateId(mod.PRODUCT, source.scope, parents, item),
+        id: mod.candidateId(mod.PRODUCT, source.scope, parents, item),
         scope: source.scope,
         path: item.path ?? '',
         label: item.label,
@@ -182,7 +168,7 @@ try {
       seenGroup.add(key);
 
       menus.push({
-        id: `${mod.PRODUCT}:${source.scope}:group:${group.title}`,
+        id: mod.groupCandidateId(mod.PRODUCT, source.scope, group.title),
         scope: source.scope,
         path: '',
         label: group.title,

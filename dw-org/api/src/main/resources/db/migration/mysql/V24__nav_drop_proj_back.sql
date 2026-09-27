@@ -1,0 +1,17 @@
+-- 撤掉项目壳侧栏的「返回工作台」（V23 种子里 id = nav-proj-back 那一行）。
+--
+-- 理由：左下角用户面板（dw-org/ui/src/components/UserPanel.vue）里已经有同一个入口，
+-- 侧栏再挂一条就是同一个动作在屏幕上出现两次。
+--
+-- 【为什么不直接删 V23 里的那行】V23 已经在既有库上执行过。改一个执行过的迁移文件会让
+-- flyway 的 checksum 对不上（spring.flyway 用默认配置，validate-on-migrate 是开的），
+-- 下次启动直接失败。所以走一条新迁移。
+--
+-- 【删完谁还能回工作台】用户面板那条原先的判据是 `isRealTenantAdmin && project`，
+-- 而项目壳路由的 meta 是 member（见 dw-org/ui/src/router/index.ts 的 /org/project/:code）——
+-- 普通成员进得来、却会因此没有回去的路。所以同一次改动里把面板判据放宽成 canBackHome：
+-- multi 下人人都有，standard 仍只给租户管理员（与 model 的 canBackToWorkbench 同义）。
+--
+-- 本文件同时给 H2 用（见 V23 顶部注释：MetaDb 只给 postgresql 配了专属目录），
+-- 所以只用 H2 也认的标准写法。
+DELETE FROM nav_nodes WHERE id = 'nav-proj-back';

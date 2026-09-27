@@ -1,5 +1,7 @@
 import type { Router } from 'vue-router';
+import { EMBED_NAV_TREE, type EmbedNavMessage, type EmbedNavNode } from '@dw-ai/engine';
 import { isEmbed, orgOrigin, storedHostOrigin } from './product';
+import { PRODUCT } from './navData';
 import { applyAccessToken } from '../api/client';
 
 export const EMBED_NAV = 'dw-embed-navigate';
@@ -68,6 +70,48 @@ export function requestEmbedToken(): void {
   const target = hostTarget();
   if (!target) return;
   window.parent.postMessage({ type: EMBED_TOKEN_REQUEST }, target);
+}
+
+/**
+ * 把本进程**运行期**算出来的菜单树报给宿主。
+ *
+ * <h2>为什么需要这条消息</h2>
+ *
+ * 壳侧栏里「挂载节点」的子树取自产品的**静态清单** —— 部署在前端的 `public/menu.json`，
+ * 由 `scripts/gen-menu.mjs` 在构建期从 `navData.ts` 导出。静态文件只能表达
+ * 「对**所有**项目都成立」的项：「建模中心」下的分层入口取决于**这个项目**在
+ * 「分层规范」里登记了哪些层，是运行期逐项目的事实（`ProjectLayout.vue` 拿
+ * `buildNavGroups(projectLayerRules, …)` 现算），清单里根本没有那几个字符串。
+ * 于是产品自己的侧栏看得见、壳里看不见。
+ *
+ * <p>这条消息补的就是这一段。**不新增任何 HTTP 接口**：`postMessage` 是浏览器自带的
+ * 跨 iframe 通道，发的是子应用**已经算好的那一份**（不是在这里重算 —— 重算等于把
+ * `nav.ts` 的规则抄第二遍，两份必然漂移）。
+ *
+ * <h2>谁调用</h2>
+ *
+ * 壳布局（项目壳 `ProjectLayout.vue`、工作台壳）watch 自己那个 `groups` computed ——
+ * 那正是它画侧栏用的同一份，在嵌入态下照样算（`isEmbed()` 只决定要不要
+ * `<AppNav>`，见那边的说明）。**没被嵌**时本函数直接返回：没人可报。
+ *
+ * <h2>目标 origin 与安全</h2>
+ *
+ * 目标见 {@link hostTarget}（referrer 优先、`#boot=` 自报的兜底），两个都拿不到就
+ * **不发**。不广播 —— 与 {@link requestEmbedToken} 同一条纪律：内容本身不敏感
+ * （标题与路径），但接收端要靠 `event.origin` 认人，发送端定向是这条协议成立的前提。
+ */
+export function postNavTree(scope: string, project: string, nodes: EmbedNavNode[]): void {
+  if (typeof window === 'undefined' || window.parent === window) return;
+  const target = hostTarget();
+  if (!target) return;
+  const message: EmbedNavMessage = {
+    type: EMBED_NAV_TREE,
+    product: PRODUCT,
+    scope,
+    project,
+    nodes,
+  };
+  window.parent.postMessage(message, target);
 }
 
 export function listenEmbedHost(router: Router): void {

@@ -16,8 +16,11 @@ import { MODEL_HOME, SYS_HOME } from './paths';
  * 脚本是在 Node 里跑 esbuild 把本文件打包后 import 的，所以这里只能有
  * **纯常量、纯函数与本文件内的类型**。`./pages` 与 `./paths` 是允许的
  * （它们顶层只有路径常量与函数定义，不碰 `window`）。若这里引用了 `authState` /
- * `stores/*` / `@dw-ai/engine` 之类的东西，`npm run build` 会在跑 vue-tsc
- * 之前就挂在生成清单这一步。
+ * `stores/*` / `@dw-ai/engine`（**包根**）之类的东西，`npm run build` 会在跑 vue-tsc
+ * 之前就挂在生成清单这一步 —— 包根的 `index.ts` 会连带 `iam.ts`，那里面有 xlsx。
+ *
+ * <p>唯一的例外是**子路径** `@dw-ai/engine/embedNav`（见下面那段 re-export）：
+ * 那个文件自己没有任何 import，打包进来是干净的。
  *
  * <p>路径一律引用 `./pages` / `./paths` 的常量而不是重写字面量：那是同一个路径的
  * **唯一真源**，重写一份的话，那边改了这里不会跟着变，而症状是壳里点了菜单落空。
@@ -31,9 +34,11 @@ import { MODEL_HOME, SYS_HOME } from './paths';
  *       「分层规范」里登记了哪些层，是建完项目才知道、之后还能自由增删改的事实
  *       （侧栏由 `nav.ts` 的 `buildNavGroups` 按它现算），而壳的侧栏配置是**全局**的、
  *       多项目共用一份 —— 静态清单没法表达「对这个项目而言有哪些层」。所以候选里
- *       一个分层入口都没有，要挂就在组织平台侧手工配。想让它们自动出现，得由组织平台
- *       支持**运行期动态菜单**（壳渲染时向子应用拉一次本项目实际的分层），
- *       那是比「构建期导出清单」大一层的改动。</li>
+ *       一个分层入口都没有。
+ *       <p><b>运行期那一路已经补上了</b>：子应用把现算的菜单树用 postMessage 报给壳
+ *       （见 `config/embed.ts` 的 `postNavTree` 与 `@dw-ai/engine/embedNav`），
+ *       挂载节点下因此能看到真实的分层入口。这条局限剩下的部分只关乎**候选清单**：
+ *       管理员在「菜单管理」里勾选时看到的是静态骨架，勾完之后的运行期效果由子应用决定。</li>
  * </ul>
  */
 
@@ -45,6 +50,31 @@ import { MODEL_HOME, SYS_HOME } from './paths';
  * 而本文件要保持在「Node 里 bundle 得动」的范围内。
  */
 export const PRODUCT = 'warehouse';
+
+/**
+ * 候选 id 的规则、以及「侧栏分组 → 报给壳的树」的转换 —— 本体在
+ * `@dw-ai/engine/embedNav`，这里只做转出（见那边的完整说明）。
+ *
+ * <h2>为什么搬到 engine，而不留在本文件</h2>
+ *
+ * 这套东西现在有**两个产品**（warehouse 与 metadata）× **两条时机**
+ * （构建期的 `gen-menu.mjs`、运行期的 `postNavTree`），共四处消费者。
+ * 而 id 是挂载的引用键：任意两处漂移的表现都是**静默失配** ——
+ * 菜单看着在、子树不展开，没有任何报错。所以规则收敛到一处，四处都 import 它。
+ *
+ * <p>搬走之前它在本文件与 `gen-menu.mjs` 里各有一份**逐字相同**的实现，
+ * 而 lineage 那边也正要加第三份 —— 到那时再收就晚了。
+ */
+export {
+  candidateId,
+  groupCandidateId,
+  toEmbedNodes,
+} from '@dw-ai/engine/embedNav';
+
+/**
+ * 报给壳的一个菜单节点。别名指向契约类型本身（原先这里是手抄的一份，见上）。
+ */
+export type { EmbedNavNode as EmbedNode } from '@dw-ai/engine/embedNav';
 
 /**
  * 本产品的权限词**全集**，供组织平台的两个下拉使用（菜单挂哪个权限、产品角色勾哪些权限）。
@@ -206,16 +236,21 @@ function inheritGroupPerm(groups: NavGroup[]): NavGroup[] {
  *       是运行期逐项目的事实，而壳的侧栏配置是全局的（见 {@link GROUP_MODELING} 的说明）。
  *       要挂就在 org 侧手工配 —— 项目没有该层时点进去是说明页而不是白屏
  *       （`pages/model/dwd-overview.vue` 既有行为）。</li>
- *   <li><b>工作台壳</b>：只报「数仓建模 / 设置」一页。它管的是**租户级**的外观 / 大模型 / AI 提示词，
- *       与「这个部署有没有工作台」无关，而组织平台的工作台壳正需要它 ——
- *       数据地图的「元数据服务」用的是同一个做法（`dw-lineage/ui/src/config/navData.ts`）。
- *       为此 `router/index.ts` 在 multi 下对它单独放行。</li>
+ *   <li><b>工作台壳</b>：报「数仓建模」一组三项（项目管理 / 知识库 / 设置）。它们管的是
+ *       **租户级**的项目清单与外观 / 大模型 / AI 提示词，与「这个部署有没有工作台」无关，
+ *       而组织平台的工作台壳正需要它们。`router/index.ts` 在 multi 下对工作台路径**一律放行**
+ *       （原先只放行「设置」一个白名单，那是一条多余的限制，已删）。</li>
  * </ul>
  *
- * <p><b>工作台的其余几页不报</b>：项目管理在 multi 下由组织平台 fan-out、与平台自己的
- * 项目管理重复；知识库与用户/角色管理的归属也在组织那边（见 `config/sysNav.ts`）。
- * 它们挂在 `/model/projects` 下，而 multi 没有工作台，`router/index.ts` 会把它们
- * 重定向回家 —— 报给平台等于给出一个点进去就跳走的入口。
+ * <p><b>工作台的其他几页</b>：`/model/projects` 下的项目管理、知识库、设置都报。
+ * 前两项原先不报，理由与 dw-lineage 那条一样 ——「multi 没有工作台，`router/index.ts`
+ * 会把它们重定向回家」。那条现在反过来了：`router/index.ts` 对工作台路径一律放行
+ * （原先的「只留设置一个白名单」已删），而候选只是**可选项**、管理员勾中才挂，
+ * 所以不会再是「点进去就跳走的入口」。
+ *
+ * <p>「用户管理」「角色管理」仍不报：它们<strong>仅租户管理员可见</strong>，且数据源
+ * 随模式而异（standard 是本地账号、multi 是组织平台，见 `config/sysNav.ts`）——
+ * 与 dw-lineage 的「账号管理」同类，那条也是 `adminOnly`、由 `gen-menu.mjs` 跳过。
  *
  * <p>`scope` 只是建议值，平台管理员在菜单管理页可以改。
  */
@@ -226,8 +261,18 @@ export const MENU_CANDIDATES: MenuCandidateSource[] = [
       {
         // 组名用产品名而不是「设置」：组织平台的工作台壳里已经有一组「系统管理 / 设置」，
         // 再挂一组同名的，侧栏上就是两个「设置」并排，用户分不清哪个是哪个。
+        //
+        // 三项手工列在这里，**不能**直接引用 `config/sysNav.ts` 的 `buildSysNav()`：
+        // 那个函数 import 了 `./runtime` 的 `getRunMode`，是运行期的，而本文件必须
+        // 保持在「Node 里 bundle 得动」的范围内（见文件头的说明）—— 引了它，
+        // `npm run build` 会在生成菜单清单这一步就挂掉。
+        // 路径同样引用 `./paths` 的 `SYS_HOME` 而不是重写字面量。
         title: '数仓建模',
-        items: [{ path: `${SYS_HOME}/settings`, label: '设置', icon: 'SettingOutlined' }],
+        items: [
+          { path: SYS_HOME, label: '项目管理', icon: 'AppstoreOutlined' },
+          { path: `${SYS_HOME}/knowledge`, label: '知识库', icon: 'ReadOutlined' },
+          { path: `${SYS_HOME}/settings`, label: '设置', icon: 'SettingOutlined' },
+        ],
       },
     ],
   },

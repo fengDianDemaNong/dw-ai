@@ -1,4 +1,17 @@
-import { roleHas, type Perm, type Product, type ProjectRole } from '@dw-ai/engine';
+// 从子路径 `@dw-ai/engine/iam` 取，**不是**包根 `@dw-ai/engine`。
+//
+// 包根的 `index.ts` 是桶文件，`export *` 了 19 个模块（modeling / ddl / metrics …），
+// 而 dev 下 vite 不做 tree-shaking：写包根，浏览器就要逐个请求那 19 个模块
+// （实测每个路由固定 20 个 engine 请求，是本项目里最大的一块固定开销），
+// 只为拿 `roleHas` 一个函数。
+//
+// `src/iam.ts` 是自包含的（73 行，唯一 import 是 `./types` 的 type-only 导入，
+// 编译后消失），本文件要的 `roleHas` 与 `Perm` / `Product` / `ProjectRole`
+// 全在里面。子路径由 `packages/engine/package.json` 的 `exports` 声明。
+//
+// 另两个产品不改：它们真的用到 engine 的几十个模块（modeling、specIo、grades …），
+// 深导入要逐处改写且收益为负 —— 这条只对「只用 iam」的 lineage 成立。
+import { roleHas, type Perm, type Product, type ProjectRole } from '@dw-ai/engine/iam';
 
 export type { Perm, Product, ProjectRole };
 export { roleHas };

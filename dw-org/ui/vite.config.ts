@@ -41,6 +41,11 @@ export default defineConfig(({ mode }) => {
     },
     optimizeDeps: {
       exclude: ['@dw-ai/engine'],
+      // engine 顶层 import 了 xlsx。被 exclude 的包，它带进来的依赖会漏出 vite
+      // 启动时的依赖扫描，直到「第一次访问用到它的页面」才被 on-demand 发现 ——
+      // 那时 vite 现场补一轮预构建并整页 reload，表现为「每个产品第一次点它的
+      // 页面要等几秒，之后同产品内就正常」。显式 include 把 xlsx 拉回启动那一批。
+      include: ['xlsx'],
     },
     server: {
       port: 5171,

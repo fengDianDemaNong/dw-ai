@@ -56,28 +56,14 @@ const ACTIONS = new Set(['read', 'write', 'admin', 'publish', 'member']);
 const PERM_SHAPE = /^[a-z][a-z0-9]*:[a-z]+$/;
 
 /**
- * 一个候选节点的稳定 id。
+ * 候选 id 的规则**不在这里** —— 它是 `navData.ts` 转出的 {@link candidateId} /
+ * {@link groupCandidateId}（本体在 `packages/engine/src/embedNav.ts`，下面用 `mod.` 取）。
  *
- * <p><b>这个 id 是挂载的引用键</b>：组织平台的菜单行拿 `ref` 记住它（见 dw-org 的
- * `nav_nodes.ref` 与 `NavNodeService.requireMountable`）。改了规则，已经挂载的行就找不到
- * 对应的节点，那一支在侧栏里降级成空目录 —— 不报错，只在有人去看侧栏时才发现是坏的。
- * 所以规则在这里钉死：
- *
- * <ul>
- *   <li><b>可点的页面</b>（有 `path`）：`{产品}:{壳}{路径}` —— 与 V22 及更早**逐字相同**，
- *       产品升级到「能报树」这一版时，已挂载的页面不会失配。</li>
- *   <li><b>组目录</b>：`{产品}:{壳}:group:{组名}` —— 与 dw-org 把老格式清单折成树时
- *       拼出来的 id 逐字相同（`MenuCandidateService.foldGroups`），于是「org 先上、
- *       产品还没发版」这段时间里挂上的组目录，在产品发版后**仍然是同一个 id**。</li>
- *   <li><b>产品自己加的中间节点</b>：`{产品}:{壳}:dir:{祖先label/…/自己label}` ——
- *       这类节点没有 path 可用，而 label 是产品自己在 `navData.ts` 里写的、比顺序号稳定。
- *       **改一个祖先的 label 会让整支的 id 变**，这是已知代价（重新挂一次即可）。</li>
- * </ul>
+ * <p>为什么搬走：同一条规则原先在本脚本与 `navData.ts` 里各有一份**逐字相同**的实现，
+ * 而运行期的上报（`config/embed.ts` 的 `postNavTree`）还要第三份。id 是挂载的引用键，
+ * 任意两处漂移都会让已挂载的节点**静默**变成空目录 —— 不报错，只在有人去看侧栏时才发现。
+ * 规则本身与它的完整说明（三条 id 规则、为什么老格式也要兼容）在 engine 那份里。
  */
-function candidateId(product, scope, parents, item) {
-  if (item.path) return `${product}:${scope}:${item.path}`;
-  return `${product}:${scope}:dir:${[...parents, item.label].join('/')}`;
-}
 
 /** 候选树摊平成一维（只用于构建期校验与计数；写进文件的仍是树）。 */
 function flatten(list) {
@@ -151,7 +137,7 @@ try {
       // 管理员已经调过的顺序不会因为一次升级而漂移。
       sort += SORT_STEP;
       return {
-        id: candidateId(mod.PRODUCT, source.scope, parents, item),
+        id: mod.candidateId(mod.PRODUCT, source.scope, parents, item),
         scope: source.scope,
         path: item.path ?? '',
         label: item.label,
@@ -184,7 +170,7 @@ try {
       seenGroup.add(key);
 
       menus.push({
-        id: `${mod.PRODUCT}:${source.scope}:group:${group.title}`,
+        id: mod.groupCandidateId(mod.PRODUCT, source.scope, group.title),
         scope: source.scope,
         path: '',
         label: group.title,

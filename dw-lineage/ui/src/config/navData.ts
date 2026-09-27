@@ -13,9 +13,13 @@ import { LINEAGE_PAGES, PROJECT_SETTINGS_PAGES, WORKBENCH_PAGES } from './pages'
  * <h2>本文件的约束：能被 Node 直接 bundle</h2>
  *
  * 脚本是在 Node 里跑 esbuild 把本文件打包后 import 的，所以这里只能有
- * **纯常量与本文件内的类型**。`./pages` 是允许的（它顶层只有路径常量与函数定义，
+ * **纯常量、纯函数与本文件内的类型**。`./pages` 是允许的（它顶层只有路径常量与函数定义，
  * 不碰 `window`）。若这里引用了 `sessionStorage` / `authState` / `@dw-ai/engine`
- * 之类的东西，`npm run build` 会在跑 vue-tsc 之前就挂在生成清单这一步。
+ * （**包根**）之类的东西，`npm run build` 会在跑 vue-tsc 之前就挂在生成清单这一步 ——
+ * 包根的 `index.ts` 会连带 `iam.ts`，那里面有 xlsx。
+ *
+ * <p>唯一的例外是**子路径** `@dw-ai/engine/embedNav`（见下面那段 re-export）：
+ * 那个文件自己没有任何 import，打包进来是干净的。
  *
  * <p>路径一律引用 `./pages` 的常量而不是重写字面量：那是同一个路径的**唯一真源**，
  * 重写一份的话，`pages.ts` 改了这边不会跟着变，而症状是壳里点了菜单落空。
@@ -25,9 +29,12 @@ import { LINEAGE_PAGES, PROJECT_SETTINGS_PAGES, WORKBENCH_PAGES } from './pages'
  * <ul>
  *   <li><b>菜单变更要重新构建前端才进候选。</b>这符合规格里「菜单是产品信息架构、
  *       跟版本走」——`menu.json` 随构建产物发布，不是运行期可改的配置。</li>
- *   <li><b>运行期动态生成的菜单项进不了静态清单。</b>数据地图是静态的，这条对它无影响；
- *       仓建设（warehouse）的「建模中心」按 `layers` 每层生成一项，属动态项，
- *       候选只给静态骨架，动态项仍由子端自己渲染。</li>
+ *   <li><b>运行期动态生成的菜单项进不了静态清单。</b>数据地图是静态的，这条对**候选**
+ *       仍然成立；仓建设（warehouse）的「建模中心」按 `layers` 每层生成一项，属动态项，
+ *       候选只给静态骨架。
+ *       <p><b>但运行期那一份已经能到壳里了</b>：子应用把现算的菜单树用 postMessage
+ *       报给壳（见 `config/embed.ts` 的 `postNavTree` 与 `@dw-ai/engine/embedNav`），
+ *       挂载节点下因此能看到真实的那份。这条局限剩下的部分只关乎候选清单。</li>
  * </ul>
  */
 
@@ -39,6 +46,32 @@ import { LINEAGE_PAGES, PROJECT_SETTINGS_PAGES, WORKBENCH_PAGES } from './pages'
  * 而本文件要保持在「Node 里 bundle 得动」的范围内。
  */
 export const PRODUCT = 'metadata';
+
+/**
+ * 候选 id 的规则、以及「侧栏分组 → 报给壳的树」的转换 —— 本体在
+ * `@dw-ai/engine/embedNav`，这里只做转出（见那边的完整说明）。
+ *
+ * <h2>为什么是本产品的 navData 转出，而不是各调用点自己去 engine 拿</h2>
+ *
+ * 调用点有两类，都要拿**本产品的** `PRODUCT` 一起用：构建脚本
+ * （`scripts/gen-menu.mjs`，跑 esbuild 打包本文件后 `mod.candidateId(…)`）与
+ * 运行期的上报（`config/embed.ts` 的 `postNavTree`，见 `layouts/AppLayout.vue`）。
+ * 从这里转出，两边都只认本文件一个入口。
+ *
+ * <p>规则本身**必须与仓建设（warehouse）那份逐字相同**：id 是挂载的引用键
+ * （dw-org 的 `nav_nodes.ref`），两处漂移的表现是**静默失配** —— 菜单看着在、
+ * 子树不展开，没有任何报错。所以它不住在任何一个产品里。
+ */
+export {
+  candidateId,
+  groupCandidateId,
+  toEmbedNodes,
+} from '@dw-ai/engine/embedNav';
+
+/**
+ * 报给壳的一个菜单节点。别名指向契约类型本身。
+ */
+export type { EmbedNavNode as EmbedNode } from '@dw-ai/engine/embedNav';
 
 /**
  * 本产品的权限词**全集**，供组织平台的两个下拉使用（菜单挂哪个权限、产品角色勾哪些权限）。
@@ -81,12 +114,15 @@ export interface PermOption {
 /**
  * 工作台级菜单：进项目**之前**的那一级。
  *
- * <p><b>这一组不进菜单候选</b>：报给组织平台等于在门户侧栏摆一批与平台自己那套
- * （组织平台的工作台菜单）重复的入口。此前不报的理由是「multi 下数据地图没有工作台、
- * 这些路径会被路由守卫打回项目概况」—— 那条守卫已于 2026-09-26 删除（工作台回到本进程），
- * 但结论不变：重复入口不是想要的。
+ * <p><b>这一组就是报给组织平台的 workbench 候选</b>（见 {@link MENU_CANDIDATES}）。
  *
- * <p>它留在本文件里是因为 `nav.ts` 要用 —— 三种模式自己的侧栏都是它。
+ * <p>早先不报，理由是「multi 下数据地图没有工作台、这些路径会被路由守卫打回项目概况」，
+ * 并由此推出「报出去等于在门户侧栏摆一批与平台自己那套重复的入口」。这两条现在都不成立：
+ * 那条守卫已于 2026-09-26 删除（工作台回到本进程，见 `router/index.ts` 工作台路由的注释），
+ * 而候选只是**可选项** —— 平台管理员在菜单管理里勾中才挂，不勾不会自己出现在侧栏上，
+ * 所以「重复入口」不再是个问题，报全了反而让管理员有的选。
+ *
+ * <p>`nav.ts` 也用这一组 —— 三种模式自己的侧栏都是它。
  */
 export const WORKBENCH_GROUPS: NavGroup[] = [
   {
@@ -146,9 +182,9 @@ export const PROJECT_GROUPS: NavGroup[] = [
 /**
  * 报给组织平台的菜单候选及**建议归属**。
  *
- * <p>显式列出而不是让脚本去猜哪个数组要报：数据地图只有项目级要报
- * （理由见 {@link WORKBENCH_GROUPS}），仓建设两边都有意义 —— 这种差别
- * 是各服务自己的知识，写在这里比写在脚本里可靠。
+ * <p>两个壳都报：工作台那一层报 {@link WORKBENCH_GROUPS}（概况 / 项目 / 设置），
+ * 项目那一层报 {@link PROJECT_GROUPS}。显式列出而不是让脚本去猜哪个数组要报 ——
+ * 「哪些页面在哪个层级下有意义」是各服务自己的知识，写在这里比写在脚本里可靠。
  *
  * <p>`scope` 只是建议值，平台管理员在菜单管理页可以改。
  */
@@ -158,23 +194,21 @@ export interface MenuCandidateSource {
 }
 
 export const MENU_CANDIDATES: MenuCandidateSource[] = [
-  {
-    // 「元数据服务」是这里唯一的工作台级候选：它归租户/全局口径（所有项目共用一份），
-    // 不跟着项目角色走（`pages.ts` 的 `PROJECT_SETTINGS_PAGES` 注释里写了它挂在
-    // `/lineage/settings/metadata` 而不是工作台路径下，是因为 multi 没有工作台，
-    // 这条得本身就能渲染出页面）。
-    //
-    // 它不在 `PROJECT_GROUPS` 里 —— 数据地图自己的侧栏在 multi 下不摆这个入口，
-    // 但组织平台的工作台壳正需要它，所以单独列出来。
-    scope: 'workbench',
-    groups: [
-      {
-        title: '设置',
-        items: [
-          { path: PROJECT_SETTINGS_PAGES.metadata, label: '元数据服务', icon: 'ApiOutlined', ready: true },
-        ],
-      },
-    ],
-  },
+  // 工作台这一层报的就是本产品自己的侧栏。三项会进候选：概况、项目，以及
+  // 「设置」目录下的元数据服务与基本信息 —— 「账号管理」是 `adminOnly`，
+  // `gen-menu.mjs` 会跳过它（它只在本地账号体系下存在；multi 下 `authState.me`
+  // 为空，路由守卫的 `to.meta.adminOnly` 也会把它打回工作台概况）。
+  //
+  // 注意「元数据服务」报的是**工作台路径**（`/lineage/workbench/settings/metadata`），
+  // 不是 `PROJECT_SETTINGS_PAGES.metadata`（`/lineage/settings/metadata`）。
+  // 两者是同一个组件（`pages/settings/metadata-sources.vue`）的两条路径、两种用途：
+  // 后者是 dw-model 把「元数据服务」页 postMessage 推过来时的**项目级嵌入契约**
+  // （见 `pages.ts` 的 `PROJECT_SETTINGS_PAGES` 注释），不是给人点的菜单入口 ——
+  // 所以它不进 `PROJECT_GROUPS`，也不该冒充工作台候选。
+  //
+  // 这一项早先是单独手工列在这里的（且报的是那条项目级路径）：当时的理由是
+  // multi 没有工作台，唯一能渲染的就是项目级那条。工作台回到本进程后不再需要，
+  // 整组按产品自己的结构报即可。
+  { scope: 'workbench', groups: WORKBENCH_GROUPS },
   { scope: 'project', groups: PROJECT_GROUPS },
 ];

@@ -17,3 +17,6 @@ export * from './modelChat';
 export * from './aiPrompts';
 export * from './knowledge';
 export * from './knowledgeIo';
+// 嵌壳协议的消息契约（子应用 → 宿主的运行期菜单树）。两端共同 import，
+// 改单边会编译期报错 —— 见该文件的说明。
+export * from './embedNav';

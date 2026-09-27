@@ -8,11 +8,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import AppNav from '../components/AppNav.vue';
 import { ADMIN_HOME, SYS_HOME } from '../config/paths';
 import { buildAdminNav, toNavItems } from '../config/sysNav';
+import { listenMountTrees, mountOrigins } from '../config/navMount';
 import { app, navTree } from '../stores/app';
 import { appearanceOf } from '../stores/prefs';
 
@@ -49,6 +50,17 @@ const menuPos = computed(() => {
     : appearanceOf('tenant', app.currentTenantId).menuPos;
   return pos === 'drawer' ? 'left' : pos;
 });
+
+/**
+ * 收被嵌产品报上来的运行期菜单树（见 `config/navMount.ts`）。
+ *
+ * <p>挂在这里而不是各自的产品页面上：两个租户壳共用这一个布局，挂一次两个壳都收得到，
+ * 而菜单树是**壳级**的状态 —— 挂载节点在哪个壳里、由哪个产品的哪次上报填充，
+ * 与用户此刻停在哪一页无关。
+ *
+ * <p>允许来源现取（传函数不传数组）：服务注册里改了产品地址，下一次消息就能生效。
+ */
+onMounted(() => listenMountTrees(() => mountOrigins(navTree.value)));
 </script>
 
 <style scoped>

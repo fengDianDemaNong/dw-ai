@@ -96,11 +96,11 @@ class NavTreeMountTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String TENANT_CODE = "navt_t1";
 
-    /** V23 种子的 id —— 清库时要留着（它们是两个壳的 org 自有菜单）。 */
+    /** 种子的 id —— 清库时要留着（它们是两个壳的 org 自有菜单）。 */
     private static final Set<String> SEED_IDS = Set.of(
             "nav-sys", "nav-sys-users", "nav-sys-roles", "nav-sys-projects",
             "nav-sys-knowledge", "nav-sys-settings",
-            "nav-proj", "nav-proj-back", "nav-proj-members");
+            "nav-proj", "nav-proj-members");
 
     private static final String PRODUCT = "metadata";
     /**

@@ -148,8 +148,9 @@ class SchemaBootstrapTest {
         Integer seeded = db.queryForObject(
                 "select count(*) from nav_nodes where id like 'nav-sys%' or id like 'nav-proj%'",
                 Integer.class);
-        assertEquals(9, seeded == null ? 0 : seeded,
-                "种子应当是 6 条工作台壳（系统管理 + 5 项）+ 3 条项目壳");
+        assertEquals(8, seeded == null ? 0 : seeded,
+                "种子应当是 6 条工作台壳（系统管理 + 5 项）+ 2 条项目壳"
+                        + "（项目壳第 3 条「返回工作台」已在 V24 删掉——那个入口现在只在用户面板里）");
 
         assertEquals("/org/project/{code}/members", db.queryForObject(
                         "select path from nav_nodes where id = 'nav-proj-members'", String.class),

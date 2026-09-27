@@ -852,8 +852,13 @@ test.describe.serial('工作台前端流程', () => {
       await expect(external).toBeVisible();
       expect(await external.getAttribute('href')).toContain('/quality/rules');
 
-      // 同一个壳里「返回工作台」始终在，否则进了项目出不去
-      await expect(nav.getByText('返回工作台', { exact: true })).toBeVisible();
+      // 进了项目要能出去 —— 这个入口现在由左下角的用户面板提供：V24 把侧栏那条菜单删了
+      // （同一个动作不该在屏幕上出现两次，用户 2026-09-27 报的重复）。所以改从面板里找，
+      // 断言的意义不变；判据也一并从「租户管理员」放宽到「在项目里就有」，
+      // 否则普通成员进得来、出不去（项目壳路由的 meta 是 member）。
+      await page.locator('.me').click();
+      await expect(page.locator('.sheet').getByText('返回工作台', { exact: true })).toBeVisible();
+      await page.keyboard.press('Escape');
     } finally {
       await clearNavItems(page, [metadataPath, warehousePath, qualityPath]);
       await deleteNavNodes(page, dirIds);

@@ -81,23 +81,39 @@ export default defineConfig(({ mode }) => {
     base: VITE_PUBLIC_PATH || '/',
     plugins: [antvPkgRequireShim(), vue()],
     resolve: {
-      alias: {
-        'ant-design-vue': 'ant-design-vue/es',
-        // engine 是 npm workspace 里的源码包（exports 直指 src/index.ts，无需构建），
-        // 写法与 dw-org/ui、dw-model/ui 的 vite.config.ts 一致。
-        // 少了这条，vite 解析不到未安装的包就会构建失败。
-        '@dw-ai/engine': fileURLToPath(
-          new URL('../../packages/engine/src/index.ts', import.meta.url)
-        ),
+      // 数组形式（而不是对象）只为了给 engine 那条写正则：对象形式的 key 只能是字符串，
+      // 而字符串在 vite 里是**前缀**匹配 —— 写 '@dw-ai/engine' 会把子路径导入
+      // '@dw-ai/engine/iam' 一起改写成 '<...>/src/index.ts/iam' 这个不存在的路径。
+      // 加 `^$` 锚定后子路径不再命中这条，交给包自己的 exports 解析
+      // （见 packages/engine/package.json 的 "./iam"）。
+      //
+      // engine 是 npm workspace 里的源码包（exports 直指 src/index.ts，无需构建），
+      // 顶层 workspace 的 node_modules/@dw-ai/engine 是指向 packages/engine 的软链。
+      alias: [
+        {
+          find: /^@dw-ai\/engine$/,
+          replacement: fileURLToPath(
+            new URL('../../packages/engine/src/index.ts', import.meta.url)
+          ),
+        },
+        { find: 'ant-design-vue', replacement: 'ant-design-vue/es' },
         // 顶替 g6-pc 引用的一个上游并不存在的模块，详见该 shim 文件内的说明
-        '@antv/algorithm/lib/asyncIndex': fileURLToPath(
-          new URL('./src/shims/antv-algorithm-async.ts', import.meta.url)
-        ),
-      },
+        {
+          find: '@antv/algorithm/lib/asyncIndex',
+          replacement: fileURLToPath(
+            new URL('./src/shims/antv-algorithm-async.ts', import.meta.url)
+          ),
+        },
+      ],
     },
     optimizeDeps: {
       // engine 是 TS 源码，交给 vite 按源码走，不进 esbuild 预构建
       exclude: ['@dw-ai/engine'],
+      // 但它顶层 import 了 xlsx。被 exclude 的包，它带进来的依赖会漏出 vite
+      // 启动时的依赖扫描，直到「第一次访问用到它的页面」才被 on-demand 发现 ——
+      // 那时 vite 现场补一轮预构建并整页 reload，表现为「每个产品第一次点它的
+      // 页面要等几秒，之后同产品内就正常」。显式 include 把 xlsx 拉回启动那一批。
+      include: ['xlsx'],
     },
     css: {
       preprocessorOptions: {

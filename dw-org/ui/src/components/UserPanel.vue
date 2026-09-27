@@ -34,7 +34,7 @@
         <button v-if="isPlatformAdmin && multi && !onAdmin" type="button" class="act" @click="toAdmin">
           进入平台后台
         </button>
-        <button v-if="isRealTenantAdmin && project" type="button" class="act" @click="toWorkbench">返回工作台</button>
+        <button v-if="canBackHome" type="button" class="act" @click="toWorkbench">返回工作台</button>
         <button v-if="!remote" type="button" class="act" @click="resetAndLeave">重置演示</button>
         <button type="button" class="act danger" @click="out">退出</button>
       </div>
@@ -120,6 +120,18 @@ const orgWord = multi ? '租户' : '组织';
 const tenants = computed(() => selectableTenants());
 const onAdmin = computed(() => route.path.includes('/platform'));
 const canSwitchTenant = computed(() => multi && !onAdmin.value && tenants.value.length > 1);
+/**
+ * 「返回工作台」这个入口对当前用户是否成立。
+ *
+ * <p>multi 下人人都有：项目壳路由的 meta 是 member（见 `router/index.ts` 的 `/org/project/:code`），
+ * 普通成员本来就能进去 —— 进得去就得能出来。standard 仍只给租户管理员：那一档里
+ * 工作台是管理界面。判据与 model 的 `config/pages.ts` 的 `canBackToWorkbench` 同义。
+ *
+ * <p>原先这里是 `isRealTenantAdmin && project`，相当于<b>所有</b>模式都只给管理员。
+ * 侧栏那条「返回工作台」撤掉之后（见 V24 迁移），这个过严的判据会把普通成员困在项目里 ——
+ * 所以两处要一起改。
+ */
+const canBackHome = computed(() => Boolean(project.value) && (multi || isRealTenantAdmin.value));
 const chromeLight = computed(() => {
   if (props.light) return true;
   const scope = onAdmin.value ? 'platform' : 'tenant';

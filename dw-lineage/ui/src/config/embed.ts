@@ -1,6 +1,8 @@
 import type { Router } from 'vue-router';
+import { EMBED_NAV_TREE, type EmbedNavMessage, type EmbedNavNode } from '@dw-ai/engine';
 import { isEmbed, orgOrigin, storedHostOrigin } from './runtime';
 import { applyAccessToken } from '../stores/tenant';
+import { PRODUCT } from './navData';
 
 export const EMBED_NAV = 'dw-embed-navigate';
 export const EMBED_READY = 'dw-embed-ready';
@@ -68,6 +70,34 @@ export function requestEmbedToken(): void {
   const target = hostTarget();
   if (!target) return;
   window.parent.postMessage({ type: EMBED_TOKEN_REQUEST }, target);
+}
+
+/**
+ * 把**当前这一层**的侧栏菜单报给嵌壳（宿主并进对应挂载节点的子树）。
+ *
+ * <p>调用方是 `layouts/AppLayout.vue` 的一个 `watch` —— 传进来的 `nodes` 必须是
+ * **侧栏正在渲染的那一份**（`config/nav.ts` 的 `visibleNavGroups`），不是另算一遍：
+ * 这条消息的全部意义就是「把已经算好的那份搬过去」，重算等于把规则复制成两份。
+ *
+ * <p>与 {@link requestEmbedToken} 同一条纪律：目标 origin 由 {@link hostTarget} 定，
+ * **拿不到就不发**。菜单内容本身不敏感，但「定向发送」是这个仓里嵌壳协议的一贯做法
+ * （接收端也只收白名单 origin，见 {@link allowed}）—— 广播会让任意父页面都能读到
+ * 本服务的完整信息架构。
+ *
+ * <p>`scope` 与 `project` 由调用方按当前层级给（工作台壳没有项目，给空串）。
+ */
+export function postNavTree(scope: string, project: string, nodes: EmbedNavNode[]): void {
+  if (typeof window === 'undefined' || window.parent === window) return;
+  const target = hostTarget();
+  if (!target) return;
+  const message: EmbedNavMessage = {
+    type: EMBED_NAV_TREE,
+    product: PRODUCT,
+    scope,
+    project,
+    nodes,
+  };
+  window.parent.postMessage(message, target);
 }
 
 export function listenEmbedHost(router: Router): void {

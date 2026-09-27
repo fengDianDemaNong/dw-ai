@@ -1,6 +1,7 @@
 import { ORG_HOME, ORG_PAGES } from './pages';
 import { navIcons } from './navIcons';
 import { isEmbeddable } from './products';
+import { liveChildren } from './navMount';
 import type { NavItem } from './nav';
 import type { NavNodeRow } from '../api/client';
 
@@ -97,7 +98,13 @@ function convertAll(nodes: NavNodeRow[], ctx: ShellCtx): NavItem[] {
 
 /** 一个服务端节点 → 侧栏项；`null` = 这一项不出现（服务端不该产出这种，防御性返回）。 */
 function convert(node: NavNodeRow, ctx: ShellCtx): NavItem | null {
-  const kids = convertAll(node.children ?? [], ctx);
+  // 挂载节点的子树有**两个**来源，优先用产品运行期报上来的那一份：
+  // 服务端折出来的是静态清单（`{frontendUrl}/menu.json`），它只能表达「对所有项目
+  // 都成立」的项；而「建模中心」下有哪些分层入口取决于这个项目在「分层规范」里登记了
+  // 什么（见 `config/navMount.ts`）。产品没报过（版本旧、或消息还没到）就沿用静态那份 ——
+  // `liveChildren` 返回 `undefined` 时回落，不会因为消息没来就变成空目录。
+  const live = node.mounted ? liveChildren(node, ctx.scope, ctx.projectCode) : undefined;
+  const kids = convertAll(live ?? node.children ?? [], ctx);
   const base: NavItem = { id: node.id, label: node.label, icon: iconOf(node), path: '' };
   // 子节点只在非空时挂上去：空数组会让「这是不是目录」的判断从 `!children` 变成
   // `children.length > 0`，两处判据不一致就是一类「空目录渲染成可点项」的 bug。

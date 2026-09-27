@@ -64,16 +64,19 @@ class NavNodeTest {
     private static final String TENANT_CODE = "navn_t1";
 
     /**
-     * V23 种子的 id —— 清库时**必须留着**。
+     * 种子的 id —— 清库时**必须留着**。
      *
-     * <p>它们是工作台壳与项目壳的 org 自有菜单（用户管理 / 项目管理 / 返回工作台 …）。
+     * <p>它们是工作台壳与项目壳的 org 自有菜单（用户管理 / 项目管理 / 成员管理 …）。
      * 用「product 非空就删」那种写法会把「测试自己建的 org 自有节点」漏掉；
      * 用「不是种子就删」则需要这份名单。
+     *
+     * <p>{@code nav-proj-back}（项目壳的「返回工作台」）不在名单里：V24 已把它从种子里删掉，
+     * 那个入口现在只由左下角的用户面板提供。
      */
     private static final Set<String> SEED_IDS = Set.of(
             "nav-sys", "nav-sys-users", "nav-sys-roles", "nav-sys-projects",
             "nav-sys-knowledge", "nav-sys-settings",
-            "nav-proj", "nav-proj-back", "nav-proj-members");
+            "nav-proj", "nav-proj-members");
 
     /** 工作台壳的 org 自有入口（非管理员也看得到的那一条）—— 好几条用例拿它当锚点。 */
     private static final String SYS_PROJECTS = "/org/workbench/projects";

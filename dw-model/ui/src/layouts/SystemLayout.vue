@@ -8,11 +8,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import AppNav from '../components/AppNav.vue';
 import { ADMIN_HOME, SYS_HOME } from '../config/paths';
 import { buildAdminNav, buildSysNav } from '../config/sysNav';
+import { PRODUCT, toEmbedNodes } from '../config/navData';
+import { postNavTree } from '../config/embed';
 import { isEmbed } from '../config/product';
 import { app, isRealTenantAdmin } from '../stores/app';
 import { appearanceOf } from '../stores/prefs';
@@ -30,6 +32,24 @@ const groups = computed(() =>
 const home = computed(() => (adminShell.value ? ADMIN_HOME : SYS_HOME));
 const menuPos = computed(() =>
   adminShell.value ? appearanceOf('platform').menuPos : appearanceOf('tenant', app.currentTenantId).menuPos
+);
+
+/**
+ * 把工作台壳的菜单报给宿主 —— 与 `ProjectLayout` 那处同一套理由，见那边的说明。
+ *
+ * <p>`project` 传空串：工作台管的是**租户级**的项目清单与外观 / 大模型 / 提示词，
+ * 与「当前是哪个项目」无关。壳据此知道这份菜单不校验项目。
+ *
+ * <p>平台管理壳（`/org/platform/*`）不报：那是组织平台自己的页面，压根不会被嵌，
+ * 而它的路径也不在产品的候选清单里，报过去只会被壳丢弃。
+ */
+watch(
+  groups,
+  (list) => {
+    if (!embed || adminShell.value) return;
+    postNavTree('workbench', '', toEmbedNodes(PRODUCT, 'workbench', list));
+  },
+  { immediate: true }
 );
 </script>
 
