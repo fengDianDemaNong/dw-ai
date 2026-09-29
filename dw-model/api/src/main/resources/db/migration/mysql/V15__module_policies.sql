@@ -1,0 +1,15 @@
+-- 租户侧的模块策略 —— 与 dw-org 的 V27 是同一列、同一语义，只是补到 dw-model 的库上。
+--
+-- 为什么需要这一条：dw-common 的 TenantLicenseEntity 是**三个模块共用**的实体，
+-- 加字段时只有 dw-org 的库跟着加了列（V27），dw-model 的库停在 V14。而 MyBatis-Plus 的
+-- selectById 会把实体上映射到的**每一列**都写进 SELECT —— 于是 dw-model 里
+-- AuthService / ProjectService / AccessService 任何一次读许可都会炸：
+--   Column "module_policies" not found; SQL: SELECT tenant_id,modules,ai_caps,module_policies ...
+--
+-- 形状与读写口径逐字见 dw-org 的 V27：
+--   [{"product": "warehouse", "enabled": true, "visibleTo": "all_members"}, ...]
+-- **故意不回填**：NULL = 这个租户没配过，读侧回落默认值（全开 + 默认可见范围）。
+--
+-- dw-model 自己不读这一列（只借用同一个实体读 modules / ai_caps），加它纯粹是让
+-- 库结构和共享实体对齐 —— 共享实体加了字段，三个模块的库都要跟，漏一个就是运行时 500。
+ALTER TABLE tenant_licenses ADD COLUMN module_policies JSON NULL;

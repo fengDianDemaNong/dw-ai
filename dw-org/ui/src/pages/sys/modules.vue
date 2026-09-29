@@ -27,10 +27,6 @@
           <template v-else-if="column.key === 'desc'">
             <span class="muted">{{ moduleDesc(record.product) }}</span>
           </template>
-          <template v-else-if="column.key === 'svc'">
-            <span v-if="record.frontendUrl" class="mono">{{ record.frontendUrl }}</span>
-            <span v-else class="muted">平台未注册</span>
-          </template>
           <template v-else-if="column.key === 'on'">
             <a-switch
               :checked="record.enabled"
@@ -54,10 +50,6 @@
       <p v-if="!rows.length && !loading" class="muted">平台尚未给本组织开通任何模块。</p>
       <ul v-else class="hint">
         <li>改动即时保存。<b>只提交你动过的模块</b> —— 没动过的保持原样，它们本来就不限可见范围。</li>
-        <li>
-          「平台服务」列是产品的<b>页面地址</b>（来自平台服务注册），不是后端地址；登记过就显示地址，
-          没有则显示「平台未注册」。这里<b>没有在线/离线状态</b> —— 平台不探活产品进程。
-        </li>
       </ul>
     </section>
   </div>
@@ -90,7 +82,6 @@ const visOpts = VISIBLE_TO_OPTS.map((o) => ({ value: o.value, label: o.label }))
 const cols = [
   { title: '模块', key: 'label', width: 200 },
   { title: '说明', key: 'desc' },
-  { title: '平台服务', key: 'svc', width: 260 },
   { title: '本组织启用', key: 'on', width: 110 },
   { title: '谁能看见', key: 'vis', width: 250 },
 ];
@@ -164,11 +155,6 @@ h3 {
 
 .lead {
   margin: 0 0 12px;
-}
-
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
 }
 
 .hint {

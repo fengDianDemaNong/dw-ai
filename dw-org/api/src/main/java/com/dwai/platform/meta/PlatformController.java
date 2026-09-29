@@ -2,7 +2,10 @@ package com.dwai.platform.meta;
 
 import com.dwai.platform.internal.ServiceRegistry;
 import com.dwai.platform.meta.dto.ApiModels;
+import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -208,6 +211,44 @@ public class PlatformController {
   public Map<String, Object> deleteNavNode(@PathVariable String id) {
     access.requirePlatform();
     return nav.delete(id);
+  }
+
+  /**
+   * 把一个菜单在同层里上移 / 下移一格（body {@code {"delta": -1 | 1}}）。
+   *
+   * <p>{@code scope} 与 {@code parentId} <b>不在请求体里</b> —— 它们全部由被移动的节点自身
+   * 推导。这两个字段一旦让调用方传，就必然出现「传了别的层」的请求，而那种错误的后果是
+   * 静默改错一层；详见 {@link NavNodeService#move}。
+   *
+   * <p>{@code changed:false} 表示已经在首 / 末位（不是错误），前端据此置灰按钮。
+   */
+  @PostMapping("/nav-nodes/{id}/move")
+  public Map<String, Object> moveNavNode(
+      @PathVariable String id, @RequestBody(required = false) NavNodeService.MoveReq req) {
+    access.requirePlatform();
+    return nav.move(id, req == null ? null : req.delta);
+  }
+
+  /**
+   * 把一条外链菜单的凭据**明文**读出来，供「复制」按钮用。
+   *
+   * <p><b>这是全仓唯一的凭据明文出口，是有意开的</b>，与 {@code ComputeDto} 那套
+   * 「写了就不回显」的区别在于：那个页面上凭据是拿来用的（服务端自己去调），
+   * 而这里的外链凭据<b>服务端用不上</b> —— 账号密码那一档浏览器根本不让我代填
+   * （见 {@code NavNodeEntity#getAuthMode()}），不给人复制就完全是个死字段。
+   *
+   * <p>门禁因此收到最严：平台管理员专属（与 {@code /nav-nodes} 其余端点同一道），
+   * 消费面<b>没有</b>对应接口 —— 使用者拿不到明文。
+   *
+   * <p>{@code no-store}：明文不能被任何中间层缓存。
+   */
+  @GetMapping("/nav-nodes/{id}/credential")
+  public ResponseEntity<Map<String, Object>> navNodeCredential(@PathVariable String id) {
+    access.requirePlatform();
+    return ResponseEntity.ok()
+        .cacheControl(CacheControl.noStore())
+        .header(HttpHeaders.PRAGMA, "no-cache")
+        .body(nav.credential(id));
   }
 
   /**

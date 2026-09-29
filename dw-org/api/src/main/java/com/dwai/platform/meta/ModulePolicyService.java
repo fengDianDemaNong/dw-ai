@@ -1,7 +1,6 @@
 package com.dwai.platform.meta;
 
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import com.dwai.platform.internal.ServiceRegistry;
 import com.dwai.platform.meta.dto.ApiModels;
 import com.dwai.platform.meta.entity.TenantEntity;
 import com.dwai.platform.meta.entity.TenantLicenseEntity;
@@ -50,13 +49,10 @@ public class ModulePolicyService {
 
   private final TenantLicenseMapper licenses;
   private final AccessService access;
-  private final ServiceRegistry registry;
 
-  public ModulePolicyService(
-      TenantLicenseMapper licenses, AccessService access, ServiceRegistry registry) {
+  public ModulePolicyService(TenantLicenseMapper licenses, AccessService access) {
     this.licenses = licenses;
     this.access = access;
-    this.registry = registry;
   }
 
   /** 本组织可配的模块及其当前设置（只列平台已开通的）。 */
@@ -135,8 +131,7 @@ public class ModulePolicyService {
       if (p == null) {
         p = new ApiModels.ModulePolicyDto(product, true, defaultVisibleTo(product));
       }
-      out.add(new ApiModels.ModuleRowDto(
-          product, p.enabled(), p.visibleTo(), frontendUrl(product), explicit));
+      out.add(new ApiModels.ModuleRowDto(product, p.enabled(), p.visibleTo(), explicit));
     }
     return out;
   }
@@ -168,12 +163,6 @@ public class ModulePolicyService {
   /** 默认可见范围（显示用初值）—— 与 {@code NavNodeService.defaultVisibleTo} 同一口径。 */
   private static String defaultVisibleTo(String product) {
     return "warehouse".equals(product) ? "all_members" : NavNodeService.DEFAULT_VISIBLE_TO;
-  }
-
-  /** 产品页面地址。为空 = 服务注册里还没登记，前端显示「平台未注册」而不是嵌一个空 iframe。 */
-  private String frontendUrl(String product) {
-    ServiceRegistry.Entry svc = registry.get(product);
-    return svc == null ? "" : nz(svc.frontendUrl());
   }
 
   private void requireTenant(String tenantId) {

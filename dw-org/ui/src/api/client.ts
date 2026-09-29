@@ -11,6 +11,7 @@ import type {
   WarehouseTable,
   WordRoot,
 } from '../types';
+import { isEmbed } from '../config/runtime';
 
 /** `.` 表示与页面同源（Docker Nginx 反代 / 安装包由 API 托管静态页 / Vite 代理） */
 function normalize(v: string | undefined): string {
@@ -89,6 +90,13 @@ function isIdle() {
 }
 
 function expireIdle() {
+  // 被框起来的那一页（入口页的 Tab 里嵌的 org 页面）不主导航、不清令牌。
+  //
+  // <p>同源 iframe 与父窗口**共享 sessionStorage**，下面这一句清掉的是**父页也在用**的
+  // `dw-ai.token` / `refreshToken` —— 父页下一次请求必 401、连 refresh 都没得刷，
+  // 表现为「外壳莫名其妙被登出」。而 `location.assign` 会把**当前这个 iframe** 导航成
+  // 登录页：标签里嵌着一张登录表单，外壳却还显示着登录态。收场留给顶层窗口。
+  if (isEmbed()) return;
   setAuthToken(null);
   if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
     window.location.assign('/org/login');
@@ -364,7 +372,6 @@ export type ModulePolicyRow = {
   product: string;
   enabled: boolean;
   visibleTo: string;
-  frontendUrl: string;
   explicit: boolean;
 };
 
@@ -418,12 +425,16 @@ export type NavScope = 'workbench' | 'project';
  * 为空、带 `children` 的节点（用户 2026-09-27：「统一都是菜单，菜单下面还有菜单…
  * 不限制菜单层级」）。所以这里没有 `groupTitle`。
  *
- * <p>三类节点只看两列（见服务端 `NavNodeService` 的类注释）：
+ * <p>五类节点只看几列（见服务端 `NavNodeService` 的类注释）：
  * <ul>
  *   <li>org 自有：`product` 为空 → `path` 是 org 的**完整路由**（可能含 `{code}` 占位符）；</li>
  *   <li>手工复制的产品页面：`product` 非空、`mounted` 为假 → `path` 是**子应用内**路径；</li>
  *   <li>挂载节点：`mounted` 为真 → 内容按 `(product, ref)` 在产品清单里**实时展开**，
- *       此时 `path`/权限词都取自产品那一项，而不是这一行的配置。</li>
+ *       此时 `path`/权限词都取自产品那一项，而不是这一行的配置；</li>
+ *   <li>入口页（V29）：`entryPage` 为真 → 自己是一排 Tab，一条被挂的菜单一个 Tab。
+ *       被挂的菜单**在原位置也还在**（引用，不是父子）；</li>
+ *   <li>外链菜单（V29）：`externalUrl` 非空 → 指向平台外的地址。`openMode` 是 `embed`
+ *       时 `path` 指向壳内那一页（含 `{node}` 占位符），是 `jump` 时改用 `href`。</li>
  * </ul>
  *
  * <p>`frontendUrl` / `disabled` / `disabledReason` 只有消费面（`api.nav()`）会给：
@@ -435,7 +446,13 @@ export type NavNodeRow = {
   /** 父节点 id；空串 = 壳下的顶层节点（用户说的「主菜单」），**不是** `null`。 */
   parentId: string;
   label: string;
-  /** 空串 = 目录节点（不可点，只用来挂子节点）。 */
+  /**
+   * 空串 = 目录节点（不可点，只用来挂子节点）。
+   *
+   * <p>入口页与外链（内嵌）这一列是**服务端写的模板**（`/org/workbench/entry/{node}`），
+   * `{node}` 由前端用节点 id 替换 —— 与 `{code}` 同一套机制。管理员填不了它，因为 id
+   * 是服务端生成的。
+   */
   path: string;
   icon: string;
   perm: string;
@@ -449,46 +466,216 @@ export type NavNodeRow = {
   ref: string;
   mounted: boolean;
   emptyPolicy: NavGroupEmptyPolicy;
+  /** 入口页（V29）：这一行自己是一排 Tab。 */
+  entryPage?: boolean;
+  /**
+   * 入口页挂进来的 Tab（管理面回显；**只有管理面给**）。**数组顺序就是 Tab 顺序**。
+   *
+   * <p>V31 之前是两个字段（`linkTargets` + `productLinks`）—— 拆开是因为当时两张表的
+   * 顺序来源不同；现在 Tab 顺序由管理员在表单里排，两类混排，只能是一份列表。
+   */
+  links?: NavEntryLink[];
+  /** 外链目标地址；非空 = 这一行是一条外链菜单。 */
+  externalUrl?: string;
+  /** `embed` = 内嵌进壳；`jump` = 新标签页打开。 */
+  openMode?: NavExternalOpenMode;
+  /** `none` / `token` / `basic`。**`basic` 不会自动登录**（浏览器限制），只存不填。 */
+  authMode?: NavExternalAuthMode;
+  /** 配过 token 没有。**明文永远不回传**，只有平台管理员的「复制」接口给。 */
+  hasToken?: boolean;
+  basicUser?: string;
+  hasPassword?: boolean;
+  /** 外链独立的可见性开关（两档，原因见 `NavNodeService` 的类注释）。 */
+  visibility?: NavExternalVisibility;
   createdAt?: string;
   /** 该节点的产品站点根；空串 = 「服务注册」里还没配。 */
   frontendUrl?: string;
+  /** 消费面：外链（`jump`）的目标地址，直接落在 `<a href>` 上。 */
+  href?: string;
+  external?: boolean;
   disabled?: boolean;
   disabledReason?: string;
   /** 子菜单，层级不限。消费面里已经被服务端按许可与角色裁过一遍。 */
   children?: NavNodeRow[];
+  /**
+   * **前端合成的只读行**，不是 `nav_nodes` 里的一行。
+   *
+   * <p>只出现在管理面：挂载行的子菜单来自产品清单（后端 `renderMounted` 根本不读 org 侧
+   * 的子行），所以直接读表时那一行下面永远是空的 —— 而侧栏里明明有一整棵。这个标记表示
+   * 「这一行是照着产品清单画的」，编辑/停用/删除/新增子菜单一概不给，也不该被当成
+   * 父节点候选。
+   */
+  virtual?: boolean;
+};
+
+/**
+ * 入口页上的一条 Tab（V31，服务端 `LinkSpec` 的回显形状）。
+ *
+ * <p>两类引用**合成一份带类型的列表**（原先拆成 `linkTargets` + `productLinks` 两段）：
+ * Tab 顺序由数组顺序决定，而两类是混排的 —— 两个数组拼不回一个顺序，也带不了
+ * 每条自己的名字。
+ *
+ * <p>`kind` 决定读哪几个字段，**不要按 id 的形状去猜**：把清单 id 当成 nav id 提交回去，
+ * 服务端报的是「要挂的菜单不存在」，与真实原因（分错类了）差得很远。
+ */
+export type NavEntryLink = {
+  /** `node` = 本站菜单（读 `target`）；`product` = 产品清单节点（读 `product` + `ref`）。 */
+  kind: 'node' | 'product';
+  /** `kind='node'` 时：本站菜单在 `nav_nodes` 里的 id。 */
+  target?: string;
+  /** `kind='product'` 时：产品码，见 `config/products.ts`。 */
+  product?: string;
+  /** `kind='product'` 时：产品清单（`{frontendUrl}/menu.json`）里那个节点的 id。 */
+  ref?: string;
+  /**
+   * 这一条 Tab 自己显示的名字。**空 = 没改过名**（用被挂菜单自己的标题），不是「名字为空」。
+   *
+   * <p>同名菜单挂两条时（比如两个「概况」）只能靠它区分。
+   */
+  label?: string;
+  /** Tab 顺序（服务端按它排，只有回显给）。提交时用不到 —— 数组顺序就是它。 */
+  sortOrder?: number;
+};
+
+/**
+ * 提交用的同一条 Tab：与 {@link NavEntryLink} 只差一个 `sortOrder`。
+ *
+ * <p>顺序由**数组下标**表达，所以这个字段不提交（服务端也不读它）。
+ */
+export type NavEntryLinkReq = Omit<NavEntryLink, 'sortOrder'>;
+
+/** 外链菜单的打开方式。 */
+export type NavExternalOpenMode = 'embed' | 'jump';
+
+/**
+ * 外链菜单的认证方式。
+ *
+ * <p>`basic` 这一档**不会带来任何自动化**：现代浏览器禁止 `https://user:pass@host` 作为
+ * iframe 地址，也无法代填第三方的登录表单。它的实际用途只剩「平台管理员保存备查 + 复制」，
+ * 表单里必须写明。
+ */
+export type NavExternalAuthMode = 'none' | 'token' | 'basic';
+
+/**
+ * 外链菜单的可见范围。**只有两档**：后三档（指定产品角色那些）都要 `product` 才能算，
+ * 而外链没有产品 —— 这是能力缺失，不是漏做。
+ */
+export type NavExternalVisibility = 'all' | 'tenant_admin';
+
+/** 入口页的内容（`GET /api/v1/nav/entry/{id}`）。 */
+export type NavEntryPage = {
+  id: string;
+  label: string;
+  scope: NavScope;
+  /** 表里要列出的菜单。**每一项都走侧栏那一套判权**，看不见的不会出现在这里。 */
+  items: NavNodeRow[];
+};
+
+/** 一条外链的最终地址（`GET /api/v1/nav/external/{id}`）：token 已由服务端拼好。 */
+export type NavExternalTarget = {
+  id: string;
+  label: string;
+  url: string;
+  openMode: NavExternalOpenMode;
+};
+
+/** 凭据明文（平台管理员专属，`GET /api/v1/platform/nav-nodes/{id}/credential`）。 */
+export type NavNodeCredential = {
+  id: string;
+  label: string;
+  authMode: NavExternalAuthMode;
+  token: string;
+  basicUser: string;
+  password: string;
 };
 
 /**
  * 新建 / 修改菜单节点的请求体（服务端 `NavNodeService.NavNodeReq` 的镜像）。
  *
  * <p>字段缺席 = 不改（`PATCH` 的语义）；新建时 `scope` 必填，其余由服务端落默认值。
- * 三类节点的填法（见 {@link NavNodeRow}）：
+ * 五类节点的填法（见 {@link NavNodeRow}）：
  * <ul>
  *   <li>org 自有页面 / 目录：`product` 留空，`path` 写 org 路由（空串 = 目录）；</li>
  *   <li>手工复制产品页面：给 `product` + 子应用内的 `path`，`mounted` 留假（默认）；</li>
  *   <li>挂载产品节点：给 `product` + `ref`（产品清单里那个节点的 id）并置 `mounted: true`
- *       —— 此时 `path` / 权限词由服务端在渲染时现取，**不要**自己填。</li>
+ *       —— 此时 `path` / 权限词由服务端在渲染时现取，**不要**自己填；</li>
+ *   <li>入口页：`entryPage: true` + `linkTargets`（挂本站菜单）+ `productLinks`（挂产品清单里的节点）；</li>
+ *   <li>外链菜单：`externalUrl` + `openMode` + `authMode`（+ 凭据）。</li>
  * </ul>
+ *
+ * <p>入口页与外链的 `path` 都**不要**填：服务端会写成模板（`{node}` 留给前端替换）。
  */
 export type NavNodeInput = {
   scope?: NavScope;
   /** 父节点 id；空串 = 壳下的顶层节点（用户说的「主菜单」）。 */
   parentId?: string;
   title?: string;
-  /** 空串 = 目录节点。 */
+  /** 空串 = 目录节点。入口页 / 外链不要填（服务端写模板）。 */
   path?: string;
   icon?: string;
   perm?: string;
+  /**
+   * 同层排序值，**不传**（= 落在同层末尾，服务端取「同层最大 + 10」）。
+   *
+   * <p>管理页已经完全不发它了：不让管理员手填数字，改用列表里的上移 / 下移
+   * （{@link PlatformApi.moveNavNode}）与展示层合成的分层位次。
+   *
+   * <p>显式传仍然生效，这是给「按既定顺序导入」这类脚本用的 —— 服务端只在字段出现时
+   * 才采信（见 `NavNodeService#apply`）。
+   */
   sortOrder?: number;
   enabled?: boolean;
-  /** 仅租户管理员可见；只能用在 org 自有节点上（`product` 为空）。 */
+  /** 仅租户管理员可见；只能用在 org 自有节点上（`product` 为空），**外链用 `visibility`**。 */
   adminOnly?: boolean;
-  /** 产品码；空串 = org 自己的页面。 */
+  /** 产品码；空串 = org 自己的页面。入口页与外链都必须留空。 */
   product?: string;
   /** `mounted` 为真时必填：产品清单里那个节点的 id。 */
   ref?: string;
   mounted?: boolean;
   emptyPolicy?: NavGroupEmptyPolicy;
+
+  // ---- V29：入口页与外链菜单 ----
+
+  /** 这一行是不是一个入口页（自己是一排 Tab）。 */
+  entryPage?: boolean;
+  /**
+   * 入口页挂进来的 Tab（V31）。**数组顺序 = Tab 顺序**，每条可带自己的 `label`（Tab 名）。
+   *
+   * <p>**全量替换**（两类一起）：不传 = 不改，空数组 = 都清空 —— 在这套语义里它们本来
+   * 就是同一张列表。管理页发的就是它。
+   *
+   * <p>与下面两个老字段**互斥**，同时传服务端会拒（以哪一份为准没有唯一说法）。
+   */
+  links?: NavEntryLinkReq[];
+  /**
+   * 入口页挂了哪些菜单的 id。**老写法（V29）**，管理页已不再发它 ——
+   * 新写法 {@link links} 才能表达混合顺序与 Tab 名。老客户端与既有测试仍在用。
+   *
+   * <p>**全量替换语义**：不传 = 不改，空数组 = 清空。两者必须分得开：改了标题但没碰
+   * 这一栏时是前者，否则一保存就把表清空了。
+   */
+  linkTargets?: string[];
+  /**
+   * 入口页挂的**产品清单节点**。**老写法（V30）**，同上，管理页已不再发。
+   *
+   * <p>与 {@link linkTargets} 各自独立的全量替换语义：不传 = 那一类不改，空数组 = 清空那一类。
+   */
+  productLinks?: { product: string; ref: string }[];
+  /** 外链目标地址；只允许 http / https。 */
+  externalUrl?: string;
+  openMode?: NavExternalOpenMode;
+  authMode?: NavExternalAuthMode;
+  /**
+   * token 明文，**只进不出**（响应只给 `hasToken`）。
+   *
+   * <p>空串 = **保持原值**，不是清空 —— 编辑态这一格本来就是空的（服务端不回显明文），
+   * 把空当清空的话改一次标题就会把 token 抹掉。
+   */
+  token?: string;
+  basicUser?: string;
+  /** 账号密码认证的密码明文，处置同 `token`。 */
+  password?: string;
+  visibility?: NavExternalVisibility;
 };
 
 /**
@@ -668,6 +855,22 @@ export const api = {
   nav: () => req<NavNodeRow[]>('/api/v1/nav'),
 
   /**
+   * 一个入口页的内容（消费面）：表里要列出哪些菜单。
+   *
+   * <p>每一项都走服务端侧栏那一套判权，所以**看不见的不会出现在这里** ——
+   * 前端不必也不该再过滤一次（两个过滤器意味着「表里少一项」有两种成因）。
+   */
+  navEntry: (id: string) => req<NavEntryPage>(`/api/v1/nav/entry/${encodeURIComponent(id)}`),
+
+  /**
+   * 一条外链的最终地址（消费面）：**token 已由服务端拼好**。
+   *
+   * <p>不在侧栏树里给明文：那样每个页面的侧栏请求都会把凭据下发一遍。这里一次只给
+   * 一条外链，且只在真要打开它的时候调。
+   */
+  navExternal: (id: string) => req<NavExternalTarget>(`/api/v1/nav/external/${encodeURIComponent(id)}`),
+
+  /**
    * 产品服务目录（消费面）：当前租户开通的产品各自的前端地址在哪。
    *
    * <p>与 `nav()` 的分工：菜单回答「侧栏有哪些入口」（按管理员配的菜单项来），
@@ -749,6 +952,29 @@ export const api = {
     /** 删一个节点**连同整棵子树**；`subtree` 是连带删掉的子孙条数（确认框要用）。 */
     deleteNavNode: (id: string) =>
       req<{ subtree: number }>(`/api/v1/platform/nav-nodes/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    /**
+     * 把一个菜单在**同层**里上移 / 下移一格（`delta` = -1 / 1）。
+     *
+     * <p>请求体里只有 `delta`，`scope` 与 `parentId` 由服务端从被移动的那个节点自身推导。
+     * 让调用方传那两个字段的话，「传错层」这类请求在协议上就成立了 —— 它的后果是静默改错
+     * 一层：没有报错，只有某处的顺序变了。
+     *
+     * <p>已经在首 / 末位时返回 `changed: false`（不是错误），调用方据此把按钮置灰。
+     * 成功时服务端会把**整层**重编号成 10/20/30，所以调用方拿到结果后应重新拉一次列表。
+     */
+    moveNavNode: (id: string, delta: -1 | 1) =>
+      req<{ changed: boolean; sortOrder?: number }>(
+        `/api/v1/platform/nav-nodes/${encodeURIComponent(id)}/move`,
+        { method: 'POST', body: JSON.stringify({ delta }) },
+      ),
+    /**
+     * 把一条外链菜单的凭据**明文**读出来，供「复制」用（平台管理员专属）。
+     *
+     * <p>这是全仓唯一的凭据明文出口，有意开的：账号密码那一档浏览器不允许代填，
+     * 不给人复制就完全是个死字段。**消费面没有对应接口** —— 使用者拿不到明文。
+     */
+    navNodeCredential: (id: string) =>
+      req<NavNodeCredential>(`/api/v1/platform/nav-nodes/${encodeURIComponent(id)}/credential`),
     /**
      * 某产品认哪些权限词（产品自报，见各服务前端 `config/navData.ts` 的 `PERM_OPTIONS`）。
      *

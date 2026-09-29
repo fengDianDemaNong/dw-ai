@@ -18,6 +18,7 @@
         :key="keyOf(item, i)"
         :item="item"
         :active-path="active"
+        :route-path="route.path"
         :depth="0"
         variant="side"
         :collapsed="collapsed"

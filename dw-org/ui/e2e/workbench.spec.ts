@@ -94,6 +94,28 @@ async function openNav(page: Page, label: string, href?: string) {
   await page.getByText(label, { exact: true }).first().click();
 }
 
+/**
+ * 展开侧栏里的一个顶层分组。
+ *
+ * <p>V28 起顶层分组可折叠，默认**只展开当前页所在的那一组**（用户 2026-09-27 的裁定）。
+ * 用例里建出来的目录都不在当前页那一组里，所以默认是收起的 —— 不点开就按文字定位，
+ * 会找不到元素。
+ *
+ * <p>判据是 `aria-expanded`（折叠控件的标准语义），**不是** `.gtitle` 上的 `collapsed` 类：
+ * 那个类说的是「侧栏整体收成 64px 图标条」，与某一组展开与否无关 —— 拿它判会永远读到
+ * 「已展开」，于是这里一次都不点，调用方在下面「元素不可见」处才炸，指错方向。
+ *
+ * <p>也不能无条件点一下：那会把**已经展开**的组点成收起，比不点还糟。
+ */
+async function expandGroup(page: Page, title: string) {
+  const head = page.locator('aside nav .gtitle').filter({ hasText: title }).first();
+  await expect(head, `侧栏里没找到分组「${title}」`).toBeVisible();
+  if ((await head.getAttribute('aria-expanded')) !== 'true') {
+    await head.click();
+  }
+  await expect(head).toHaveAttribute('aria-expanded', 'true');
+}
+
 async function waitDrawerClosed(page: Page, cls: string) {
   await expect(page.locator(`${cls}.ant-drawer-open`)).toHaveCount(0, { timeout: 15_000 });
 }
@@ -204,21 +226,45 @@ async function createNavDirs(
   return ids;
 }
 
-async function deleteNavNodes(page: Page, ids: string[]) {
+/**
+ * 清理测试建的菜单节点：**能删就删，删不掉就停用**。
+ *
+ * <p>为什么不能只删：org 自己的节点现在<b>删不掉了，只能停用</b>（本次需求的守卫，
+ * `NavNodeService.delete()` 会对 `product` 为空的行回 400）。而本文件里清理用的节点
+ * 一大半是 org 自有的（目录、页面），只删会让它们**永远留在库里**。
+ *
+ * <p>为什么停用也算清干净：停用＝那一支连同子菜单都不出现在侧栏里（消费面的过滤在
+ * `NavNodeService.enabledRows()` 一处收口），而后面那些读 `/api/v1/nav` 的用例正是
+ * 靠「看得见的菜单」断言的；管理面读到的多余行不影响它们（都带 `stamp`，标题不重）。
+ * 反过来，**如果这里什么都不做**，残留的行会让「侧栏里不该有 X」这类断言变成空转。
+ */
+async function disposeNavNodes(page: Page, ids: string[]) {
   const headers = { Authorization: `Bearer ${await adminToken(page)}` };
   for (const id of ids) {
-    await page.request.delete(`/api/v1/platform/nav-nodes/${encodeURIComponent(id)}`, { headers });
+    const res = await page.request.delete(
+      `/api/v1/platform/nav-nodes/${encodeURIComponent(id)}`,
+      { headers }
+    );
+    if (!res.ok()) {
+      await page.request.patch(`/api/v1/platform/nav-nodes/${encodeURIComponent(id)}`, {
+        headers,
+        data: { enabled: false },
+      });
+    }
   }
+}
+
+async function deleteNavNodes(page: Page, ids: string[]) {
+  await disposeNavNodes(page, ids);
 }
 
 /** 删掉这些 path 上的菜单项（同一条路径可能挂在两个壳上，两个都清）。 */
 async function clearNavItems(page: Page, paths: string[]) {
-  const headers = { Authorization: `Bearer ${await adminToken(page)}` };
+  const ids: string[] = [];
   for (const row of await navItemRows(page)) {
-    if (paths.includes(row.path)) {
-      await page.request.delete(`/api/v1/platform/nav-nodes/${encodeURIComponent(row.id)}`, { headers });
-    }
+    if (paths.includes(row.path)) ids.push(row.id);
   }
+  await disposeNavNodes(page, ids);
 }
 
 /** 菜单树里的一个节点（{@link navItemRows} 把整棵树展平成一维，断言好写）。 */
@@ -233,6 +279,13 @@ type NavRow = {
   perm: string;
   mounted: boolean;
   ref: string;
+  /** 停用过的行仍在管理面列出来（否则没法再启用），所以这一列是「停用」按钮的**服务端证据**。 */
+  enabled: boolean;
+  /**
+   * 库里存的层内序号。**管理面不再显示它**（界面显示的是合成出来的位次路径），
+   * 但「新建落同层末尾」「移动后整层归一成 10/20/30」这两条只能读它来验。
+   */
+  sortOrder: number;
   children?: NavRow[];
 };
 
@@ -253,10 +306,7 @@ async function navItemRows(page: Page): Promise<NavRow[]> {
 }
 
 async function deleteNavItemIds(page: Page, ids: string[]) {
-  const headers = { Authorization: `Bearer ${await adminToken(page)}` };
-  for (const id of ids) {
-    await page.request.delete(`/api/v1/platform/nav-nodes/${encodeURIComponent(id)}`, { headers });
-  }
+  await disposeNavNodes(page, ids);
 }
 
 /** 菜单树的 label 展平 —— 消费面 `/api/v1/nav` 返回的是树，层级不限。 */
@@ -622,6 +672,23 @@ async function startMenuStub(initial: string): Promise<{ base: string; body: str
   return stub;
 }
 
+/**
+ * 一个只回一小段 HTML 的桩站点 —— 外链内嵌用例（V29）的目标站。
+ *
+ * <p>不用真外站：跑 e2e 的机器未必通外网，不通时 iframe 白屏 —— 那时断言失败指向的是
+ * 「网络」，不是被验的东西。桩只承担「有个真能嵌进来的页面」这一件事。
+ */
+async function startEmbedTarget(): Promise<{ base: string; close: () => Promise<void> }> {
+  const server = http.createServer((_req, res) => {
+    const bytes = Buffer.from('<!doctype html><title>embed target</title><p>ok</p>', 'utf8');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': bytes.length });
+    res.end(bytes);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  return { base, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
+}
+
 test.describe.serial('工作台前端流程', () => {
   /**
    * 把星河租户**两个壳**的菜单风格都钉成 `left`，让存量用例与风格解耦。
@@ -652,8 +719,10 @@ test.describe.serial('工作台前端流程', () => {
     await expect(page).toHaveURL(/\/projects/);
     await expect(page.getByRole('heading', { name: '项目管理' })).toBeVisible();
     await expect(btn(page, '新增')).toBeVisible();
-    await expect(page.getByText('块')).toBeVisible();
-    await expect(page.getByText('行')).toBeVisible();
+    // 必须 `exact`：默认是子串匹配，而侧栏里的「模块管理」含一个「块」字 ——
+    // 一撞就是 Playwright 的 strict mode 报错（匹配到 2 个元素），跟页面本身没关系。
+    await expect(page.getByText('块', { exact: true })).toBeVisible();
+    await expect(page.getByText('行', { exact: true })).toBeVisible();
   });
 
   test('用户管理：行内仅编辑删除，抽屉含全部字段并可保存', async ({ page }) => {
@@ -663,6 +732,38 @@ test.describe.serial('工作台前端流程', () => {
     await expect(btn(page.locator('.page-header'), '新增')).toBeVisible();
     await expect(btn(page, '转让管理员')).toBeVisible();
     await expect(page.getByRole('heading', { name: '平台授权码' })).toBeVisible();
+
+    // 授权码只能脱敏显示，且旁边要有复制入口。**拿接口里的真值去页面里找**才是这条的判据 ——
+    // 只断言「长得像掩码」不够：原样渲染完整码、只是恰好也匹配掩码正则时，那种断言照样绿。
+    const grantTable = page.locator('.grant-table');
+    const grants = await page.request.get(`/api/v1/tenants/${await xingheTenantId(page)}/grants`, {
+      headers: await tenantAdminHeaders(page),
+    });
+    const codes = ((await grants.json()) as { code: string }[]).map((g) => g.code);
+    // 种子里必有 `g-xinghe-demo`（与下面断言张三/李四同一个前提）；为空说明这条断言在空转。
+    expect(codes.length, '本租户应当已有授权码种子，否则脱敏断言是空转').toBeGreaterThan(0);
+    for (const code of codes) {
+      await expect(
+        grantTable.getByText(code, { exact: true }),
+        `授权码 ${code} 不该以明文出现在列表里`
+      ).toHaveCount(0);
+    }
+    await expect(grantTable.locator('.grant-code').first()).toHaveText(/^.{4}•{6}$/);
+    await expect(grantTable.locator('.ant-typography-copy').first()).toBeVisible();
+
+    // 复制按钮得真把**完整码**写进剪贴板 —— 只断言图标在，等于没验「快捷复制」这件事。
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await grantTable.locator('.ant-typography-copy').first().click();
+    const clip = await page.evaluate(() => navigator.clipboard.readText());
+    expect(codes, `剪贴板里应当是完整授权码，实际是「${clip}」`).toContain(clip);
+
+    // 编辑弹窗里那一格与列表同一口径，别一处脱敏、点开编辑又全露出来。
+    await btn(grantTable.locator('tbody tr').first(), '编辑').click();
+    const grantModal = page.locator('.ant-modal').filter({ hasText: '编辑平台授权码' });
+    await expect(grantModal).toBeVisible();
+    await expect(grantModal.locator('.grant-code')).toHaveText(/^.{4}•{6}$/);
+    await btn(grantModal, '取消').click();
+    await expect(grantModal).toBeHidden();
 
     const table = page.locator('.org-users-table');
     await expect(table.getByText('显示名')).toBeVisible();
@@ -840,12 +941,14 @@ test.describe.serial('工作台前端流程', () => {
     await expect(page.getByRole('heading', { name: '租户管理员' })).toBeVisible();
     await expect(page.getByRole('heading', { name: '项目管理员' })).toBeVisible();
 
-    await openNav(page, '设置', '/org/workbench/settings');
-    await expect(page.getByRole('heading', { name: '设置' })).toBeVisible();
+    // 「设置」V28 起是个目录（`nav_nodes.path` 为空串，点不动），下挂外观 / 大模型 / AI 提示词。
+    // 旧地址 `/org/workbench/settings` 还在（路由表里重定向到外观页），但侧栏已经没有指向它的
+    // 链接了，所以按新地址点。另外两个子页各有专门用例，这条只做「设置这一支还能进去」的冒烟。
+    await openNav(page, '外观', '/org/workbench/settings/appearance');
+    await expect(page.getByRole('heading', { name: '外观' })).toBeVisible();
     await expect(page.getByRole('heading', { name: '主题' })).toBeVisible();
     await expect(page.getByRole('heading', { name: '菜单栏颜色' })).toBeVisible();
     await expect(page.getByRole('heading', { name: '菜单风格' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: '大模型' })).toBeVisible();
 
     // 「进入项目」落点 = **项目壳**（不是某个产品自己的站点，也不是工作台里的某一页）。
     // 见下面那条 case 的说明：项目壳里有什么，取决于管理员把哪些菜单挂到了项目壳上。
@@ -924,6 +1027,11 @@ test.describe.serial('工作台前端流程', () => {
       // 第一条能嵌的项目菜单就是元数据的这条 —— 直接落进去，没有中转页
       await expect(page).toHaveURL(/\/org\/project\/[^/]+\/embed\/metadata\/lineage\/tables/);
       const nav = page.locator('aside nav');
+      // 产品菜单挂在项目壳的顶层目录下，而当前页属于「项目」那一组 → 这些组默认是收起的
+      // （用户 2026-09-27 裁定：只展开当前页所在组，其余收起），先点开再断言。
+      await expandGroup(page, gMeta);
+      await expandGroup(page, gWh);
+      await expandGroup(page, gQuality);
       await expect(nav.getByText(gMeta, { exact: true })).toBeVisible();
       await expect(nav.getByText('血缘分析', { exact: true })).toBeVisible();
 
@@ -1105,26 +1213,40 @@ test.describe.serial('工作台前端流程', () => {
 
       await login(page, '张三', '123456');
       const nav = page.locator('aside nav');
+      // 登录落在 `/projects`（属「系统管理」那一组），本用例建的四组目录都在别的组里 → 默认收起。
+      await expandGroup(page, a);
+      await expandGroup(page, b);
       await expect(nav.getByText(`甲页-${stamp}`, { exact: true })).toBeVisible();
       await expect(nav.getByText(`乙页-${stamp}`, { exact: true })).toBeVisible();
       await expect(nav.getByText(kept, { exact: true })).toBeVisible();
 
-      const titles = await nav.locator('.gtitle').allInnerTexts();
+      // 顶层分组的标题行无论展开还是收起都在（折叠走 `v-show`，只藏 `.kids`），
+      // 所以顺序断言不受这次折叠改动影响。`trim()` 是因为标题行现在是 flex 容器，
+      // 里面除文字外还有个箭头图标 —— 别让排版细节把这条断言变成偶发红。
+      const titles = (await nav.locator('.gtitle').allInnerTexts()).map((t) => t.trim());
       const ia = titles.indexOf(a);
       const ib = titles.indexOf(b);
       expect(ia, `侧栏里没找到登记的「${a}」，实际顶层：${titles.join(' / ')}`).toBeGreaterThanOrEqual(0);
       expect(ib, `侧栏里没找到登记的「${b}」，实际顶层：${titles.join(' / ')}`).toBeGreaterThanOrEqual(0);
       expect(ib, `登记的排序没生效（首次出现序是「${a}」在前），实际：${titles.join(' / ')}`).toBeLessThan(ia);
 
+      // 父目录也是**新建**的顶层组 → 默认收起，先点开再验下钻。
+      await expandGroup(page, parent);
+
       // 三级都在：少了孙这一层，说明渲染只往下走了一层
       await expect(nav.getByText(parent, { exact: true })).toBeVisible();
       await expect(nav.getByText(child, { exact: true })).toBeVisible();
       await expect(nav.getByText(grand, { exact: true })).toBeVisible();
-      // 缩进线只在**深层**的子树上有（顶层目录是平铺标题）：父 › 子 › 孙 正好产生 1 条
+      // 缩进线只在**深层**的子树上有（顶层目录是平铺标题）。
+      //
+      // 不数「深层一共几条」：V28 起工作台自己的「设置」也是个深层目录，那个总数会随
+      // 种子数据变，写死就是一条注定要维护的断言。钉住「顶层的一条都没有」+「验证父 ›
+      // 验证子这一层有一条」——前者正是折叠改动最容易弄坏的地方（顶层被渲染成 `.dir`）。
       await expect(
-        nav.locator('.kids.nested'),
-        '深一层的子菜单应当有一条缩进线（顶层目录是平铺标题，不算）'
-      ).toHaveCount(1);
+        nav.locator('.gtitle + .kids.nested'),
+        '顶层目录是平铺标题，它的子菜单不该有缩进线'
+      ).toHaveCount(0);
+      await expect(nav.locator(`.dir:has-text("${child}") + .kids.nested`)).toHaveCount(1);
 
       // 折叠：点「验证子」那一行的展开箭头，孙消失；再点回来。
       //
@@ -1140,6 +1262,10 @@ test.describe.serial('工作台前端流程', () => {
       await expect(nav.getByText(grand, { exact: true })).toBeVisible();
 
       // always 空目录：整支在、入口置灰不可点、且**不是**链接
+      //
+      // 这个组也是默认收起的（不在当前页那一组里）—— 收着的时候里面的占位项
+      // 是 `display: none`，不点开就断言「可见」会红。
+      await expandGroup(page, kept);
       const placeholder = nav.locator('.item.off').filter({ hasText: '暂无可用的入口' });
       await expect(placeholder).toHaveCount(1);
       await expect(placeholder.first()).toBeVisible();
@@ -1160,8 +1286,110 @@ test.describe.serial('工作台前端流程', () => {
     await expect(page.getByRole('heading', { name: /租户/ })).toBeVisible();
     await openNav(page, '平台用户');
     await expect(page.getByRole('heading', { name: '平台用户' })).toBeVisible();
+    // 平台壳的菜单是前端硬编码的一维清单（`buildAdminNav`，不进库、没有分组），
+    // 所以 V28 的工作台折叠改动影响不到这里，这一条顺带当着平台侧的回归。
     await openNav(page, '设置');
     await expect(page.getByRole('heading', { name: '外观与布局' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '菜单风格' })).toBeVisible();
+  });
+
+  /**
+   * 侧栏顶层分组可折叠（V28）。
+   *
+   * <p>用户 2026-09-27：「系统管理，主菜单，做成可以收起的，点击才展示子菜单」，并裁定
+   * 「所有分组都能收起、默认只展开当前页所在的那一组」。
+   *
+   * <p>三段断言各管一件事，缺一条都可能在错的方向上全绿：
+   * ① 默认态 —— 不在当前页那一组里的组是收起的，**且**当前那一组是展开的（少了后半句，
+   * 「所有组一律收起」也会让前半句绿）；
+   * ② 点标题能展开、再点能收起（收起走 `v-show`，元素还在 DOM 里）；
+   * ③ 路由一变就重算 —— 手动展开过的组，切到别的页面后被收回。
+   */
+  test('侧栏分组可折叠：默认只展开当前页所在的那一组', async ({ page }) => {
+    const grp = `折叠组-${stamp}`;
+    const leaf = `折叠页-${stamp}`;
+    const leafPath = `/lineage/fold-${stamp}`;
+    const dirIds = await createNavDirs(page, [{ scope: 'workbench', title: grp, sortOrder: 50 }]);
+
+    try {
+      await configureNavItems(page, [
+        { product: 'metadata', scope: 'workbench', groupTitle: grp, label: leaf, path: leafPath, sortOrder: 0 },
+      ]);
+
+      await login(page, '张三', '123456');
+      const nav = page.locator('aside nav');
+      const head = nav.locator('.gtitle').filter({ hasText: grp }).first();
+
+      // ① 默认收起：标题行在（它本身就是那个开关），里面的项不可见
+      await expect(head).toBeVisible();
+      await expect(head).toHaveAttribute('aria-expanded', 'false');
+      await expect(nav.getByText(leaf, { exact: true })).toBeHidden();
+
+      // 当前页（`/projects`）所在的那一组反而是展开的。少了这句，「全都收起」也会绿。
+      const sysHead = nav.locator('.gtitle').filter({ hasText: '系统管理' }).first();
+      await expect(sysHead).toHaveAttribute('aria-expanded', 'true');
+      await expect(nav.getByText('项目管理', { exact: true })).toBeVisible();
+
+      // ② 点标题展开，再点收起
+      await head.click();
+      await expect(nav.getByText(leaf, { exact: true })).toBeVisible();
+      await head.click();
+      // 收起走 `v-show`：元素还在 DOM 里，只是 `display: none`。断言「不可见」而不是
+      // `toHaveCount(0)` —— 后者在这里永远不成立（会一直等到超时）。
+      await expect(nav.getByText(leaf, { exact: true })).toBeHidden();
+
+      // ③ 手动展开过的组，切页后被收回 —— 这是「当前页所在组展开，其余收起」的直接结果
+      await head.click();
+      await expect(nav.getByText(leaf, { exact: true })).toBeVisible();
+      await nav.getByText('角色管理', { exact: true }).click();
+      await expect(page).toHaveURL(/\/org\/workbench\/roles/);
+      await expect(head, '切到别的页面后，手动展开过的组应当被收回').toHaveAttribute(
+        'aria-expanded',
+        'false'
+      );
+    } finally {
+      await clearNavItems(page, [leafPath]);
+      await deleteNavNodes(page, dirIds);
+    }
+  });
+
+  /**
+   * 工作台「设置」拆成三个子页（V28）。
+   *
+   * <p>用户 2026-09-27：「设置 现在下面内容太多了，拆成设置主菜单+多个子菜单」，裁定三个
+   * 子页是外观 / 大模型 / AI 提示词，且「AI 会改什么」那张只读表并入提示词页（它讲的就是
+   * 下面的槽位对应哪个接口写什么数据，分开放反而看不懂）。
+   *
+   * <p>刻意**不**只点侧栏：还要证明「设置」自己已经不可点（它成了目录，`nav_nodes.path`
+   * 空串），以及旧地址 `/org/workbench/settings` 仍能进 —— 外链、书签、浏览器历史里
+   * 都还存着它。
+   */
+  test('工作台设置：三个子页各自可达，旧地址回退到外观页', async ({ page }) => {
+    await login(page, '张三', '123456');
+
+    // 「设置」现在是目录：侧栏里不应该再有指向旧地址的链接（它自己点不动了）
+    const nav = page.locator('aside nav');
+    await expect(nav.locator('a[href="/org/workbench/settings"]')).toHaveCount(0);
+
+    await openNav(page, '外观', '/org/workbench/settings/appearance');
+    await expect(page.getByRole('heading', { name: '外观' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '主题' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '菜单风格' })).toBeVisible();
+
+    await openNav(page, '大模型', '/org/workbench/settings/llm');
+    await expect(page.getByRole('heading', { name: '大模型' })).toBeVisible();
+    await expect(page.locator('label').filter({ hasText: 'API Key' })).toBeVisible();
+
+    await openNav(page, 'AI 提示词', '/org/workbench/settings/prompts');
+    await expect(page.getByRole('heading', { name: 'AI 提示词' })).toBeVisible();
+    // 只读表并进来了 —— 拆页时最容易被丢掉的就是它（原来在设置页中段，不属于任何一个新页）
+    await expect(page.getByRole('heading', { name: 'AI 会改什么、走哪些接口' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '提示词槽位' })).toBeVisible();
+
+    // 旧地址仍可用：整页重载后由路由表重定向到外观页
+    await page.goto('/org/workbench/settings');
+    await expect(page).toHaveURL(/\/org\/workbench\/settings\/appearance$/);
+    await expect(page.getByRole('heading', { name: '外观' })).toBeVisible();
   });
 
   /**
@@ -1191,11 +1419,11 @@ test.describe.serial('工作台前端流程', () => {
       await login(page, 'admin', '123456');
       await page.goto('/org/platform/nav-items');
 
-      // 只能按 `.ant-btn-primary` 认工具栏上那一个：表格里两个壳根行（工作台壳 / 项目壳）
-      // 的行内按钮文案也是「新增主菜单」（对壳根来说「新增子菜单」就是新增主菜单），
-      // 单按名字会一次命中 3 个（strict mode 直接报出来，不会静默点错）
-      await page.locator('button.ant-btn-primary').filter({ hasText: '新增主菜单' }).click();
-      const form = page.locator('.ant-modal-content').filter({ hasText: '新增菜单' });
+      // 限定在 `PageHeader` 的 actions 里，不靠 `.ant-btn-primary`：表格里两个壳根行
+      // （工作台壳 / 项目壳）的行内按钮文案也是「新增菜单」，单按名字会一次命中 3 个
+      // （strict mode 直接报出来，不会静默点错）
+      await page.locator('.page-header .actions button').filter({ hasText: '新增菜单' }).click();
+      const form = page.locator('.ant-drawer-content').filter({ hasText: '新增菜单' });
       await expect(form).toBeVisible({ timeout: 15_000 });
 
       // 来源切到「手工复制产品页面」后才会出现「挑一条」—— 这一步是整条用例的前提：
@@ -1203,15 +1431,12 @@ test.describe.serial('工作台前端流程', () => {
       await form.getByText('手工复制产品页面', { exact: true }).click();
       await btn(form, '挑一条').click();
 
-      const pick = page.locator('.ant-modal-content').filter({ hasText: '从产品清单里挑一条' });
+      const pick = page.locator('.ant-drawer-content').filter({ hasText: '从产品清单里挑一条' });
       await expect(pick).toBeVisible({ timeout: 15_000 });
-      // 选择器必须**独占**：两个弹窗叠着时后开的那个会被前一个的遮罩盖住（管理页真机踩过 ——
-      // 选择器整块被压在「新增菜单」下面，只看得见左半边）。只断言「可见」抓不到这种叠法，
-      // 被盖住的元素照样算可见。也不能数 `.ant-modal-content` —— 关掉的弹窗 DOM 还在。
-      await expect(
-        page.locator('.ant-modal-wrap:visible'),
-        '打开选择器时应当只剩它一个弹窗：叠着的话它会被表单那层的遮罩盖住'
-      ).toHaveCount(1);
+      // 表单与选择器现在都是**右侧抽屉**，两层叠着（表单在下、选择器在上）。原先 Modal 时代
+      // 这里数 `.ant-modal-wrap:visible` 判「没被前一个的遮罩盖住」；抽屉的遮罩压在下面那一层，
+      // 数层数不再说明问题 —— 判据换成**上层那个点不点得到**：被盖住时下面那句 `.click()`
+      // 会在 hit-target 检查上超时失败，比断言 z-index 更贴近「管理员点得动吗」。
       await pick.locator('.ant-select').first().click();
       await page.locator(OPEN_OPTION).filter({ hasText: '元数据 / 血缘' }).first().click();
 
@@ -1283,6 +1508,267 @@ test.describe.serial('工作台前端流程', () => {
   });
 
   /**
+   * 需求 ②：**org 自己的菜单只能停用、不能删除**；从产品来的照常能删。
+   *
+   * <p>与上一条的分工：上一条验「新增流程」，这条验**操作列的分流** —— 两类的判据在
+   * 前端是 `sourceOf`（`entryPage` / `externalUrl` / `mounted` / `product` 四个分支）、
+   * 后端是 `isProductNode`（只看 `product`）。两条判据一旦漂移，表现是
+   * 「界面上有删除、点下去 400」或反过来「能删的却只给停用」，而各自看着都像对的。
+   *
+   * <p><b>每一步都取服务端证据</b>：光看按钮文案与「停用」标签会绿得毫无意义 ——
+   * 上一个用例（或上一次跑）留下的状态也能满足它。所以停用之后要读回
+   * `/api/v1/platform/nav-nodes` 里的 `enabled`，并按**消费面**（张三读 `/api/v1/nav`）
+   * 确认它真的从侧栏消失了。停用的意义就在这里：管理面还看得见（否则没法再启用），
+   * 消费面看不见。
+   */
+  test('菜单管理：org 自己的菜单没有删除，只能停用', async ({ page }) => {
+    test.setTimeout(120_000);
+
+    const ownLabel = `验证·自有页面-${stamp}`;
+    const ownPath = `/org/workbench/nav-own-${stamp}`;
+    const prodLabel = `验证·产品页面-${stamp}`;
+    const before = new Set((await navItemRows(page)).map((r) => r.id));
+    let ownId = '';
+    let prodId = '';
+
+    try {
+      // 前置：两条顶层菜单，只差在「是不是从产品来的」。
+      //   ① org 自己的页面：`product` 空 + `path` 非空（就是用户截图里圈的那一类）
+      //   ② 从产品来的：`product` 非空 + `mounted` 关着 = 手工复制档（挂载档要产品清单，重）
+      ownId = await createNavNode(page, {
+        scope: 'workbench',
+        parentId: '',
+        title: ownLabel,
+        path: ownPath,
+        sortOrder: 900,
+      });
+      prodId = await createNavNode(page, {
+        scope: 'workbench',
+        parentId: '',
+        title: prodLabel,
+        path: `/lineage/nav-prod-${stamp}`,
+        product: 'metadata',
+        mounted: false,
+        sortOrder: 901,
+      });
+
+      await login(page, 'admin', '123456');
+      await page.goto('/org/platform/nav-items');
+
+      const ownRow = page.locator('tr.ant-table-row').filter({ hasText: ownLabel }).first();
+      const prodRow = page.locator('tr.ant-table-row').filter({ hasText: prodLabel }).first();
+      await expect(ownRow, '新建的自有菜单应当出现在管理页里').toBeVisible({ timeout: 15_000 });
+      await expect(prodRow, '新建的产品菜单应当出现在管理页里').toBeVisible({ timeout: 15_000 });
+
+      // ① 操作列的分流：自有行没有「删除」，产品行有。
+      //    两边都断言，缺一不可 —— 只断言自有行没有删除的话，一个「所有行都不给删除」
+      //    的实现照样绿（那正是「守卫过宽」，产品类该能删）。
+      //    按钮一律走 {@link btn}：antd 把两字按钮渲染成「删 除」（中间插空格），
+      //    直接写 `name: '删除'` 匹配不上 —— 而它又**不会**报错，只是找不到元素。
+      await expect(btn(ownRow, '删除')).toHaveCount(0);
+      await expect(btn(ownRow, '停用')).toBeVisible();
+      await expect(btn(prodRow, '删除')).toBeVisible();
+
+      // 后端也要认这条分流 —— 前端的按钮只是入口，绕过界面直接调接口同样要被拒。
+      // 这条断言是「前端藏了按钮、后端其实还能删」唯一挡得住的地方。
+      const blocked = await page.request.delete(`/api/v1/platform/nav-nodes/${ownId}`, {
+        headers: { Authorization: `Bearer ${await adminToken(page)}` },
+      });
+      expect(blocked.status(), '绕过界面直接删自有菜单，后端也要拒').toBe(400);
+
+      // ② 停用：管理面留下（带「停用」标签）、消费面消失
+      await btn(ownRow, '停用').click();
+      // 标签按 `.ant-tag` 定位，不用 `getByText('停用')`：停用之后行内**同时**有
+      // 「停用」标签与「启用」按钮，而按钮的 tooltip 文案里也含「停用」二字 ——
+      // 按文字找会命中多个（strict mode 直接抛，且抛的位置指不到真因）。
+      await expect(ownRow.locator('.ant-tag').filter({ hasText: '停用' })).toBeVisible({
+        timeout: 15_000,
+      });
+
+      // 服务端证据：`enabled` 真的翻过去了 —— 界面标签可能是本地状态，这一列不是
+      const disabled = (await navItemRows(page)).find((r) => r.id === ownId);
+      expect(disabled, '停用后管理面仍要列得出来，否则没法再启用').toBeTruthy();
+      expect(disabled!.enabled, '停用要落到服务端').toBe(false);
+
+      // 消费面证据：按张三（租户管理员）读菜单树，这一项不该在里面。
+      // 这是本次需求真正的目的 —— 停用 = 从侧栏收起来。
+      const tenantToken = await tenantAdminToken(page);
+      const consumer = async () => {
+        const res = await page.request.get('/api/v1/nav', {
+          headers: { Authorization: `Bearer ${tenantToken}`, 'X-Tenant-Code': 'xinghe' },
+        });
+        expect(res.ok(), `读菜单失败：${res.status()} ${await res.text()}`).toBeTruthy();
+        return flattenLabels((await res.json()) as { label: string; children?: unknown[] }[]);
+      };
+      expect(await consumer(), '停用之后侧栏里不该还有它').not.toContain(ownLabel);
+
+      // ③ 再启用：侧栏里回来 —— 「只能停用」不等于「只能停掉」
+      await btn(ownRow, '启用').click();
+      await expect(btn(ownRow, '停用')).toBeVisible({ timeout: 15_000 });
+      const enabled = (await navItemRows(page)).find((r) => r.id === ownId);
+      expect(enabled!.enabled, '启用也要落到服务端').toBe(true);
+      expect(await consumer(), '启用之后侧栏里要回来').toContain(ownLabel);
+    } finally {
+      // 自有那条 `deleteNavItemIds` 删不掉（守卫），会回落到停用 —— 见 `disposeNavNodes`。
+      // 产品那条走正常删除。
+      await deleteNavItemIds(page, [ownId, prodId]);
+      const leftovers = (await navItemRows(page)).filter((r) => !before.has(r.id));
+      // 断言的是「没有**启用**的残留」，不是「一条都不剩」：自有那条按新规则只能停用，
+      // 行会留在库里（管理面照样列得出来），这正是本次需求要的行为。
+      // 而启用的残留必须为零 —— 它会出现在消费面，让后面「侧栏里不该有 X」的断言变空转。
+      expect(
+        leftovers.filter((r) => r.enabled).map((r) => r.label),
+        '清理之后不该再留有启用的残留'
+      ).toEqual([]);
+    }
+  });
+
+  /**
+   * 菜单排序：排序列显示的是**分层位次**（`2.3`），本层内的位置用行内 ↑↓ 调。
+   *
+   * <p>后端 `NavNodeTest` 已经把 `move()` 与「缺省落同层末尾」验过了。这条要钉的是
+   * **只有经过前端才成立的**两件事：
+   * ① 新建表单里不再有手填排序，保存时前端**根本不发** `sortOrder` —— 服务端的缺省逻辑
+   *    才会被触发。前端只要还发一个 `0`（改动前就是如此），后端那套逻辑永远走不到，
+   *    JUnit 却照样全绿；
+   * ② 位次是**按壳分开算**的：工作台壳与项目壳的顶层**都从 1 开始**。两个壳的顶层节点
+   *    在表格里是挨着排的，混着数就会变成 1、2、3… 而这件事只有跨壳看才看得出来。
+   *
+   * ③ **子菜单默认收起**：打开这一页只看到两个壳各自的顶层，要看某一支底下有什么得自己
+   *    点开；写操作（保存 / 移动）之后展开态保持原样，不会把人点开的那几支收回去。
+   *
+   * <p>位次断言一律写成**相对的**（`${父的位次}.1`），不写死数字：这一层里还有环境存量
+   * 的节点，写死一个 `3` 就成了一条要跟着环境维护的断言。
+   */
+  test('菜单管理：排序列是分层位次，↑↓ 在本层内调位置', async ({ page }) => {
+    test.setTimeout(120_000);
+    const dir = `位次父-${stamp}`;
+    const c1 = `位次子甲-${stamp}`;
+    const c2 = `位次子乙-${stamp}`;
+
+    const before = await navItemRows(page);
+    const beforeIds = new Set(before.map((r) => r.id));
+    // 建之前该壳顶层的最大排序值：新建应当落在它后面一个步长（`SORT_STEP = 10`）
+    const topMax = before.filter((r) => r.scope === 'workbench' && !r.parentId).map((r) => r.sortOrder);
+    const expectedNewSort = Math.max(0, ...topMax) + 10;
+
+    const rowOf = (label: string) => page.locator('tr.ant-table-row').filter({ hasText: label }).first();
+    const idxOf = async (label: string) => (await rowOf(label).locator('.sort-idx').innerText()).trim();
+
+    /**
+     * 点开一行的子菜单 —— **这一页现在默认收起**（只把两个壳根开好），子行要自己点。
+     *
+     * <p>先看 `collapsed` 类再点：antd 的展开图标点一下是**切换**，已经开着的再点一下就
+     * 收回去了。写成「无条件点一下」的话，只有在「恰好是收着的」那次才碰巧对。
+     */
+    const expandRow = async (label: string) => {
+      const icon = rowOf(label).locator('.ant-table-row-expand-icon').first();
+      if ((await icon.getAttribute('class'))?.includes('collapsed')) await icon.click();
+    };
+    const savedOf = async (label: string) => (await navItemRows(page)).find((r) => r.label === label);
+    const shellTab = (name: string) => page.locator('.filters').getByText(name, { exact: true });
+
+    /** 走一次「新增菜单」抽屉：填名字 + 打开「这是个目录」。**全程不碰排序**（表单里已经没有了）。 */
+    const createDir = async (trigger: Locator, label: string) => {
+      await trigger.click();
+      const form = page.locator('.ant-drawer-content').filter({ hasText: '新增菜单' });
+      await expect(form).toBeVisible({ timeout: 15_000 });
+      await expect(
+        form.locator('.ant-form-item:has(label[title="排序"])'),
+        '表单里不该再有手填排序 —— 替代品是行内的 ↑↓'
+      ).toHaveCount(0);
+      await field(form, '菜单名').fill(label);
+      // 按整项文字过滤，不用 `item()`：那一项标签的**完整**文字是「这是个目录（只用来放子菜单）」，
+      // 而 `item()` 是按 `label[title=…]` 精确匹配的 —— 少写括号就会找不到元素，然后
+      // （本仓没配 `actionTimeout`）一直等到整条 test timeout，报错还落在 `finally` 上指错行。
+      await form.locator('.ant-form-item').filter({ hasText: '这是个目录' }).locator('.ant-switch').click();
+      await btn(form, '保存').click();
+      await expect(form).toBeHidden({ timeout: 15_000 });
+      await expect(rowOf(label), `保存后表格里没出现「${label}」`).toBeVisible({ timeout: 15_000 });
+    };
+
+    try {
+      await login(page, 'admin', '123456');
+      await page.goto('/org/platform/nav-items');
+      // 只看一个壳：位次是**壳内**的，两个壳混着看数不清（跨壳那条另有专门一段）
+      await shellTab('工作台壳').click();
+      await expect(page.locator('tr.ant-table-row').first()).toBeVisible({ timeout: 15_000 });
+
+      // ① 界面新建父目录 → 落同层末尾（缺省 = 同层最大 + 一个步长）
+      await createDir(btn(page.locator('.page-header'), '新增菜单'), dir);
+      const savedDir = await savedOf(dir);
+      expect(savedDir, `服务端没找到刚建的「${dir}」`).toBeTruthy();
+      expect(
+        savedDir!.sortOrder,
+        `新建应当落在同层末尾（期望 ${expectedNewSort}）。这个值是前端**不发** sortOrder 时` +
+          `服务端补的 —— 若是 0，说明前端还在发自己的默认值，服务端那套缺省永远走不到`
+      ).toBe(expectedNewSort);
+
+      // ② 在它下面建两个子目录 —— 缺省应当逐条 10、20
+      await expandRow(dir);
+      await createDir(btn(rowOf(dir), '新增子菜单'), c1);
+      await createDir(btn(rowOf(dir), '新增子菜单'), c2);
+      expect((await savedOf(c1))!.sortOrder, '第一条子菜单该是 10').toBe(10);
+      expect((await savedOf(c2))!.sortOrder, '第二条子菜单该是 20').toBe(20);
+
+      // ②′ **默认收起**（本次需求本身）：重新打开这一页 —— 壳根是开的（连它都收的话整页
+      //     只剩两行，那不叫「收起子菜单」叫「什么都没显示」），子菜单是收的，得自己点开。
+      await page.goto('/org/platform/nav-items');
+      await expect(rowOf(dir), '壳根应当默认展开：顶层菜单要看得到').toBeVisible({ timeout: 15_000 });
+      await expect(rowOf(c1), '子菜单应当默认收起，不该自己冒出来').toBeHidden();
+      await expandRow(dir);
+      await expect(rowOf(c1), '点开父行之后子菜单要出现').toBeVisible({ timeout: 15_000 });
+      // 上面那次 `expandRow(dir)` 点开的展开态，在下面的移动（走 `load()`）之后必须还在 ——
+      // 这正是 ③④⑤ 能继续读到子菜单行的前提，也是「写操作不重置展开态」的活证据。
+      await expect(rowOf(dir).locator('.ant-table-row-expand-icon').first()).toHaveClass(/expanded/);
+
+      // ③ 界面显示的是**位次路径**：子菜单带上父那一段
+      const dirIdx = await idxOf(dir);
+      expect(dirIdx, '顶层节点的位次就是个数字').toMatch(/^\d+$/);
+      await expect(rowOf(c1).locator('.sort-idx')).toHaveText(`${dirIdx}.1`);
+      await expect(rowOf(c2).locator('.sort-idx')).toHaveText(`${dirIdx}.2`);
+
+      // ④ 首 / 末位：同层第一个的上移、最后一个的下移都是禁用的
+      await expect(rowOf(c1).locator('.sort-move button').first(), '第一个子菜单不能再往上').toBeDisabled();
+      await expect(rowOf(c2).locator('.sort-move button').nth(1), '最后一个子菜单不能再往下').toBeDisabled();
+
+      // ⑤ 点 ↑ 把最后一条提上来：界面位次对调，服务端整层重编号成 10/20
+      await rowOf(c2).locator('.sort-move button').first().click();
+      await expect(rowOf(c1).locator('.sort-idx')).toHaveText(`${dirIdx}.2`, { timeout: 15_000 });
+      await expect(rowOf(c2).locator('.sort-idx')).toHaveText(`${dirIdx}.1`);
+      expect((await savedOf(c2))!.sortOrder, '移上来之后整层重编号，它是第一条').toBe(10);
+      expect((await savedOf(c1))!.sortOrder, '被顶下去的那条是第二条').toBe(20);
+
+      // ⑥ 移动**父**节点：子菜单的位次整段前缀跟着动 —— 分层路径该有的样子。
+      //    先等界面把新位次画出来再读：移动是「请求 → 重新加载整棵树」，点完立刻读会读到旧值
+      //    （`idxOf` 是一次性读取，不会重试）。这一层有几十条存量节点，位次不写死。
+      await rowOf(dir).locator('.sort-move button').first().click();
+      await expect(rowOf(dir).locator('.sort-idx')).not.toHaveText(dirIdx, { timeout: 15_000 });
+      const dirIdx2 = await idxOf(dir);
+      expect(Number(dirIdx2), `父节点上移一格，位次应当减一（原 ${dirIdx}）`).toBe(Number(dirIdx) - 1);
+      await expect(rowOf(c2).locator('.sort-idx')).toHaveText(`${dirIdx2}.1`);
+      await expect(rowOf(c1).locator('.sort-idx')).toHaveText(`${dirIdx2}.2`);
+
+      // ⑦ 跨壳反例：位次按**壳**算，两个壳的顶层都从 1 开始。
+      //    若把两个壳的顶层混在一起数，后看的那个壳里的第一条会是「前一个壳的条数 + 1」。
+      await shellTab('项目壳').click();
+      await expect(page.locator('tr.ant-table-row').nth(1).locator('.sort-idx')).toHaveText('1', {
+        timeout: 15_000,
+      });
+      await shellTab('工作台壳').click();
+      await expect(page.locator('tr.ant-table-row').nth(1).locator('.sort-idx')).toHaveText('1', {
+        timeout: 15_000,
+      });
+    } finally {
+      const after = await navItemRows(page);
+      await deleteNavItemIds(
+        page,
+        after.filter((r) => !beforeIds.has(r.id)).map((r) => r.id)
+      );
+    }
+  });
+
+  /**
    * 项目壳：同一条菜单对**不同的人**结论不同 —— 判不动的入口不返回。
    *
    * <p>与上面「按能不能嵌分流」那条的分工：那条验的是「管理员配了什么就画什么」，
@@ -1328,6 +1814,8 @@ test.describe.serial('工作台前端流程', () => {
       await expect(page).toHaveURL(/\/org\/project\//, { timeout: 20_000 });
 
       const nav = page.locator('aside nav');
+      // 产品组默认收起（当前页在「项目」那一组里）—— 先点开，再验「判得动的在、判不动的整条没有」。
+      await expandGroup(page, `验证分组-${stamp}`);
       await expect(nav.getByText(readLabel, { exact: true })).toBeVisible({ timeout: 15_000 });
       await expect(
         nav.getByText(adminLabel, { exact: true }),
@@ -1578,6 +2066,8 @@ test.describe.serial('工作台前端流程', () => {
       await btn(page.locator('.projects-grid .proj').first(), '进入项目').click();
       await expect(page).toHaveURL(/\/org\/project\//);
       const nav = page.locator('aside nav');
+      // 挂载目录是项目壳的顶层组，当前页在「项目」那一组里 → 它默认收起，先点开。
+      await expandGroup(page, dir);
       await expect(nav.getByText(labelA, { exact: true })).toBeVisible({ timeout: 20_000 });
       expect(
         (await navItemRows(page)).some((r) => r.path === pathA),
@@ -1598,6 +2088,8 @@ test.describe.serial('工作台前端流程', () => {
         },
       ]);
       await page.reload();
+      // reload 会把展开态重置回「当前页所在组展开」—— 挂载目录又收起来了，得再点开一次。
+      await expandGroup(page, dir);
       await expect(
         nav.getByText(labelB, { exact: true }),
         '产品清单加了子菜单但侧栏没跟上。若只在某台机器上红，先确认那台的 org 后端带了 ' +
@@ -1697,6 +2189,8 @@ test.describe.serial('工作台前端流程', () => {
       await expect(page).toHaveURL(/\/org\/project\//);
 
       const nav = page.locator('aside nav');
+      // 混装的那个目录也是顶层组，当前页在「项目」组里 → 默认收起。
+      await expandGroup(page, dir);
       await expect(nav.getByText(mdLabel, { exact: true }), 'metadata 挂的项没出现在项目壳里').toBeVisible({
         timeout: 20_000,
       });
@@ -1972,12 +2466,27 @@ test.describe.serial('工作台前端流程', () => {
       await expect(page).toHaveURL(/\/org\/project\//, { timeout: 20_000 });
 
       const nav = page.locator('aside nav');
-      // 先等置灰那一项出现（= 菜单已经渲染完），再断言另一条不在 ——
+      // 先等「始终出现」那一支出现（= 菜单已经渲染完），再断言另一条不在 ——
       // 反过来的话，「还没有菜单」会让 toHaveCount(0) 立刻通过。
+      //
+      // 断言按**目录形态**写：服务端给这类节点挂了一个置灰占位子项（说明为什么点不开），
+      // 于是前端把它当父项渲染，`span.item.off` 落在**占位子项**上而不是它自己
+      // （见 NavNode.vue 的 kids 分支）。所以这里分三步验：它在、它不可点、里面是占位项。
       await expect(
-        nav.locator('span.item.off').filter({ hasText: alwaysLabel }),
-        '承诺「始终出现」的入口应当保留并置灰，而不是整条消失'
-      ).toHaveCount(1, { timeout: 20_000 });
+        nav.getByText(alwaysLabel, { exact: true }),
+        '承诺「始终出现」的入口应当保留，而不是整条消失'
+      ).toBeVisible({ timeout: 20_000 });
+      // 上面那条只证明「组标题还在」（顶层分组的标题行无论展开收起都在）。占位项是它的**子项**，
+      // 而这是个产品挂的顶层组、当前页在「项目」那一组里 → 默认收起，得先点开。
+      await expandGroup(page, alwaysLabel);
+      await expect(
+        nav.getByText('暂无可用的入口').first(),
+        '保留下来应当是一个说明原因的置灰占位项'
+      ).toBeVisible();
+      await expect(
+        nav.locator(`a[href="${alwaysPath}"]`),
+        '置灰项不能带可点路径 —— 点进去恰好是个 403，比置灰更糟'
+      ).toHaveCount(0);
       await expect(
         nav.getByText(plainLabel, { exact: true }),
         '本组织关掉的模块，它的入口不该还在侧栏上'
@@ -2010,6 +2519,16 @@ test.describe.serial('工作台前端流程', () => {
 
       await field(page, 'API 基址').fill('http://127.0.0.1:1/ds');
       await field(page, 'Access Token').fill(secret);
+      // 「启用」得先打开，否则下面等不到「未通过」：tag 的口径是「没启用就不谈测没测通」
+      // （`schedTag` 第一句就是 `!schedulerEnabled → 未启用`，与原型同）。关着的时候点
+      // 「测试连接」，探活结论确实写进了 note，但 tag 始终是「未启用」—— 断言就会挂在这里。
+      await page
+        .locator('.ant-form-item')
+        .filter({ hasText: '启用' })
+        .first()
+        .locator('.ant-switch')
+        .first()
+        .click();
       await btn(page, '保存').click();
       await expect(page.locator('.ant-message').getByText('已保存')).toBeVisible({ timeout: 15_000 });
 
@@ -2042,6 +2561,336 @@ test.describe.serial('工作台前端流程', () => {
       // 地址与引擎还原。**Token 没有清除接口**（设计如此：只进不出），所以这次 e2e 会在
       // 验证库里留下一个连不上的假 Token —— 它是这一条自己造的，不影响任何真实环境。
       await putCompute(page, tid, { schedulerEnabled: false, schedulerBaseUrl: '', engines: [] });
+    }
+  });
+
+  /**
+   * 入口页（V29）：新建的菜单本身是一张表，把**别的菜单引用进来**。
+   *
+   * <p>这次与「父子挂载」唯一的分水岭是**引用不是搬走** —— 所以光断言「进去能看到两项」
+   * 不够：那样的断言在把实现换成父子树之后照样绿。必须同时断言<b>被挂的菜单在它原来的
+   * 组里也还在</b>，以及删掉入口页之后它们不会跟着消失。
+   */
+  test('入口页：把别的菜单挂进来，被挂的菜单在原位置也还在', async ({ page }) => {
+    test.setTimeout(120_000);
+    const group = `入口组-${stamp}`;
+    const leafA = `入口项甲-${stamp}`;
+    const leafB = `入口项乙-${stamp}`;
+    const entry = `入口页-${stamp}`;
+    const made: string[] = [];
+
+    try {
+      const [dirId] = await createNavDirs(page, [{ scope: 'workbench', title: group, sortOrder: 900 }]);
+      made.push(dirId);
+      // 被挂的两项就是普通菜单（落在 org 自己的页面上），与侧栏里别的菜单毫无区别
+      const a = await createNavNode(page, {
+        scope: 'workbench', parentId: dirId, title: leafA, path: '/org/workbench/users', sortOrder: 0,
+      });
+      const b = await createNavNode(page, {
+        scope: 'workbench', parentId: dirId, title: leafB, path: '/org/workbench/knowledge', sortOrder: 1,
+      });
+      made.push(a, b);
+
+      const entryId = await createNavNode(page, {
+        scope: 'workbench', parentId: '', title: entry, path: '', sortOrder: 901,
+        entryPage: true, linkTargets: [a, b],
+      });
+      made.push(entryId);
+
+      await login(page, '张三', '123456');
+      const nav = page.locator('aside nav');
+
+      // ① 被挂的两项在**原组**里照旧可见 —— 引用不是搬走（需求 1 的核心）
+      await expandGroup(page, group);
+      await expect(nav.getByText(leafA, { exact: true })).toBeVisible();
+      await expect(nav.getByText(leafB, { exact: true })).toBeVisible();
+
+      // ② 入口页自己是一个能点的顶层菜单（它没有子菜单，走叶子分支）
+      await openNav(page, entry);
+      await expect(page).toHaveURL(new RegExp(`/org/workbench/entry/${entryId}$`));
+      await expect(page.getByRole('heading', { name: entry })).toBeVisible();
+
+      // ③ Tab 栏就是被挂的那两项，一项一个（挂几项就几个 Tab，打不开的也占一个）
+      const tabs = page.locator('.ant-tabs-tab');
+      await expect(tabs).toHaveCount(2);
+      await expect(tabs.filter({ hasText: leafA })).toHaveCount(1);
+      await expect(tabs.filter({ hasText: leafB })).toHaveCount(1);
+
+      // ④ 点开「入口项甲」—— 内容区是**它自己的页面**（内嵌），不是一张列出菜单的表。
+      //
+      //    必须按 **active pane** 收窄：访问过的 Tab 会留在 DOM 里（antd 默认行为，
+      //    见 `entry.vue` 里「切走再切回来不会重载」那段），页面上会同时存在多个 iframe ——
+      //    `page.frames().find(f => f !== mainFrame())` 或 `page.locator('iframe')` 在这种
+      //    场景下拿到哪个是不确定的（仓里唯一那条 frame 先例只访问了一个跨域 iframe，
+      //    所以那个写法在这里不适用）。
+      await tabs.filter({ hasText: leafA }).click();
+      const frame = page.locator('.ant-tabs-tabpane-active').frameLocator('iframe');
+
+      // 正向前置：先证明子应用**真的画出来了**，再断言导航缺席。顺序反了就是假绿 ——
+      // Vue 还没挂载时框里 DOM 本来就是空的，没有什么是「不该出现」的。
+      await expect.poll(() => frame.locator('.main, .shell').count()).toBeGreaterThan(0);
+      // 壳中壳：内嵌态不画导航。三个菜单变体的根（aside / topbar / nav）与品牌图标都不该在
+      await expect(frame.locator('aside.sidebar, header.bar, .brand')).toHaveCount(0);
+      // 成员管理页自己那张表在 —— 证明嵌的是**那个页面**，而不是一个空壳
+      await expect(frame.locator('.ant-table').first()).toBeVisible();
+
+      // iframe 必须撑满内容区（不能是浏览器默认的 150px）。与项目壳那条同因：
+      // flex 高度链断在哪一环都表现为「内容只剩顶上一条」，而地址、菜单那几条断言照样全绿。
+      const box = await page.locator('.ant-tabs-tabpane-active iframe').boundingBox();
+      const paneBox = await page.locator('.ant-tabs-tabpane-active .pane').boundingBox();
+      const holder = await page.locator('.ant-tabs-content').boundingBox();
+      expect(box!.height, 'iframe 不该是浏览器默认的 150px 高').toBeGreaterThan(300);
+      // 「撑了但没撑满」这一头拿 `.pane`（Tab 内容区）当基准，**不是** `.ant-tabs-content`：
+      // iframe 上面还有一条工具条（类型标签 + 重新加载 + 在新标签页打开），它本来就该比
+      // content 矮那一条。工具条约 32px，这里给到 60px 余量 —— 再多就说明链子中间断了。
+      expect(paneBox!.height, 'Tab 内容区应撑满').toBeGreaterThanOrEqual(holder!.height - 1);
+      expect(box!.height, 'iframe 应吃满工具条以下的全部高度').toBeGreaterThan(paneBox!.height - 60);
+
+      // ⑤ 回退保护：删掉入口页，被挂的两项不该跟着消失 —— 它们本来就不是它的子节点
+      await deleteNavNodes(page, [entryId]);
+      await page.reload();
+      await expandGroup(page, group);
+      await expect(nav.getByText(leafA, { exact: true })).toBeVisible();
+      await expect(nav.getByText(leafB, { exact: true })).toBeVisible();
+    } finally {
+      // 入口页在上面已经删过一次，这里再删一次是无害的（DELETE 不存在的 id 也不报错）
+      await deleteNavNodes(page, made);
+    }
+  });
+
+  /**
+   * 入口页：**嵌不进来的那一项也占一个 Tab**，内容是说明卡片而不是空 iframe。
+   *
+   * <p>这一条守的是「挂几项就几个 Tab」这个约定 —— 挂 3 项只出现 2 个 Tab，看到的人会
+   * 以为漏了一个，比多一个空 Tab 更难查。样本用一条 `openMode = jump` 的外链：
+   * 它要去别的站点，嵌不进来（同一个节点在侧栏里也是一条外链）。
+   */
+  test('入口页：嵌不进来的那一项在 Tab 里是说明卡片，不是空 iframe', async ({ page }) => {
+    const group = `嵌入组-${stamp}`;
+    const leaf = `嵌入项-${stamp}`;
+    const jump = `嵌入外跳-${stamp}`;
+    const entry = `嵌入入口-${stamp}`;
+    const url = `https://example.com/embed-${stamp}`;
+    const made: string[] = [];
+
+    try {
+      const [dirId] = await createNavDirs(page, [{ scope: 'workbench', title: group, sortOrder: 903 }]);
+      made.push(dirId);
+      const a = await createNavNode(page, {
+        scope: 'workbench', parentId: dirId, title: leaf, path: '/org/workbench/users', sortOrder: 0,
+      });
+      const j = await createNavNode(page, {
+        scope: 'workbench', parentId: dirId, title: jump, path: '', sortOrder: 1,
+        externalUrl: url, openMode: 'jump', authMode: 'none',
+      });
+      made.push(a, j);
+
+      const entryId = await createNavNode(page, {
+        scope: 'workbench', parentId: '', title: entry, path: '', sortOrder: 904,
+        entryPage: true, linkTargets: [a, j],
+      });
+      made.push(entryId);
+
+      await login(page, '张三', '123456');
+      await openNav(page, entry);
+
+      // 两项都在 —— 打不开的那一项**没有**被悄悄丢掉
+      await expect(page.locator('.ant-tabs-tab')).toHaveCount(2);
+
+      // 切到「外跳」那个 Tab：是卡片，不是 iframe
+      await page.locator('.ant-tabs-tab').filter({ hasText: jump }).click();
+      const pane = page.locator('.ant-tabs-tabpane-active');
+      await expect(pane.locator('.fallback')).toBeVisible();
+      await expect(pane.locator('iframe')).toHaveCount(0);
+      // 卡片上给出路。地址是**裸的**（不带 token）—— V29 已定的取舍：明文 token 只在
+      // `/api/nav/external/{id}` 那一次下发，不铺进侧栏树。
+      await expect(pane.locator(`a[href="${url}"]`)).toHaveCount(1);
+    } finally {
+      await deleteNavNodes(page, made);
+    }
+  });
+
+  /**
+   * 入口页挂**目录**：点进去是它下面每一项各一个 Tab，不是一张「这是一个目录」的卡片。
+   *
+   * <p>用户 2026-09-27 报的正是这一档：产品清单里的「规范中心 / 建模中心 / 数据地图」都是
+   * 分组（`path` 为空），挂进来之后子菜单一条都看不到。摊平做在**前端**（`entry.vue`）——
+   * 产品「建模中心」下面有哪些分层入口是按项目登记的**运行期**事实，服务端只有静态清单。
+   *
+   * <p>与上面两条的分水岭是**挂的量与出的量不一样**：挂 1 条（目录）出 2 个 Tab。
+   */
+  test('入口页挂目录：点进去是它下面每一项各一个 Tab', async ({ page }) => {
+    test.setTimeout(120_000);
+    const group = `摊平组-${stamp}`;
+    const leafA = `摊平项甲-${stamp}`;
+    const leafB = `摊平项乙-${stamp}`;
+    const entry = `摊平入口-${stamp}`;
+    const made: string[] = [];
+
+    try {
+      const [dirId] = await createNavDirs(page, [{ scope: 'workbench', title: group, sortOrder: 905 }]);
+      made.push(dirId);
+      const a = await createNavNode(page, {
+        scope: 'workbench', parentId: dirId, title: leafA, path: '/org/workbench/users', sortOrder: 0,
+      });
+      const b = await createNavNode(page, {
+        scope: 'workbench', parentId: dirId, title: leafB, path: '/org/workbench/knowledge', sortOrder: 1,
+      });
+      made.push(a, b);
+
+      // 挂的是**目录**，不是那两个叶子 —— 出几个 Tab 由摊平决定
+      const entryId = await createNavNode(page, {
+        scope: 'workbench', parentId: '', title: entry, path: '', sortOrder: 906,
+        entryPage: true, linkTargets: [dirId],
+      });
+      made.push(entryId);
+
+      await login(page, '张三', '123456');
+      await openNav(page, entry);
+      await expect(page).toHaveURL(new RegExp(`/org/workbench/entry/${entryId}$`));
+
+      const tabs = page.locator('.ant-tabs-tab');
+      await expect(tabs).toHaveCount(2);
+      await expect(tabs.filter({ hasText: leafA })).toHaveCount(1);
+      await expect(tabs.filter({ hasText: leafB })).toHaveCount(1);
+      // 目录自己**不该**再占一个 Tab：它没有页面，留着就是那张「这是一个目录」的卡片
+      await expect(tabs.filter({ hasText: group })).toHaveCount(0);
+
+      // 内容仍是各自那一页（不是空壳），高度链也没断。与上一条同因，但摊平之后 Tab 变多，
+      // flex 链断在哪一环都只是静默退化成浏览器默认的 150px —— 地址与数量断言照样全绿。
+      await tabs.filter({ hasText: leafA }).click();
+      const frame = page.locator('.ant-tabs-tabpane-active').frameLocator('iframe');
+      await expect.poll(() => frame.locator('.main, .shell').count()).toBeGreaterThan(0);
+      const box = await page.locator('.ant-tabs-tabpane-active iframe').boundingBox();
+      expect(box!.height, '摊平出来的 Tab 里 iframe 也不该是 150px').toBeGreaterThan(300);
+    } finally {
+      await deleteNavNodes(page, made);
+    }
+  });
+
+  /**
+   * 外链菜单（V29）：`openMode = jump` 的那一档在侧栏就是一条**普通外链**。
+   *
+   * <p>刻意不点它：「新标签页打开」会开出一个新 page，把这条用例的断言对象变成另一个
+   * 标签页，而且那个地址是桩不了的第三方站点。要验的只是「侧栏渲染成了外链形态」。
+   */
+  test('外链菜单：外跳的那一条在侧栏就是新标签页打开的外链', async ({ page }) => {
+    const title = `外跳-${stamp}`;
+    const url = `https://example.com/dw-${stamp}?org=xinghe`;
+    let id = '';
+
+    try {
+      id = await createNavNode(page, {
+        scope: 'workbench', parentId: '', title, path: '', sortOrder: 910,
+        externalUrl: url, openMode: 'jump', authMode: 'none',
+      });
+
+      await login(page, '张三', '123456');
+      const link = page.locator(`aside nav a[href="${url}"]`);
+      await expect(link).toHaveCount(1);
+      await expect(link).toHaveText(title);
+      await expect(link, '去别的站点该开新标签页，别把整个壳带走').toHaveAttribute('target', '_blank');
+    } finally {
+      await deleteNavNodes(page, [id]);
+    }
+  });
+
+  /**
+   * 外链菜单：`openMode = embed` 的那一档进内嵌页，且 token **由服务端拼进地址**。
+   *
+   * <p>验的是服务端那一跳（`NavNodeService.externalTarget`），不是「页面上有个 iframe」——
+   * 拼 URL 的逻辑放在服务端就是为了让明文 token 不进侧栏树接口，只在打开这一条外链的
+   * 那一刻下发一次。
+   */
+  test('外链菜单：内嵌的那一条由服务端把 token 拼进地址，页头常驻兜底按钮', async ({ page }) => {
+    const title = `内嵌-${stamp}`;
+    const token = `tk-${stamp}/a+b`;
+    const stub = await startEmbedTarget();
+    let id = '';
+
+    try {
+      id = await createNavNode(page, {
+        scope: 'workbench', parentId: '', title, path: '', sortOrder: 911,
+        externalUrl: `${stub.base}/app?orgId=7`, openMode: 'embed', authMode: 'token', token,
+      });
+
+      await login(page, '张三', '123456');
+      await openNav(page, title);
+      await expect(page).toHaveURL(new RegExp(`/org/workbench/external/${id}$`));
+
+      const frame = page.locator('iframe');
+      await expect(frame).toHaveCount(1);
+      await expect(
+        frame,
+        'token 要拼进原有 query（用 & 而不是 ?），并且按 URL 规则转义'
+      ).toHaveAttribute(
+        'src',
+        `${stub.base}/app?orgId=7&token=${encodeURIComponent(token)}`
+      );
+      await expect(frame).toHaveAttribute('referrerpolicy', 'no-referrer');
+
+      // 目标站用 X-Frame-Options / CSP 拒绝内嵌时，浏览器**不把失败暴露给 JS**（load 照样
+      // 触发、跨域读不到 contentDocument），所以「探测到打不开再提示」这条路走不通 ——
+      // 兜底按钮必须一开始就在，这条断言钉的就是「常驻」而不是「出错时才出现」。
+      await expect(btn(page, '在新标签页打开')).toBeVisible();
+      // 明文 token 只该出现在 iframe 的 src 里，不该铺在页面文本上
+      expect(await page.locator('body').innerText()).not.toContain(token);
+    } finally {
+      await deleteNavNodes(page, [id]);
+      await stub.close();
+    }
+  });
+
+  /**
+   * 顶层节点**自己也有页面**（V29 起的新形态，见 `NavNode.vue` 的顶层两条分支）。
+   *
+   * <p>过去顶层一律渲染成整行可点的折叠按钮，代价是「顶层 + 有 `path`」这种配置点不动。
+   * 现在标题主体进页面、右侧箭头单独控展开。
+   */
+  test('顶层节点自己也有页面时：点标题进页面、点箭头展开子菜单', async ({ page }) => {
+    const top = `顶层页-${stamp}`;
+    const kid = `顶层页子-${stamp}`;
+    const made: string[] = [];
+
+    try {
+      const topId = await createNavNode(page, {
+        // path 刻意**不是**登录落点 `/org/workbench/projects`：那一支上的顶层节点默认就
+        // 是展开的（`containsActive`），拿它验「默认收起、点箭头才展开」会一开始就假绿。
+        scope: 'workbench', parentId: '', title: top, path: '/org/workbench/users', sortOrder: 920,
+      });
+      const kidId = await createNavNode(page, {
+        scope: 'workbench', parentId: topId, title: kid, path: '/org/workbench/knowledge', sortOrder: 0,
+      });
+      made.push(kidId, topId);
+
+      await login(page, '张三', '123456');
+      const nav = page.locator('aside nav');
+      const head = nav.locator('.gtitle').filter({ hasText: top }).first();
+      await expect(head).toBeVisible();
+      // 有 `path` 的顶层节点是 `.gtitle` 里的一个 `<div>`（标题 + 箭头），**不是**那个
+      // 整行可点的按钮 —— 存量用例按 `.gtitle` 直接点的地方会落到标题上、把人带走，
+      // 所以这一条只按 `.glabel` / `.twist` 分别点。
+      const twist = head.locator('.twist');
+      await expect(twist, '有 path 的顶层节点要拆出独立的展开箭头').toHaveCount(1);
+
+      // 默认收起（当前页不在这一支），先点箭头展开
+      await expect(nav.getByText(kid, { exact: true })).toBeHidden();
+      await twist.click();
+      await expect(nav.getByText(kid, { exact: true })).toBeVisible();
+
+      // 点标题主体进页面，而不是把这一组收起
+      await head.locator('.glabel').click();
+      await expect(page).toHaveURL(/\/org\/workbench\/users$/);
+      await expect(
+        nav.getByText(kid, { exact: true }),
+        '这一组就在当前页这一支上，跳过来之后该是展开的'
+      ).toBeVisible();
+
+      // 再点一次箭头：收起 / 展开由它单独管，与标题的去向互不干扰
+      await twist.click();
+      await expect(nav.getByText(kid, { exact: true })).toBeHidden();
+    } finally {
+      await deleteNavNodes(page, made);
     }
   });
 });

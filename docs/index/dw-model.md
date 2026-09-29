@@ -1,6 +1,6 @@
 # dw-model（仓建设 · 后端）
 
-> 由 `bin/gen-index.sh` 于 2026-09-27 18:15:33 生成（HEAD `04d51fd`）。**不要手工编辑**，改完代码重跑脚本即可。
+> 由 `bin/gen-index.sh` 于 2026-09-29 11:57:33 生成（HEAD `78c8f30`）。**不要手工编辑**，改完代码重跑脚本即可。
 > 共 54 个类。**路径 = 源码根 `dw-model/api/src/main/java/` + 下表路径**；分组标题是包名（已省略 `com/dwai/platform/` 这类公共前缀）。测试清单见 [tests.md](tests.md)。
 
 

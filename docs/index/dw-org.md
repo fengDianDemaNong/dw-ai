@@ -1,7 +1,7 @@
 # dw-org（组织平台 · 后端）
 
-> 由 `bin/gen-index.sh` 于 2026-09-27 18:15:33 生成（HEAD `04d51fd`）。**不要手工编辑**，改完代码重跑脚本即可。
-> 共 48 个类。**路径 = 源码根 `dw-org/api/src/main/java/` + 下表路径**；分组标题是包名（已省略 `com/dwai/platform/` 这类公共前缀）。测试清单见 [tests.md](tests.md)。
+> 由 `bin/gen-index.sh` 于 2026-09-29 11:57:33 生成（HEAD `78c8f30`）。**不要手工编辑**，改完代码重跑脚本即可。
+> 共 54 个类。**路径 = 源码根 `dw-org/api/src/main/java/` + 下表路径**；分组标题是包名（已省略 `com/dwai/platform/` 这类公共前缀）。测试清单见 [tests.md](tests.md)。
 
 
 ## (根包)
@@ -37,24 +37,28 @@
 
 - `com/dwai/platform/meta/AccessService.java` — AccessService [业务服务]
 - `com/dwai/platform/meta/AiPromptService.java` — AiPromptService [业务服务]
+- `com/dwai/platform/meta/ComputeService.java` — ComputeService [业务服务] 工作台「计算资源」页：本组织自己的调度集群与数仓引擎。
 - `com/dwai/platform/meta/KnowledgeImportParser.java` — KnowledgeImportParser
 - `com/dwai/platform/meta/KnowledgeService.java` — KnowledgeService [业务服务]
 - `com/dwai/platform/meta/MenuCandidateService.java` — MenuCandidateService [业务服务] 拉各服务的菜单候选，供平台管理员在「菜单管理」里勾选。
-- `com/dwai/platform/meta/NavController.java` — NavController [HTTP 接口] 侧栏菜单树（消费面）：当前租户里，这个人该看到哪些入口。
+- `com/dwai/platform/meta/ModulePolicyService.java` — ModulePolicyService [业务服务] 工作台「模块管理」页：租户在平台开通范围内的第二层控制（启停 + 可见范围）。
+- `com/dwai/platform/meta/NavController.java` — NavController [HTTP 接口] 侧栏菜单树（消费面）：当前租户里，这个人该看到哪些入口。 · 前缀 `/api/nav`, `/api/v1/nav` → `GET /entry/{id}`, `GET /external/{id}`
 - `com/dwai/platform/meta/NavNodeService.java` — NavNodeService [业务服务] 门户菜单树：管理面（平台管理员配树）与消费面（租户成员读树）。
 - `com/dwai/platform/meta/PermWords.java` — PermWords 权限词的<b>形状</b>判定：严格两段式 域:动作，动作取自固定五档。
-- `com/dwai/platform/meta/PlatformController.java` — PlatformController [HTTP 接口] · 前缀 `/api/platform`, `/api/v1/platform` → `GET /tenants`, `POST /tenants`, `PATCH /tenants/{id}`, `POST /tenants/{id}/reset-admin-password`, `GET /accounts`, `GET /users`, `POST /users`, `PATCH /users/{id}`, …(共 23 条)
+- `com/dwai/platform/meta/PlatformController.java` — PlatformController [HTTP 接口] · 前缀 `/api/platform`, `/api/v1/platform` → `GET /tenants`, `POST /tenants`, `PATCH /tenants/{id}`, `POST /tenants/{id}/reset-admin-password`, `GET /accounts`, `GET /users`, `POST /users`, `PATCH /users/{id}`, …(共 25 条)
 - `com/dwai/platform/meta/PlatformService.java` — PlatformService [业务服务]
 - `com/dwai/platform/meta/ProductCodes.java` — ProductCodes 允许登记的产品码，以及它与「租户许可模块名」两套词汇的关系。
 - `com/dwai/platform/meta/ProductRoleService.java` — ProductRoleService [业务服务] 产品角色：把「哪个角色有哪些权限」从 Perms.java 的硬编码矩阵变成可管理的数据。
 - `com/dwai/platform/meta/ProjectMemberController.java` — ProjectMemberController [HTTP 接口] 项目成员 —— 组织平台「项目壳」里「成员管理」页的后端。 · 前缀 `/api`, `/api/v1` → `GET /projects/{projectId}/members`, `PUT /projects/{projectId}/members/{userId}`, `DELETE /projects/{projectId}/members/{userId}`, `GET /projects/{projectId}/member-roles`
 - `com/dwai/platform/meta/ProjectService.java` — ProjectService [业务服务]
 - `com/dwai/platform/meta/ServiceCatalogController.java` — ServiceCatalogController [HTTP 接口] 产品服务目录（消费面）：当前租户开通了哪些产品、各自的前端地址在哪。
-- `com/dwai/platform/meta/TenantAdminController.java` — TenantAdminController [HTTP 接口] · 前缀 `/api/tenants/{id}`, `/api/v1/tenants/{id}` → `GET /users`, `POST /users`, `PATCH /users/{userId}`, `DELETE /users/{userId}`, `GET /projects`, `POST /projects`, `PATCH /projects/{projectId}`, `DELETE /projects/{projectId}`, …(共 23 条)
+- `com/dwai/platform/meta/TenantAdminController.java` — TenantAdminController [HTTP 接口] · 前缀 `/api/tenants/{id}`, `/api/v1/tenants/{id}` → `GET /modules`, `PUT /modules`, `GET /compute`, `PUT /compute`, `POST /compute/test`, `GET /users`, `POST /users`, `PATCH /users/{userId}`, …(共 28 条)
 - `com/dwai/platform/meta/TenantAdminService.java` — TenantAdminService [业务服务]
 
 ## meta/entity
 
+- `com/dwai/platform/meta/entity/NavEntryLinkEntity.java` — NavEntryLinkEntity [实体] 入口页挂了哪些菜单（见 V29__nav_entry_and_external.sql 的 nav_entry_links）。
+- `com/dwai/platform/meta/entity/NavEntryProductLinkEntity.java` — NavEntryProductLinkEntity [实体] 入口页挂进来的**产品清单节点**（见 V30__nav_entry_product_links.sql）。
 - `com/dwai/platform/meta/entity/NavNodeEntity.java` — NavNodeEntity [实体] 侧栏菜单树上的一个节点（见 V23__nav_nodes.sql）。
 - `com/dwai/platform/meta/entity/ProductRoleEntity.java` — ProductRoleEntity [实体] 一个产品的角色定义（见 V20__product_roles.sql）。
 - `com/dwai/platform/meta/entity/ProductRolePermEntity.java` — ProductRolePermEntity [实体] 角色到权限词的关联行（见 V20__product_roles.sql 的 product_role_perms）。
@@ -62,6 +66,8 @@
 
 ## meta/mapper
 
+- `com/dwai/platform/meta/mapper/NavEntryLinkMapper.java` — NavEntryLinkMapper [数据访问] 只走 wrapper 查询的 mapper —— 本表主键是复合的，selectById 语义不对。
+- `com/dwai/platform/meta/mapper/NavEntryProductLinkMapper.java` — NavEntryProductLinkMapper [数据访问] 只走 wrapper 查询的 mapper —— 本表主键是复合的，selectById 语义不对。
 - `com/dwai/platform/meta/mapper/NavNodeMapper.java` — NavNodeMapper [数据访问]
 - `com/dwai/platform/meta/mapper/ProductRoleMapper.java` — ProductRoleMapper [数据访问]
 - `com/dwai/platform/meta/mapper/ProductRolePermMapper.java` — ProductRolePermMapper [数据访问] 只走 wrapper 查询的 mapper —— 本表主键是复合的，selectById 语义不对。

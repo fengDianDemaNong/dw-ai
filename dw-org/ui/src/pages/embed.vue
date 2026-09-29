@@ -34,11 +34,10 @@ import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import ProductEmbed from '../components/ProductEmbed.vue';
 import { ORG_PAGES } from '../config/pages';
-import { productEmbedUrl } from '../config/product';
+import { shellProductUrl } from '../config/shellBoot';
 import { isEmbeddable } from '../config/products';
 import type { ProductModule } from '../config/iam';
-import { app, currentProject, currentTenant, hasModule, loadNav, navTree } from '../stores/app';
-import { appearanceOf } from '../stores/prefs';
+import { hasModule, loadNav, navTree } from '../stores/app';
 import type { NavNodeRow } from '../api/client';
 
 defineOptions({ name: 'PortalEmbed' });
@@ -95,14 +94,7 @@ const frontendUrl = computed(() => menu.value?.frontendUrl ?? '');
 const label = computed(() => menu.value?.label ?? '产品页面');
 
 const src = computed(() =>
-  productEmbedUrl(product.value, subPath.value, frontendUrl.value, {
-    tenantName: currentTenant.value?.name ?? '',
-    projectName: currentProject.value?.name ?? '',
-    userId: app.currentUserId ?? '',
-    // 现在这个壳（工作台还是项目）那套外观，推给被嵌的产品 —— 嵌入态下它不读自己那份，
-    // 否则里外会拼成两种颜色。`shell` 的取值正好是外观作用域的两个子集。
-    appearance: { ...appearanceOf(shell.value) },
-  })
+  shellProductUrl(product.value, subPath.value, frontendUrl.value, shell.value)
 );
 
 /**

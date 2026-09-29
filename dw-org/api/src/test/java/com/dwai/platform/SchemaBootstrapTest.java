@@ -35,12 +35,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 })
 class SchemaBootstrapTest {
 
-    /** dw-org 全库应有的表（跨 V1~V27 全部迁移）。 */
+    /** dw-org 全库应有的表（跨 V1~V31 全部迁移）。 */
     private static final List<String> EXPECTED_TABLES = List.of(
             "tenants", "users", "user_tenants", "projects", "project_members",
             "platform_access", "tenant_grants", "tenant_licenses", "tenant_llm",
             "appearance_prefs", "tenant_ai_prompts", "tenant_knowledge_articles",
-            "refresh_tokens", "service_registry", "nav_nodes",
+            "refresh_tokens", "service_registry", "nav_nodes", "nav_entry_links",
+            "nav_entry_product_links",
             "product_roles", "product_role_perms", "tenant_compute");
 
     /**
@@ -58,8 +59,29 @@ class SchemaBootstrapTest {
             // 而「表建出来了」不会报任何错：漏 parent_id 就没有层级、漏 product/ref/mounted
             // 挂载整个失效、漏 admin_only 那批菜单会显示给所有成员、漏 empty_policy
             // 空目录的行为就成了某个没人预期的默认值。
+            // V29 补了 8 列（入口页 + 外链菜单）。这 8 列漏任何一个都不报错：漏 entry_page
+            // 入口页退化成目录、漏 external_url 外链条目整个不存在、漏 token_enc /
+            // basic_pass_enc 凭据静默丢失（而 hasToken 会一直是 false，看着像「没配过」）、
+            // 漏 visibility 那条「仅租户管理员可见」的外链会对所有人可见。
             "nav_nodes", List.of("id", "scope", "parent_id", "title", "path", "icon", "perm",
-                    "sort_order", "enabled", "admin_only", "product", "ref", "mounted", "empty_policy"),
+                    "sort_order", "enabled", "admin_only", "product", "ref", "mounted", "empty_policy",
+                    "entry_page", "external_url", "open_mode", "auth_mode", "token_enc",
+                    "basic_user", "basic_pass_enc", "visibility"),
+            // nav_entry_links 是 V29 新增的（入口页挂进来的菜单，多对多引用）。
+            // 主键是复合的 (entry_id, target_id) —— 少了它同一个菜单能被挂进同一张表两次，
+            // 表现是入口页的表格里出现重复行，看起来像渲染去重没做。
+            // V31 补了 label（Tab 名）与 sort_order（Tab 顺序）：漏 label 是「改名保存成功、
+            // 回来还是原名」，漏 sort_order 是「排好的 Tab 顺序每次都变回老样子」——
+            // 两个都不报错，只是管理员的操作静默失效。
+            "nav_entry_links", List.of("entry_id", "target_id", "label", "sort_order"),
+            // nav_entry_product_links 是 V30 新增的（入口页挂的**产品清单节点**）。
+            // 与上一张表是同一件事的两半：那一张装 nav_nodes.id，这一张装产品清单 id
+            // （后者在 nav_nodes 里没有行，target_id 的 VARCHAR(64) 也装不下 —— 真清单最长
+            // 58 字符，见 V30 顶部注释）。product 列不是冗余：清单 id 自带产品码前缀只是
+            // 产品的约定，不是本服务的契约。sort_order 必须是这一张自己存 —— 清单节点
+            // 没有「它自己的顺序」可跟。V31 起它多了 label，理由同上；两张表的 sort_order
+            // 从这时起**共用一个序号空间**（Tab 顺序由行序决定，两类混排）。
+            "nav_entry_product_links", List.of("entry_id", "product", "ref", "sort_order", "label"),
             // product_roles / product_role_perms 是 V20 新增的（产品角色）。
             // is_admin 与 builtin 是这张表存在的理由：漏了 is_admin，租户管理员在该产品里
             // 就找不到短路映射的目标；漏了 builtin，管理员能把出厂角色删掉。
@@ -157,10 +179,11 @@ class SchemaBootstrapTest {
         Integer seeded = db.queryForObject(
                 "select count(*) from nav_nodes where id like 'nav-sys%' or id like 'nav-proj%'",
                 Integer.class);
-        assertEquals(11, seeded == null ? 0 : seeded,
-                "种子应当是 8 条工作台壳（系统管理 + 7 项）+ 3 条项目壳"
+        assertEquals(14, seeded == null ? 0 : seeded,
+                "种子应当是 11 条工作台壳（系统管理 + 7 项 + V28 的 3 个设置子页）+ 3 条项目壳"
                         + "（项目壳第 3 条「返回工作台」已在 V24 删掉——那个入口现在只在用户面板里；"
-                        + "V25 补了第 4 条「外观」；V27 补了「模块管理」「计算资源」）");
+                        + "V25 补了第 4 条「外观」；V27 补了「模块管理」「计算资源」；"
+                        + "V28 把「设置」改成目录并挂了 外观/大模型/AI 提示词 三个子页）");
 
         assertEquals("/org/project/{code}/members", db.queryForObject(
                         "select path from nav_nodes where id = 'nav-proj-members'", String.class),
@@ -177,6 +200,17 @@ class SchemaBootstrapTest {
         assertEquals(Boolean.TRUE, db.queryForObject(
                         "select admin_only from nav_nodes where id = 'nav-sys-users'", Boolean.class),
                 "「用户管理」只有租户管理员可见（原先由 buildSysNav 的入参在前端算）");
+
+        // V28：「设置」从一条可点的路由改成**目录**（path 空串 = 不可点，见 V23 建表注释）。
+        // 忘记置空的话，它既是「能点的一条」又是「有子项的一层」——点下去是旧地址，
+        // 而那条路由已被重定向，症状是「点设置直接跳到外观，看着像对的」而层级是坏的。
+        assertEquals("", db.queryForObject(
+                        "select path from nav_nodes where id = 'nav-sys-settings'", String.class),
+                "V28 起「设置」是目录节点，自己不再指向一条路由");
+        assertEquals(3, db.queryForObject(
+                        "select count(*) from nav_nodes where parent_id = 'nav-sys-settings'",
+                        Integer.class),
+                "「设置」下应当是 外观 / 大模型 / AI 提示词 三个子页");
     }
 
     /**

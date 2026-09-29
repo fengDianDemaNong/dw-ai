@@ -27,10 +27,38 @@ export interface NavItem {
  * <p>以前这里还有 `navGroups` / `buildNavGroups()` / `activeNavGroup()` 三样，已随
  * `nav_groups` 一起删掉 —— 留着一个恒空的常量，下一个人会当它是可用入口。
  */
-/** 子树里有没有这一条路径。 */
-function subtreeHasPath(item: NavItem, hit: string): boolean {
+/** 子树里有没有这一条路径。侧栏用它判「当前页在不在这个分组里」（见 NavNode 的 `open`）。 */
+export function subtreeHasPath(item: NavItem, hit: string): boolean {
   if (item.path === hit) return true;
   return (item.children ?? []).some((kid) => subtreeHasPath(kid, hit));
+}
+
+/**
+ * 子树里有没有哪一项与 `hit` 在**同一条路径上**（按 `/` 分段，任一方是另一方的前缀；
+ * 相等也算）。
+ *
+ * <p>比 {@link subtreeHasPath} 宽一档，专治「壳的首页不等于组里任何一项」：项目壳的首页是
+ * `/org/project/{code}`，而「项目」组里的项是 `/org/project/{code}/members` —— 精确匹配
+ * 一个也命中不了，于是进了项目、侧栏里那一组反而默认收起，看起来像菜单没了。
+ *
+ * <p>**必须按段比，不能用字符串 `startsWith`**：`/lineage/a` 与 `/lineage/ab` 是两个页面，
+ * 字符串前缀会把它们判成同一个。
+ *
+ * <p>目录自身的 `path` 是空串，这里直接跳过（`!/^path/` 那条守卫）—— 空串是任何字符串的
+ * 前缀，不挡掉它，每个组都会命中一切。
+ */
+export function subtreeOnSameBranch(item: NavItem, hit: string): boolean {
+  const onBranch = (path: string) => {
+    if (!path) return false;
+    const a = path.split('/');
+    const b = hit.split('/');
+    for (let i = 0; i < Math.min(a.length, b.length); i += 1) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
+  };
+  if (onBranch(item.path)) return true;
+  return (item.children ?? []).some((kid) => subtreeOnSameBranch(kid, hit));
 }
 
 /**

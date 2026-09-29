@@ -64,7 +64,9 @@ access token（默认 15 分钟）到期后，被整合进来的服务会整片�
 | P6 boot 协议三处复制 | ⏳ 变成四处 | 新增 org 副本后，守卫 `CrossServiceDesignGuardTest` 里那两条「两端都接了消息通道」的断言**参数化**成扫描所有 `*/ui/src/components/ProductEmbed.vue` × 所有 `*/ui/src/config/embed.ts`，否则新副本游离在守卫之外 |
 | P6 消息类型字符串重复 | ⏳ 未动 | 同上，抽共享包时一并消除 |
 
-**本轮已知缺口**：iframe 未加 `sandbox`（记录决策，见 §12）；组织删项目后模块侧留孤儿镜像（`dw-lineage/docs/KNOWN_ISSUES.md` 第 9 条）。
+**本轮已知缺口**：**产品嵌入**的 iframe（`ProductEmbed`）未加 `sandbox`（有意保留，见 §12 与 P6 那一行）；组织删项目后模块侧留孤儿镜像（`dw-lineage/docs/KNOWN_ISSUES.md` 第 9 条）。V29 新增的**外链菜单** iframe 是另一个面（目标站不可信），已加 `sandbox` + `referrerpolicy="no-referrer"`。
+
+**入口页的 Tab（2026-09-27）是同源 iframe，做法与前两者相反**：Tab 里嵌的是 org 自己那一页（`pages/entry.vue`），**不加 `sandbox`** —— 不给 `allow-same-origin` 会让它成 opaque origin、sessionStorage 隔离，框里的 org 读不到 `dw-ai.token` 而整页 401；给了 `allow-same-origin` 则对同源内容形同虚设。同一个原因让 org 的 `isEmbed()` **不能**照抄 model/lineage 的 sessionStorage 标记（同源共享存储，子帧写的标记会被父窗口 F5 读到，表现为外壳侧栏消失），只能用 `window.self !== window.top` + 同源父窗口判定；`expireIdle()` / `leaveTenant()` 也各加了 embed 熔断，防子帧清掉父页共用的令牌与租户。
 
 ---
 
@@ -168,7 +170,7 @@ multi 部署下用户带一个 `?mode=standalone` 链接进来：守卫按 stand
 | origin 白名单形同虚设 | lineage `embed.ts` 的 `allowed()` 用 `document.referrer` 兜底 = 「谁嵌我信谁」；拿不到 referrer 时 `EMBED_READY` 直接 `postMessage('*')` [读证] |
 | boot 协议三处复制 | `EmbedBoot/consumeBootHash/lineageEmbedUrl` 在三个 UI 各一份，已漂移（org 的带 `embed:true`，warehouse 的多 `tenantName/projectName`，org 的 `lineageEmbedUrl` 是死代码）。应进共享包一处定义 |
 | `asciiHeader` 静默丢弃 | 非 ASCII 头直接吞掉无日志；若 userId 之类来源被污染，排查困难 |
-| iframe 无 `sandbox/allow` | 当前消息面无敏感负载可暂缓；接入 token 通道后建议显式收紧 |
+| iframe 无 `sandbox/allow` | **产品嵌入**的 iframe（`ProductEmbed`）仍然没有：它跑的是自己人写的子应用，消息面里没有敏感负载，收紧它会连带卡住当前的消息协议与 token 转发（P1），**是有意的取舍，不是漏了**。**外链菜单**（V29，`pages/external.vue`）是另一回事 —— 目标站不可信，已加 `sandbox="allow-scripts allow-forms allow-same-origin allow-popups"` + `referrerpolicy="no-referrer"`（地址里带 token，不能再经 Referer 泄给第三方资源）；刻意**不给** `allow-popups-to-escape-sandbox` 与 `allow-top-navigation` |
 
 ---
 

@@ -1,12 +1,12 @@
 # 前端 / TypeScript（三个 UI + 共享引擎）
 
-> 由 `bin/gen-index.sh` 于 2026-09-27 18:15:33 生成（HEAD `04d51fd`）。**不要手工编辑**，改完代码重跑脚本即可。
+> 由 `bin/gen-index.sh` 于 2026-09-29 11:57:33 生成（HEAD `78c8f30`）。**不要手工编辑**，改完代码重跑脚本即可。
 > **路径 = 小节标题里的模块名 + `/ui/src/`（`engine` 片段为 `packages/engine/src/`） + 下表路径**。路由表在各 UI 的 `ui/src/router/` 下，需要完整 path → 组件映射时直接读那个文件。
 
 
 ## dw-org
 
-源码根 `dw-org/ui/src`，共 67 个文件。
+源码根 `dw-org/ui/src`，共 74 个文件。
 
 ### dw-org · router（路由）
 
@@ -21,6 +21,8 @@
 - `pages/admin/users.vue`
 - `pages/auth-callback.vue`
 - `pages/embed.vue`
+- `pages/entry.vue`
+- `pages/external.vue`
 - `pages/forbidden.vue`
 - `pages/login.vue`
 - `pages/no-project.vue`
@@ -30,9 +32,13 @@
 - `pages/project-members.vue`
 - `pages/projects.vue`
 - `pages/select-tenant.vue`
+- `pages/sys/compute.vue`
 - `pages/sys/knowledge.vue`
+- `pages/sys/modules.vue`
 - `pages/sys/roles.vue`
-- `pages/sys/settings.vue`
+- `pages/sys/settings-appearance.vue`
+- `pages/sys/settings-llm.vue`
+- `pages/sys/settings-prompts.vue`
 
 ### dw-org · layouts（布局）
 
@@ -90,6 +96,7 @@
 - `config/product.ts`
 - `config/products.ts` — 产品码与中文名。
 - `config/runtime.ts`
+- `config/shellBoot.ts` — 壳里嵌一个产品页面时用的**完整地址**（含 `#boot=` 那一串启动参数）。
 - `config/sysNav.ts` — 两个租户壳。
 - `config/version.ts`
 

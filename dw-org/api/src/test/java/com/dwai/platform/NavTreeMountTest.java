@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.io.IOException;
@@ -181,6 +182,10 @@ class NavTreeMountTest {
     @Autowired
     private MockMvc mvc;
 
+    /** 清理用（直删绕开业务守卫），见 {@code setUp} 里的说明。 */
+    @Autowired
+    private JdbcTemplate jdbc;
+
     private static String adminToken;
     private static String memberToken;
     private static String tenantId;
@@ -234,8 +239,15 @@ class NavTreeMountTest {
 
         // 同一套库跑所有用例，而树是可变的：每个用例从「只剩种子」重来，
         // 否则用例之间会互相看见对方留下的行（同层同名会直接撞唯一约束）。
+        //
+        // **直删，不走 DELETE 接口**：本类用例建的多是 org 自有节点，而那一类现在**只能停用**
+        // （守卫见 `NavNodeService.delete()`）—— 走接口会被 400 挡下，行留在库里，
+        // 症状是「别的用例随机变红」（下一条用例撞上残留的 uk_nav_node），不是本用例报错。
+        // 清理不是被测行为，绕开业务守卫是对的。
+        jdbc.update("DELETE FROM nav_entry_links");
+        jdbc.update("DELETE FROM nav_entry_product_links");
         for (String id : new ArrayList<>(ownedNodeIds())) {
-            call(delete("/api/v1/platform/nav-nodes/" + id).header("Authorization", "Bearer " + adminToken));
+            jdbc.update("DELETE FROM nav_nodes WHERE id = ?", id);
         }
         // quality 在这里登记成一个「没人监听」的地址：验证降级要用它。
         // 端口每次都是新的，所以要每个用例重新登记（registry.put 是覆盖语义）。
@@ -546,6 +558,296 @@ class NavTreeMountTest {
                 .content("{\"scope\":\"project\",\"title\":\"X\",\"product\":\"" + PRODUCT + "\","
                         + "\"ref\":\"" + REF_MAP + "\",\"mounted\":true}"));
         assertEquals(403, res.status(), "普通成员不该能挂载: " + res.body());
+    }
+
+    // ------------------------------------------------------------------
+    // V30：入口页挂产品清单里的节点
+    //
+    // 与上面那批挂载用例的区别：挂载行在**侧栏**里展开，这一类在**入口页**里摊成一排 Tab。
+    // 两者共用同一份清单、同一套渲染（`renderProductNode`），所以这里不重复验判权与降级的
+    // 全部细节，只钉「入口页这条通路特有」的四件事：解析成什么、顺序怎么排、写入时拒什么、
+    // 清单变了之后长什么样。
+    // ------------------------------------------------------------------
+
+    /** 建一个项目壳的入口页，挂给定的产品清单节点。 */
+    private JsonNode entryWithProductLinks(String title, String productLinksJson) throws Exception {
+        return createNode("{\"scope\":\"project\",\"title\":\"" + title + "\",\"entryPage\":true,"
+                + "\"productLinks\":" + productLinksJson + "}");
+    }
+
+    private static String oneLink(String product, String ref) {
+        return "[{\"product\":\"" + product + "\",\"ref\":\"" + ref + "\"}]";
+    }
+
+    private JsonNode entryPage(String id, String token) throws Exception {
+        Resp res = call(get("/api/v1/nav/entry/" + id)
+                .header("Authorization", "Bearer " + token)
+                .header("X-Tenant-Code", TENANT_CODE));
+        assertEquals(200, res.status(), "读入口页失败: " + res.body());
+        return MAPPER.readTree(res.body());
+    }
+
+    /**
+     * 挂一个**清单叶子**：入口页里多一格 Tab，内容与侧栏里那一条逐字一致。
+     *
+     * <p>这里同时钉住了「id 的形状」{@code {product}/{清单 id}}：前端拿它当 Tab 的 key，
+     * 也拿它去运行期菜单树里找子项（见 {@code navMount.ts}）。形状变了不会报错，
+     * 只会让「运行期报上来的子菜单」永远匹配不上。
+     */
+    @Test
+    void productLinkLeafBecomesOneTab() throws Exception {
+        JsonNode entry = entryWithProductLinks("总览", oneLink(PRODUCT, "metadata:project:/lineage/tables"));
+
+        JsonNode page = entryPage(entry.path("id").asText(), memberToken);
+        assertEquals(1, page.path("items").size(), "挂了一条就该只有一个 Tab: " + page);
+        JsonNode item = page.path("items").get(0);
+        assertEquals("metadata/metadata:project:/lineage/tables", item.path("id").asText(), item.toString());
+        assertEquals("数据表", item.path("label").asText(), item.toString());
+        assertEquals("/lineage/tables", item.path("path").asText(),
+                "路径取自产品清单 —— 入口页里那一格要能点开: " + item);
+        assertEquals(base, item.path("frontendUrl").asText(), item.toString());
+        assertEquals(PRODUCT, item.path("product").asText(), item.toString());
+        assertEquals("project", item.path("scope").asText(),
+                "顶层行的 scope 要归一成入口页的壳，否则前端按壳过滤时整个 Tab 会变成一张"
+                        + "「这一项不在这个壳里」的卡片: " + item);
+
+        // 管理面回显：一份带类型的列表（V31），前端不必猜哪个 id 是哪种
+        JsonNode admin = findById(adminTree(), entry.path("id").asText());
+        assertEquals(1, admin.path("links").size(), admin.toString());
+        assertEquals("product", admin.path("links").get(0).path("kind").asText(), admin.toString());
+        assertEquals("metadata:project:/lineage/tables",
+                admin.path("links").get(0).path("ref").asText(), admin.toString());
+        assertEquals("", admin.path("links").get(0).path("target").asText(),
+                "产品引用不该混进 nav_nodes 的那一份: " + admin);
+    }
+
+    /** 挂一个清单**目录**：整支子树跟着进来（一格 Tab 里是它的子菜单）。 */
+    @Test
+    void productLinkDirectoryBringsItsSubtree() throws Exception {
+        JsonNode entry = entryWithProductLinks("总览", oneLink(PRODUCT, REF_MAP));
+
+        JsonNode item = entryPage(entry.path("id").asText(), memberToken).path("items").get(0);
+        assertEquals("数据地图", item.path("label").asText(), item.toString());
+        assertEquals("", item.path("path").asText(), "目录没有自己的页面: " + item);
+        // 只读成员看得到 catalog:read 与不带权限词的两条，看不到 catalog:admin 那条
+        List<String> kids = new ArrayList<>();
+        for (JsonNode kid : item.path("children")) kids.add(kid.path("label").asText());
+        assertEquals(List.of("数据表", "数据目录"), kids,
+                "清单目录要带出它的子树，且判权与侧栏同一套（catalog:admin 那条看不到）: " + item);
+    }
+
+    /** 判权跟人走：同一条产品引用，普通成员看不到，租户管理员看得到。 */
+    @Test
+    void productLinkRespectsRoleWords() throws Exception {
+        JsonNode entry = entryWithProductLinks("总览", oneLink(PRODUCT, "metadata:project:/lineage/rules"));
+        String id = entry.path("id").asText();
+
+        assertEquals(0, entryPage(id, memberToken).path("items").size(),
+                "普通成员没有 catalog:admin，这一格不该出现: " + entryPage(id, memberToken));
+        assertEquals(1, entryPage(id, adminToken).path("items").size(),
+                "租户管理员应当看得到: " + entryPage(id, adminToken));
+    }
+
+    // ---- 写入时的四道门 ----
+
+    /** 清单里没有这个 id → 400，且报错要把产品现在报的顶层节点摊开（文案与挂载那条一致）。 */
+    @Test
+    void productLinkUnknownRefIsRejected() throws Exception {
+        Resp res = postNode("{\"scope\":\"project\",\"title\":\"挂错\",\"entryPage\":true,"
+                + "\"productLinks\":" + oneLink(PRODUCT, "metadata:project:nope") + "}");
+        assertEquals(400, res.status(), "清单里没有的 id 应当被拒: " + res.body());
+        assertTrue(res.body().contains("数据地图") && res.body().contains("血缘分析"),
+                "报错要把产品现在报的顶层节点摊开: " + res.body());
+        assertEquals(0, ownNodes().size(), "被拒的入口页不该留下任何行");
+    }
+
+    /** 清单节点在别的壳里 → 400（照 {@code linkTargets} 的同壳规则）。 */
+    @Test
+    void productLinkAcrossShellsIsRejected() throws Exception {
+        // 「设置」是工作台壳的节点，挂进项目壳的入口页会让它在按壳取树时整个丢掉
+        Resp res = postNode("{\"scope\":\"project\",\"title\":\"挂错\",\"entryPage\":true,"
+                + "\"productLinks\":" + oneLink(PRODUCT, "metadata:workbench:settings") + "}");
+        assertEquals(400, res.status(), "跨壳应当被拒: " + res.body());
+        assertTrue(res.body().contains("workbench"), "报错要说清它在哪个壳里: " + res.body());
+    }
+
+    /** 产品还没登记页面地址 → 400。挂上去点了就是打不开，不如现在就拒。 */
+    @Test
+    void productLinkRequiresRegisteredFrontendUrl() throws Exception {
+        // 这一条与别的用例无关，先把 warehouse 的登记摘干净（本类各用例共用一份注册表）
+        call(delete("/api/v1/platform/services/" + PRODUCT_B).header("Authorization", "Bearer " + adminToken));
+
+        Resp res = postNode("{\"scope\":\"project\",\"title\":\"挂错\",\"entryPage\":true,"
+                + "\"productLinks\":" + oneLink(PRODUCT_B, "warehouse:project:pipeline") + "}");
+        assertEquals(400, res.status(), "没登记页面地址的产品不该挂得上: " + res.body());
+        assertTrue(res.body().contains("服务注册"), "报错要指出去哪配: " + res.body());
+    }
+
+    /** 不是入口页却传了 {@code productLinks}：报错而不是静默忽略。 */
+    @Test
+    void productLinksOnlyMakeSenseOnEntryPages() throws Exception {
+        Resp res = postNode("{\"scope\":\"project\",\"title\":\"普通页面\",\"path\":\"/x\","
+                + "\"productLinks\":" + oneLink(PRODUCT, REF_MAP) + "}");
+        assertEquals(400, res.status(), "只有入口页能挂东西: " + res.body());
+    }
+
+    // ---- 清单变了之后 ----
+
+    /**
+     * 产品拉不到 → 写入侧 fail-open 放行（不能拿一处配置缺失把功能锁死），但渲染侧必须
+     * 给个交代：**置灰 + 说明**，不是静默少一格。
+     */
+    @Test
+    void productLinkToUnreachableProductShowsAGreyTab() throws Exception {
+        JsonNode entry = entryWithProductLinks("总览", oneLink("quality", "quality:project:/x"));
+
+        JsonNode item = entryPage(entry.path("id").asText(), memberToken).path("items").get(0);
+        assertTrue(item.path("disabled").asBoolean(),
+                "拉不到清单时这一格要置灰说明，而不是消失: " + item);
+        assertTrue(item.path("disabledReason").asText().contains("清单"),
+                "说明里要写清是清单拉不到: " + item);
+        assertEquals("", item.path("path").asText(),
+                "置灰项不能留着能点的路径（点下去只会 403）: " + item);
+    }
+
+    /**
+     * 产品发版后那个 id 没了（改了 id 生成规则）→ 置灰 + 说明。
+     *
+     * <p>静默跳过是这里最坏的一种做法：配置看起来完全正常，只有进这个入口页才发现少一格。
+     */
+    @Test
+    void productLinkToVanishedRefShowsAGreyTab() throws Exception {
+        JsonNode entry = entryWithProductLinks("总览", oneLink(PRODUCT, "metadata:project:/lineage/tables"));
+        String id = entry.path("id").asText();
+        assertFalse(entryPage(id, memberToken).path("items").get(0).path("disabled").asBoolean(),
+                "前置条件：换清单之前它是好的");
+
+        // 产品发版：这一条改名换 id 了
+        body = menusJson(MAP_DIR.replace("metadata:project:/lineage/tables", "metadata:project:/lineage/dw-tables"),
+                BIO_DIR, SETTINGS);
+
+        JsonNode item = entryPage(id, memberToken).path("items").get(0);
+        assertTrue(item.path("disabled").asBoolean(), "失效的引用要置灰说明: " + item);
+        assertTrue(item.path("disabledReason").asText().contains("metadata:project:/lineage/tables"),
+                "说明里要带上那个 id，管理员才知道该重挂哪一条: " + item);
+    }
+
+    /**
+     * 产品自己改了那一项的 {@code scope} → 顶层行的 scope 仍按入口页的壳算。
+     *
+     * <p>写入时的同壳校验只在「清单拉得到」时生效，产品发版是绕过它的唯一路径 ——
+     * 而前端只挑顶层那一层、且按壳过滤，不归一的话整个 Tab 会变成一张
+     * 「这一项不在这个壳的菜单里」的卡片。先例见 {@code navMount.ts} 的 {@code toRows}。
+     */
+    @Test
+    void productChangingTheNodeScopeDoesNotLoseTheTab() throws Exception {
+        JsonNode entry = entryWithProductLinks("总览", oneLink(PRODUCT, "metadata:project:/lineage/tables"));
+        String id = entry.path("id").asText();
+
+        body = menusJson(
+                "{\"id\":\"metadata:project:/lineage/tables\",\"scope\":\"workbench\",\"path\":\"/lineage/tables\","
+                        + "\"label\":\"数据表\",\"icon\":\"DatabaseOutlined\",\"perms\":[],\"perm\":\"\",\"sort\":10}",
+                BIO_DIR, SETTINGS);
+
+        JsonNode item = entryPage(id, memberToken).path("items").get(0);
+        assertEquals("project", item.path("scope").asText(),
+                "顶层行跟着入口页的壳走，不由被挂的那一方自报: " + item);
+    }
+
+    /** 第二类引用也按**提交顺序**排，排在 {@code linkTargets} 那些之后。 */
+    @Test
+    void productLinksKeepSubmissionOrderAndComeAfterNodeLinks() throws Exception {
+        String node = createNode("{\"scope\":\"project\",\"title\":\"自有菜单\",\"path\":\"/x/own\"}")
+                .path("id").asText();
+        JsonNode entry = createNode("{\"scope\":\"project\",\"title\":\"总览\",\"entryPage\":true,"
+                + "\"linkTargets\":[\"" + node + "\"],"
+                + "\"productLinks\":[{\"product\":\"" + PRODUCT + "\",\"ref\":\"metadata:project:/lineage/catalogs\"},"
+                + "{\"product\":\"" + PRODUCT + "\",\"ref\":\"metadata:project:/lineage/tables\"}]}");
+        String id = entry.path("id").asText();
+
+        assertEquals(List.of("自有菜单", "数据目录", "数据表"), labelsOf(entryPage(id, memberToken).path("items")),
+                "老链接跟随 target 自己的排序、产品链接按勾选顺序接在后面 —— 两类顺序来源不同，"
+                        + "混排的话谁在前没有唯一说法");
+
+        // 不传 = 不改（改个标题不该把挂的东西清空）
+        assertEquals(200, patchNode(id, "{\"title\":\"总览2\"}").status());
+        assertEquals(3, entryPage(id, memberToken).path("items").size(), "不传 productLinks 时不该动关联");
+
+        // 空数组 = 清空，且只清产品那一类
+        assertEquals(200, patchNode(id, "{\"productLinks\":[]}").status());
+        assertEquals(List.of("自有菜单"), labelsOf(entryPage(id, memberToken).path("items")),
+                "productLinks 传空数组只该清掉产品那一类");
+    }
+
+    /**
+     * 两类引用可以<b>交替</b>排：行顺序 = Tab 顺序（V31）。
+     *
+     * <p>这正是 V30 那两个扁平数组做不到的事 —— 那时产品链接只能整体排在自有菜单之后，
+     * 与「行顺序就是 Tab 顺序」直接冲突。这里刻意排成「产品 / 本站 / 产品」，
+     * 若还有任何一处按「先本站后产品」拼装，顺序立刻变回三明治的反面。
+     */
+    @Test
+    void nodeAndProductLinksCanInterleave() throws Exception {
+        String node = createNode("{\"scope\":\"project\",\"title\":\"自有菜单\",\"path\":\"/x/own\"}")
+                .path("id").asText();
+        JsonNode entry = createNode("{\"scope\":\"project\",\"title\":\"总览\",\"entryPage\":true,"
+                + "\"links\":["
+                + "{\"kind\":\"product\",\"product\":\"" + PRODUCT + "\","
+                + "\"ref\":\"metadata:project:/lineage/tables\"},"
+                + "{\"kind\":\"node\",\"target\":\"" + node + "\"},"
+                + "{\"kind\":\"product\",\"product\":\"" + PRODUCT + "\","
+                + "\"ref\":\"metadata:project:/lineage/catalogs\"}]}");
+
+        assertEquals(List.of("数据表", "自有菜单", "数据目录"),
+                labelsOf(entryPage(entry.path("id").asText(), memberToken).path("items")),
+                "Tab 顺序就是行顺序，两类可以交替");
+    }
+
+    /** 产品清单节点也能改 Tab 名（V31）—— 只给本站菜单改名等于「一半能改、一半不能」。 */
+    @Test
+    void productLinkLabelOverridesTheMenuLabel() throws Exception {
+        JsonNode entry = createNode("{\"scope\":\"project\",\"title\":\"总览\",\"entryPage\":true,"
+                + "\"links\":[{\"kind\":\"product\",\"product\":\"" + PRODUCT + "\","
+                + "\"ref\":\"metadata:project:/lineage/tables\",\"label\":\"我的表\"}]}");
+
+        JsonNode item = entryPage(entry.path("id").asText(), memberToken).path("items").get(0);
+        assertEquals("我的表", item.path("label").asText(), item.toString());
+        assertEquals("/lineage/tables", item.path("path").asText(),
+                "改的只是显示名，落点还是清单里那条自己的路径: " + item);
+    }
+
+    /**
+     * 入口页改成别的类型时，两张关联表都要清干净 —— 否则留下的是**再也不会显示**的悬空行，
+     * 而它会在下一次有人把这一条改回入口页时静默复活。
+     */
+    @Test
+    void convertingAnEntryPageClearsProductLinks() throws Exception {
+        JsonNode entry = entryWithProductLinks("总览", oneLink(PRODUCT, REF_MAP));
+        String id = entry.path("id").asText();
+        assertEquals(1, countProductLinks(id), "前置条件：关联行落库了");
+
+        assertEquals(200, patchNode(id, "{\"entryPage\":false}").status());
+        assertEquals(0, countProductLinks(id), "改成普通节点后关联行应当清干净");
+    }
+
+    /** 直读关联表 —— 改成普通节点后管理面不再回显这一项，只能看库。 */
+    private int countProductLinks(String entryId) {
+        Integer n = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM nav_entry_product_links WHERE entry_id = ?", Integer.class, entryId);
+        return n == null ? 0 : n;
+    }
+
+    private static List<String> labelsOf(JsonNode items) {
+        List<String> out = new ArrayList<>();
+        for (JsonNode item : items) out.add(item.path("label").asText());
+        return out;
+    }
+
+    /** 管理面全树（adminToken 读）。 */
+    private JsonNode adminTree() throws Exception {
+        Resp res = call(get("/api/v1/platform/nav-nodes").header("Authorization", "Bearer " + adminToken));
+        assertEquals(200, res.status(), "读管理面菜单树失败: " + res.body());
+        return MAPPER.readTree(res.body());
     }
 
     // ------------------------------------------------------------------

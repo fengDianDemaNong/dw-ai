@@ -306,8 +306,13 @@ public class MenuCandidateService {
 
     Map<String, Object> root = Jsons.map(body);
     if (root == null) {
-      throw new IllegalStateException("拉取 " + url + " 拿到的东西不是 JSON 对象 —— "
-          + "这个地址上多半是另一个页面（前端没构建过时常见的是 HTML）");
+      // 这条消息会**原样显示在菜单管理页上**（`failedReports` 直接插值），所以不能带标记语言。
+      throw new IllegalStateException("拉取 " + url + " 拿到的是网页、不是菜单清单 —— "
+          + "这个地址上没有 menu.json。自家产品是「构建时导出清单」，前端没构建过就会出现这种现象；"
+          + "外部系统则一律如此：它们的菜单是浏览器里跑 JS 画出来的，服务端拿不到，"
+          + "换抓取方式也一样（而且抓不到权限词与稳定节点 id，做不成「挂载」）。"
+          + "外部系统的页面请改用「菜单管理」里的「外链菜单」手工挂 —— "
+          + "外链菜单只要一个地址，既不查服务注册、也不查清单。");
     }
 
     // 自报产品码对不上 = 这个地址上跑的是另一个产品的前端。这是「页面地址填串了」

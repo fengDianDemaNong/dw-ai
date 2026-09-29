@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.nio.charset.StandardCharsets;
@@ -74,6 +75,10 @@ class ModulePolicyContractTest {
     @Autowired
     private MockMvc mvc;
 
+    /** 清理用（直删绕开业务守卫），见 {@code setUp} 里的说明。 */
+    @Autowired
+    private JdbcTemplate jdbc;
+
     private static String adminToken;
     private static String tenantAdminToken;
     private static String memberToken;
@@ -110,8 +115,14 @@ class ModulePolicyContractTest {
         }
 
         // 树与策略都是可变的、同一个库跑所有用例：每个用例从干净状态重来。
+        //
+        // **直删，不走 DELETE 接口**：本类建的是 org 自有节点，而那一类现在**只能停用**
+        // （守卫见 `NavNodeService.delete()`）—— 走接口会被 400 挡下，行留在库里，
+        // 症状是「别的用例随机变红」（下一条用例撞上残留的 uk_nav_node），不是本用例报错。
+        // 清理不是被测行为，绕开业务守卫是对的。
+        jdbc.update("DELETE FROM nav_entry_links");
         for (String id : new ArrayList<>(ownedNodeIds())) {
-            call(delete("/api/v1/platform/nav-nodes/" + id).header("Authorization", "Bearer " + adminToken));
+            jdbc.update("DELETE FROM nav_nodes WHERE id = ?", id);
         }
         setModules("[\"warehouse\",\"metadata\"]");
         assertEquals(200, putPolicies("[]").status(), "清理策略失败");

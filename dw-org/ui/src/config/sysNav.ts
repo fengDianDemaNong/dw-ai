@@ -67,6 +67,24 @@ function embedBase(ctx: ShellCtx): string {
 }
 
 /**
+ * 把一个壳内的路径模板变成真路径：替换两个占位符。
+ *
+ * <p>`{code}` 是**运行期**才知道的项目码（种子里的 `/org/project/{code}/members`）；
+ * `{node}` 是**服务端生成**的节点 id（入口页 / 内嵌外链的 `path`，见
+ * `NavNodeService.entryPathTemplate`）。两者都编码一次 —— id 与项目码都进了 URL 段。
+ *
+ * <p>合成一个函数而不是各写一遍 `split().join()`：两处替换的顺序无所谓，但**漏一处**
+ * 就是「点进去 404」，而拼出来的字符串看着完全正常（`{node}` 是个合法的 URL 段）。
+ */
+function shellPath(template: string, nodeId: string, ctx: ShellCtx): string {
+  return template
+    .split('{code}')
+    .join(encodeURIComponent(ctx.projectCode))
+    .split('{node}')
+    .join(encodeURIComponent(nodeId));
+}
+
+/**
  * 服务端的菜单树 → 侧栏渲染树。
  *
  * <p><b>服务端一次返回所有壳的顶层节点</b>（每项带 `scope`，见 `NavNodeService.treeFor`），
@@ -116,10 +134,32 @@ function convert(node: NavNodeRow, ctx: ShellCtx): NavItem | null {
     return { ...base, ...withKids, disabled: true, disabledReason: node.disabledReason || '' };
   }
 
+  // 入口页（V29）：壳内的一排 Tab。地址由服务端给**模板**（`path` 里带 `{node}`），
+  // 因为节点 id 是服务端生成的 —— 管理员配这一行时还不知道它。
+  if (node.entryPage) {
+    return { ...base, ...withKids, path: shellPath(node.path || '', node.id, ctx) };
+  }
+
+  // 外链菜单（V29）。两档落点完全不同，所以分两条：
+  //   · `embed` → 壳内那一页（路由过去，页面里放 iframe 并现场取带 token 的地址）；
+  //   · `jump`  → 直接跳目标站，走叶子的 `<a target="_blank">` 通路（与「不能嵌的产品」
+  //               同一个形态：那是「去别的站点」，不是本站的一次导航）。
+  //
+  // `jump` 这一档的 `path` 给的是**目标地址**而不是空串：`NavItem.path` 还兼着高亮的
+  // 最长前缀匹配，给空串会让它退化成目录语义（`subtreeOnSameBranch` 里空串被跳过）。
+  if (node.externalUrl) {
+    if (node.openMode === 'embed') {
+      return { ...base, ...withKids, path: shellPath(node.path || '', node.id, ctx) };
+    }
+    // `href` 是**不带 token** 的地址：明文 token 只在 `/api/nav/external/{id}` 那一次
+    // 下发（见 `external.vue`）。中键/右键复制拿到的是裸地址，这是有意的取舍 ——
+    // 把 token 铺进侧栏树等于每个页面都下发一遍凭据。
+    return { ...base, ...withKids, path: node.externalUrl, href: node.externalUrl, external: true };
+  }
+
   // org 自己的页面：`path` 已经是 org 的完整路由，替换掉运行期才知道的项目码即可。
   if (!node.product) {
-    const path = (node.path || '').split('{code}').join(encodeURIComponent(ctx.projectCode));
-    return { ...base, ...withKids, path };
+    return { ...base, ...withKids, path: shellPath(node.path || '', node.id, ctx) };
   }
 
   const sub = node.path ? (node.path.startsWith('/') ? node.path : `/${node.path}`) : '';

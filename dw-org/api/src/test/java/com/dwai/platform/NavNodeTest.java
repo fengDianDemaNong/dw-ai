@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.nio.charset.StandardCharsets;
@@ -88,6 +89,10 @@ class NavNodeTest {
     @Autowired
     private MockMvc mvc;
 
+    /** 清理用（直删绕开业务守卫），见 {@code setUp} 里的说明。 */
+    @Autowired
+    private JdbcTemplate jdbc;
+
     private static String adminToken;
     private static String memberToken;
     private static String tenantAdminToken;
@@ -112,8 +117,14 @@ class NavNodeTest {
 
         // 同一套库跑所有用例，而树是可变的：每个用例从「只剩种子」重来，
         // 否则用例之间会互相看见对方留下的行（同层同名会直接撞唯一约束）。
+        //
+        // **直删，不走 DELETE 接口**：本类用例建的多是 org 自有节点，而那一类现在**只能停用**
+        // （守卫见 `NavNodeService.delete()`）—— 走接口会被 400 挡下，行留在库里，
+        // 症状是「别的用例随机变红」（下一条用例撞上残留的 uk_nav_node），不是本用例报错。
+        // 清理不是被测行为，绕开业务守卫是对的。
+        jdbc.update("DELETE FROM nav_entry_links");
         for (String id : new ArrayList<>(ownedNodeIds())) {
-            call(delete("/api/v1/platform/nav-nodes/" + id).header("Authorization", "Bearer " + adminToken));
+            jdbc.update("DELETE FROM nav_nodes WHERE id = ?", id);
         }
     }
 
@@ -212,12 +223,19 @@ class NavNodeTest {
         assertEquals(400, own.status(), "把自己挂到自己下面应当被拒: " + own.body());
     }
 
-    /** 删一个节点连带整棵子树，返回的条数就是前端二次确认里的数字。 */
+    /**
+     * 删一个节点连带整棵子树，返回的条数就是前端二次确认里的数字。
+     *
+     * <p>这一支建的是**从产品来的**节点（手工复制档：`product` 非空、`mounted` 关着）。
+     * 不能建 org 自有的 —— 那一类现在只能停用（见 {@link #orgOwnedMenuCannotBeDeleted}），
+     * 会在这里被 400 挡下。级联本身与节点是哪一类无关，换成产品类不损失覆盖面。
+     */
     @Test
     void deleteCascadesToSubtreeAndReportsTheCount() throws Exception {
-        String dir = create("{\"scope\":\"project\",\"title\":\"要删的\"}").path("id").asText();
-        String sub = create("{\"scope\":\"project\",\"parentId\":\"" + dir + "\",\"title\":\"子\"}").path("id").asText();
-        create("{\"scope\":\"project\",\"parentId\":\"" + sub + "\",\"title\":\"孙\",\"path\":\"/x/sun\"}");
+        String dir = create("{\"scope\":\"project\",\"title\":\"要删的\",\"product\":\"warehouse\"}").path("id").asText();
+        String sub = create("{\"scope\":\"project\",\"parentId\":\"" + dir + "\",\"title\":\"子\",\"product\":\"warehouse\"}")
+                .path("id").asText();
+        create("{\"scope\":\"project\",\"parentId\":\"" + sub + "\",\"title\":\"孙\",\"product\":\"warehouse\",\"path\":\"/x/sun\"}");
 
         Resp res = call(delete("/api/v1/platform/nav-nodes/" + dir)
                 .header("Authorization", "Bearer " + adminToken));
@@ -339,6 +357,66 @@ class NavNodeTest {
     }
 
     /**
+     * org 自己的菜单（页面 / 目录 / 入口页 / 外链）<b>删不掉</b>，只能停用；
+     * 从产品来的（挂载 / 手工复制）照常删得掉。
+     *
+     * <p>判据是「{@code product} 是否为空」。这四类都要各测一遍，而不是只测页面那一类：
+     * 前端给的删除按钮走 {@code sourceOf}（`entryPage` / `externalUrl` 各是一个分支），
+     * 后端守卫走 {@code isProductNode} —— 两条判据一旦有一个漂移，
+     * 表现就是「界面上有删除、点了 400」或反过来「能删的却只给停用」，各自看着都像对的。
+     *
+     * <p>顺带守住「守卫没有过宽」：产品类那两条必须 200，否则这个功能就成了「什么都删不掉」。
+     */
+    @Test
+    void orgOwnedMenuCannotBeDeletedOnlyDisabled() throws Exception {
+        String page = create("{\"scope\":\"project\",\"title\":\"自有页面\",\"path\":\"/org/workbench/projects\"}")
+                .path("id").asText();
+        String dir = create("{\"scope\":\"project\",\"title\":\"自有目录\"}").path("id").asText();
+        String entry = create("{\"scope\":\"project\",\"title\":\"自有入口页\",\"entryPage\":true}").path("id").asText();
+        String ext = create("{\"scope\":\"project\",\"title\":\"自有外链\","
+                + "\"externalUrl\":\"https://grafana.example.com/d/abc\"}").path("id").asText();
+
+        for (String id : List.of(page, dir, entry, ext)) {
+            Resp res = del(id);
+            assertEquals(400, res.status(), "org 自己的菜单不该删得掉（" + id + "）: " + res.body());
+            assertNotNull(findById(adminTree(null), id), "被拒之后这一行必须还在（" + id + "）");
+        }
+
+        // 守卫没有过宽：从产品来的照样删得掉 —— 手工复制档（product 非空、mounted 关着）。
+        String manual = create("{\"scope\":\"project\",\"title\":\"产品来的\",\"product\":\"warehouse\"}")
+                .path("id").asText();
+        assertEquals(200, del(manual).status(), "产品节点应当照常能删");
+
+        // 并且「拒了之后还能停用」—— 这才是给管理员的那条出路，光拒不做等于没路走。
+        assertEquals(200, patchNode(page, "{\"enabled\":false}").status());
+        assertNull(findByLabel(navTree(memberToken), "自有页面"), "停用后侧栏里不该还有它");
+        assertEquals(200, patchNode(page, "{\"enabled\":true}").status(), "停用要能再启用");
+    }
+
+    /**
+     * <b>级联也是个后门，要一起堵</b>：把一个 org 自有的菜单挂在产品节点下面，
+     * 再删那个产品节点 —— 只判「要删的这一条自己」的话，守卫就被绕过去了，
+     * 而管理员看到的是「我删的是产品那一行」。
+     *
+     * <p>文案要报出**是哪一个**子节点挡住了：只回「不能删除」的话，管理员对着
+     * 一整棵子树不知道该处理谁。
+     */
+    @Test
+    void deleteCannotSmuggleOutOrgOwnedChildInSubtree() throws Exception {
+        String parent = create("{\"scope\":\"project\",\"title\":\"产品父\",\"product\":\"warehouse\"}")
+                .path("id").asText();
+        String kid = create("{\"scope\":\"project\",\"parentId\":\"" + parent + "\","
+                + "\"title\":\"挡路的自有菜单\",\"path\":\"/org/workbench/projects\"}").path("id").asText();
+
+        Resp res = del(parent);
+        assertEquals(400, res.status(), "子树里混着 org 自有的菜单时，整支都不该删得掉: " + res.body());
+        assertTrue(res.body().contains("挡路的自有菜单"),
+                "要说清是哪一个子节点挡住了 —— 否则管理员对着整支不知道处理谁: " + res.body());
+        assertNotNull(findById(adminTree(null), parent), "被拒之后父节点也要还在");
+        assertNotNull(findById(adminTree(null), kid), "被拒之后子节点要还在");
+    }
+
+    /**
      * 空目录策略：<b>一个可用子项都没有的目录</b>怎么办。
      *
      * <p>{@code hide}（默认）= 整枝不出现，{@code always} = 保留并置灰说明。
@@ -403,6 +481,170 @@ class NavNodeTest {
     }
 
     // ------------------------------------------------------------------
+    // 排序：同层序号 + 上移 / 下移
+    // ------------------------------------------------------------------
+
+    /*
+     * 下面几条一律用 **ASCII 标题**（A/B/C、L1/R1）：并列时「谁在前」由 {@code title} 的
+     * **字符序**兜底，而这个序各库不同 —— H2 按码点（`乙` U+4E59 < `甲` U+7532），
+     * MySQL 按 collation，对中文给出的先后未必一致。先前用「甲乙丙」写的版本就栽在这儿：
+     * 失败信息是「期望 [甲, 丙, 乙]，实际 [乙, 丙, 甲]」—— 看着像排序逻辑错了，其实是字符序。
+     *
+     * 顺带一提，「并列看字符序」本身就是这一版要修的病根：同层全 0 时先后不由管理员决定。
+     * 缺省改成「同层最大 + 10」之后不再产生新并列，但老数据里的还在，所以
+     * `moveNormalizesTiedSortValuesAcrossTheWholeLevel` 专门盯住「一次移动把它归一」。
+     */
+
+    /**
+     * 不传 {@code sortOrder} 时**落在同层末尾**，值是 10/20/30。
+     *
+     * <p>这条同时钉两件事：缺省不再是 0（原先同层全 0 → 并列 → 谁在前由 {@code title} 的
+     * 字符序说了算，管理员没填过的两条菜单，先后不由他决定），以及量纲就是
+     * {@code SORT_STEP} 的倍数 —— 别的用例（{@link #moveSwapsWithinTheSameLevelAndRenumbers}）
+     * 拿它当基准。
+     */
+    @Test
+    void siblingsGetSequentialSortOrderByDefault() throws Exception {
+        String dir = create("{\"scope\":\"project\",\"title\":\"排序：缺省\"}").path("id").asText();
+        JsonNode a = create("{\"scope\":\"project\",\"parentId\":\"" + dir + "\",\"title\":\"A\"}");
+        JsonNode b = create("{\"scope\":\"project\",\"parentId\":\"" + dir + "\",\"title\":\"B\"}");
+        JsonNode c = create("{\"scope\":\"project\",\"parentId\":\"" + dir + "\",\"title\":\"C\"}");
+
+        assertEquals(10, a.path("sortOrder").asInt(), a.toString());
+        assertEquals(20, b.path("sortOrder").asInt(), b.toString());
+        assertEquals(30, c.path("sortOrder").asInt(), c.toString());
+        assertEquals(List.of("A", "B", "C"), titlesUnder(dir), "顺序就是建立的先后");
+    }
+
+    /**
+     * 显式传的 {@code sortOrder} 仍然说了算。
+     *
+     * <p>这是一条**护栏**：{@code dw-org/ui/e2e/workbench.spec.ts} 里「侧栏按登记的顺序排」
+     * 那条用例靠显式值构造反例，改缺省规则不能把「显式优先」一起改掉。
+     */
+    @Test
+    void explicitSortOrderStillWins() throws Exception {
+        String dir = create("{\"scope\":\"project\",\"title\":\"排序：显式\"}").path("id").asText();
+        create("{\"scope\":\"project\",\"parentId\":\"" + dir + "\",\"title\":\"A\"}");
+        // 5 比缺省的 10 小 → 后建的反而排前面
+        create("{\"scope\":\"project\",\"parentId\":\"" + dir + "\",\"title\":\"B\",\"sortOrder\":5}");
+        assertEquals(List.of("B", "A"), titlesUnder(dir));
+    }
+
+    /** 上移 / 下移一格：换位 + 整层重编号（值恰好回到 10/20/30）。 */
+    @Test
+    void moveSwapsWithinTheSameLevelAndRenumbers() throws Exception {
+        String dir = create("{\"scope\":\"project\",\"title\":\"排序：移动\"}").path("id").asText();
+        create("{\"scope\":\"project\",\"parentId\":\"" + dir + "\",\"title\":\"A\"}");
+        create("{\"scope\":\"project\",\"parentId\":\"" + dir + "\",\"title\":\"B\"}");
+        String c = create("{\"scope\":\"project\",\"parentId\":\"" + dir + "\",\"title\":\"C\"}").path("id").asText();
+
+        Resp up = moveNode(c, -1);
+        assertEquals(200, up.status(), up.body());
+        assertTrue(MAPPER.readTree(up.body()).path("changed").asBoolean(), up.body());
+        assertEquals(List.of("A", "C", "B"), titlesUnder(dir));
+        assertSortValues(dir, 10, 20, 30);
+
+        Resp down = moveNode(c, 1);
+        assertEquals(200, down.status(), down.body());
+        assertEquals(List.of("A", "B", "C"), titlesUnder(dir), "再下移一格就回到原样");
+        assertSortValues(dir, 10, 20, 30);
+    }
+
+    /** 已经在首 / 末位时是 {@code changed:false} 且**一个字都不写**（不是错误）。 */
+    @Test
+    void moveAtTheEdgeChangesNothing() throws Exception {
+        String dir = create("{\"scope\":\"project\",\"title\":\"排序：边界\"}").path("id").asText();
+        String a = create("{\"scope\":\"project\",\"parentId\":\"" + dir + "\",\"title\":\"A\"}").path("id").asText();
+        String b = create("{\"scope\":\"project\",\"parentId\":\"" + dir + "\",\"title\":\"B\"}").path("id").asText();
+
+        Resp upFirst = moveNode(a, -1);
+        assertEquals(200, upFirst.status(), upFirst.body());
+        assertFalse(MAPPER.readTree(upFirst.body()).path("changed").asBoolean(), upFirst.body());
+
+        Resp downLast = moveNode(b, 1);
+        assertEquals(200, downLast.status(), downLast.body());
+        assertFalse(MAPPER.readTree(downLast.body()).path("changed").asBoolean(), downLast.body());
+
+        assertEquals(List.of("A", "B"), titlesUnder(dir), "到头了就不该动");
+        assertSortValues(dir, 10, 20);
+    }
+
+    /**
+     * 一次移动把**整层**归一：老数据的并列（全 0）与导入带来的外来值都在这一次写里消失。
+     *
+     * <p>只交换两个值的话并列会留下来，而并列之下「谁在前」由 {@code title} 决定 ——
+     * 管理员点了上移却没动，是最难查的那一类 bug。
+     */
+    @Test
+    void moveNormalizesTiedSortValuesAcrossTheWholeLevel() throws Exception {
+        String dir = create("{\"scope\":\"project\",\"title\":\"排序：归一\"}").path("id").asText();
+        String a = create("{\"scope\":\"project\",\"parentId\":\"" + dir + "\",\"title\":\"A\"}").path("id").asText();
+        String b = create("{\"scope\":\"project\",\"parentId\":\"" + dir + "\",\"title\":\"B\"}").path("id").asText();
+        String c = create("{\"scope\":\"project\",\"parentId\":\"" + dir + "\",\"title\":\"C\"}").path("id").asText();
+
+        // 造出老数据那种并列：两条都改回 0。此时顺序靠 title 兜底，看着仍是 A,B,C
+        assertEquals(200, patchNode(a, "{\"sortOrder\":0}").status());
+        assertEquals(200, patchNode(b, "{\"sortOrder\":0}").status());
+        assertSortValues(dir, 0, 0, 30);
+
+        assertEquals(200, moveNode(c, -1).status());
+        assertSortValues(dir, 10, 20, 30);
+        assertEquals(List.of("A", "C", "B"), titlesUnder(dir));
+    }
+
+    /** 移动只碰自己的兄弟：另一个父节点下的行、另一个壳里的行都不动。 */
+    @Test
+    void moveOnlyTouchesItsOwnSiblings() throws Exception {
+        String one = create("{\"scope\":\"project\",\"title\":\"排序：左\"}").path("id").asText();
+        String two = create("{\"scope\":\"project\",\"title\":\"排序：右\"}").path("id").asText();
+        String left = create("{\"scope\":\"project\",\"parentId\":\"" + one + "\",\"title\":\"L1\"}").path("id").asText();
+        create("{\"scope\":\"project\",\"parentId\":\"" + one + "\",\"title\":\"L2\"}");
+        create("{\"scope\":\"project\",\"parentId\":\"" + two + "\",\"title\":\"R1\"}");
+        create("{\"scope\":\"project\",\"parentId\":\"" + two + "\",\"title\":\"R2\"}");
+
+        assertEquals(200, moveNode(left, 1).status());
+
+        assertEquals(List.of("L2", "L1"), titlesUnder(one));
+        assertEquals(List.of("R1", "R2"), titlesUnder(two), "另一个父节点下的顺序不该被动");
+        assertSortValues(two, 10, 20);
+    }
+
+    /**
+     * 顶层（{@code parentId} 为空）也要能移动。
+     *
+     * <p>单拎出来是因为这一档的「同层」判据是**同壳**而不是同父 —— 按 {@code parentId} 分组
+     * 时最容易漏掉的就是 {@code parentId = ''} 这一支。
+     */
+    @Test
+    void topLevelNodesCanMoveToo() throws Exception {
+        create("{\"scope\":\"workbench\",\"title\":\"排序：顶层T1\"}");
+        String y = create("{\"scope\":\"workbench\",\"title\":\"排序：顶层T2\"}").path("id").asText();
+
+        assertEquals(200, moveNode(y, -1).status());
+
+        List<String> titles = topLevelTitles("workbench");
+        int atY = titles.indexOf("排序：顶层T2");
+        int atX = titles.indexOf("排序：顶层T1");
+        assertTrue(atY >= 0 && atX >= 0 && atY < atX, "上移之后 T2 应当排在 T1 前面: " + titles);
+    }
+
+    /** 越界之外的两种坏输入：不存在的 id（404）与非法 delta（400），以及门禁。 */
+    @Test
+    void moveRejectsBadDeltaAndUnknownId() throws Exception {
+        String id = create("{\"scope\":\"project\",\"title\":\"排序：坏输入\"}").path("id").asText();
+
+        assertEquals(404, moveNode("nav-not-a-real-id", 1).status());
+        assertEquals(400, moveNode(id, 0).status(), "delta=0 不是「不动」，是不认识的输入");
+        assertEquals(400, moveNode(id, 2).status());
+        assertEquals(400, moveNode(id, -2).status());
+        assertEquals(403, call(post("/api/v1/platform/nav-nodes/" + id + "/move")
+                .header("Authorization", "Bearer " + memberToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"delta\":1}")).status(), "移动是平台配置动作，普通成员不该能调");
+    }
+
+    // ------------------------------------------------------------------
 
     private void createUser(String username, String tenantRole) throws Exception {
         Resp res = call(post("/api/tenants/" + tenantId + "/users")
@@ -452,6 +694,45 @@ class NavNodeTest {
                 .header("Authorization", "Bearer " + adminToken)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json));
+    }
+
+    /** 删一个节点，**不断言状态码** —— 守卫用例要看的就是那个非 200 的返回。 */
+    private Resp del(String id) throws Exception {
+        return call(delete("/api/v1/platform/nav-nodes/" + id)
+                .header("Authorization", "Bearer " + adminToken));
+    }
+
+    /** 把一个节点在同层里上移 / 下移一格。**不断言状态码** —— 越界与非法 delta 要看那个返回。 */
+    private Resp moveNode(String id, int delta) throws Exception {
+        return call(post("/api/v1/platform/nav-nodes/" + id + "/move")
+                .header("Authorization", "Bearer " + adminToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"delta\":" + delta + "}"));
+    }
+
+    /** 某个父节点下的标题顺序（断言「谁在前」用）。 */
+    private List<String> titlesUnder(String parentId) throws Exception {
+        List<String> out = new ArrayList<>();
+        findById(adminTree("project"), parentId).path("children")
+                .forEach(n -> out.add(n.path("label").asText()));
+        return out;
+    }
+
+    /** 某个壳的**顶层**（{@code parentId} 为空）标题顺序。 */
+    private List<String> topLevelTitles(String scope) throws Exception {
+        List<String> out = new ArrayList<>();
+        adminTree(scope).forEach(n -> out.add(n.path("label").asText()));
+        return out;
+    }
+
+    /** 某个父节点下各行的 {@code sortOrder} —— 重编号（消除并列）那几条用例靠它。 */
+    private void assertSortValues(String parentId, int... expected) throws Exception {
+        JsonNode kids = findById(adminTree("project"), parentId).path("children");
+        List<Integer> got = new ArrayList<>();
+        kids.forEach(n -> got.add(n.path("sortOrder").asInt()));
+        List<Integer> want = new ArrayList<>();
+        for (int v : expected) want.add(v);
+        assertEquals(want, got, kids.toString());
     }
 
     private JsonNode adminTree(String scope) throws Exception {

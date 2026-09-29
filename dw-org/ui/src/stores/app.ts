@@ -1,5 +1,6 @@
 import { computed, reactive, readonly, ref } from 'vue';
 import { message } from 'ant-design-vue';
+import { isEmbed } from '../config/runtime';
 import type {
   AppState,
   DataGrade,
@@ -1012,6 +1013,10 @@ export function leaveProject() {
 
 /** 回到平台后台：清掉当前租户，平台壳不切换租户。 */
 export function leaveTenant() {
+  // 被框起来的那一页（入口页的 Tab 里嵌的 org 页面）不该清租户上下文：下面这几个
+  // `dw-ai.*` 是**共享** sessionStorage —— 同源 iframe 与父窗口用的是同一份。子帧清了，
+  // 父窗口的租户跟着没了（route 守卫的 `meta.admin` 分支会走到这里）。
+  if (isEmbed()) return;
   state.currentTenantId = '';
   state.currentProjectId = null;
   state.tenantRole = null;

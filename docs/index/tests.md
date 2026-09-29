@@ -1,17 +1,20 @@
 # 测试清单
 
-> 由 `bin/gen-index.sh` 于 2026-09-27 18:15:33 生成（HEAD `04d51fd`）。**不要手工编辑**，改完代码重跑脚本即可。
+> 由 `bin/gen-index.sh` 于 2026-09-29 11:57:33 生成（HEAD `78c8f30`）。**不要手工编辑**，改完代码重跑脚本即可。
 > 只列类名与一句话职责；具体断言请打开文件。**路径 = 小节标题里的模块名 + `/` + 下表路径**。跑测试见各模块 `api/pom.xml`。
 
 
-## dw-org（14 个）
+## dw-org（17 个）
 
 - `api/src/test/java/com/dwai/platform/AppearanceShellContractTest.java`
 - `api/src/test/java/com/dwai/platform/AuthSmokeTest.java`
+- `api/src/test/java/com/dwai/platform/ComputeContractTest.java`
 - `api/src/test/java/com/dwai/platform/CrossServiceDesignGuardTest.java` — 把技术方案 §2 的三条<b>禁止项</b>变成源码级的守卫。
 - `api/src/test/java/com/dwai/platform/InternalContractTest.java`
 - `api/src/test/java/com/dwai/platform/InternalModuleTokenTest.java`
 - `api/src/test/java/com/dwai/platform/MenuCandidateContractTest.java`
+- `api/src/test/java/com/dwai/platform/ModulePolicyContractTest.java`
+- `api/src/test/java/com/dwai/platform/NavEntryExternalTest.java`
 - `api/src/test/java/com/dwai/platform/NavNodeTest.java`
 - `api/src/test/java/com/dwai/platform/NavTreeMountTest.java`
 - `api/src/test/java/com/dwai/platform/PermWordsTest.java` — 权限词的<b>形状</b>规则，以及「三份词表不许漂移」的守卫。

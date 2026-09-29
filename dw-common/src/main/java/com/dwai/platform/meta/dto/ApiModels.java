@@ -97,15 +97,12 @@ public final class ApiModels {
    * <p>不带模块名与说明文案：那是前端 {@code config/iam.ts} 的 {@code MODULE_OPTIONS}
    * 的事，服务端再各带一份就多了一个会漂的真相。前端按 {@code product} 查表。
    *
-   * @param frontendUrl 该产品的页面地址，来自服务注册表（{@code GET /api/services}）。
-   *                    <b>没有在线状态</b>：心跳已删除，只有「已登记地址 / 平台未注册」两态。
    * @param explicit    true = 库里有这个模块的策略行；false = 从未配过，{@code enabled} /
    *                    {@code visibleTo} 是<b>显示的初值</b>。生效侧「没配过 = 不判」，
    *                    与这里显示的值刻意不对称（见 {@code NavNodeService} 第三层注释），
    *                    前端据此给一句「保存后生效」的提示。
    */
-  public record ModuleRowDto(
-      String product, boolean enabled, String visibleTo, String frontendUrl, boolean explicit) {}
+  public record ModuleRowDto(String product, boolean enabled, String visibleTo, boolean explicit) {}
 
   /** 数仓引擎的一行。连接信息本版不做，只有启停。 */
   public record ComputeEngineDto(String kind, boolean enabled) {}

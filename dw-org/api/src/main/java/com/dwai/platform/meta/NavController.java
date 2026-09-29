@@ -1,7 +1,11 @@
 package com.dwai.platform.meta;
 
 import com.dwai.platform.auth.TenantContext;
+import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -52,5 +56,33 @@ public class NavController {
     // 带上当前项目：同一个产品在不同项目里可以是不同角色（`X-Project-Id` 由壳按
     // sessionStorage 里的当前项目带上，见 dw-org/ui 的 `api/client.ts`）。
     return nav.treeFor(TenantContext.tenantId(), TenantContext.projectId());
+  }
+
+  /**
+   * 入口页的内容：表里列出挂进来的菜单。
+   *
+   * <p>每一项都走侧栏那一套 {@link NavNodeService#entryPage} 渲染 —— 判权结论与它在侧栏
+   * 原位置时完全一致，这里不再判一次（两个过滤器意味着「表里少了一项」有两种成因）。
+   */
+  @GetMapping("/entry/{id}")
+  public Map<String, Object> entry(@PathVariable String id) {
+    return nav.entryPage(TenantContext.tenantId(), TenantContext.projectId(), id);
+  }
+
+  /**
+   * 外链菜单的最终地址 —— <b>token 已经由服务端拼好</b>。
+   *
+   * <p>服务端拼而不是前端拼：token 明文因此只出现在「打开这一条外链的那一刻」的这一个
+   * 响应里，不会随每次侧栏请求反复下发（侧栏只给 {@code hasToken} 布尔）。
+   *
+   * <p>{@code no-store}：地址里带着凭据，不能被任何中间层缓存下来。
+   */
+  @GetMapping("/external/{id}")
+  public ResponseEntity<Map<String, Object>> external(@PathVariable String id) {
+    Map<String, Object> out = nav.externalTarget(TenantContext.tenantId(), TenantContext.projectId(), id);
+    return ResponseEntity.ok()
+        .cacheControl(CacheControl.noStore())
+        .header(HttpHeaders.PRAGMA, "no-cache")
+        .body(out);
   }
 }

@@ -21,7 +21,13 @@
       </div>
       <a-table :data-source="grants" :columns="grantCols" row-key="id" :pagination="false" size="small" class="card grant-table">
         <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'kind'">
+          <template v-if="column.key === 'code'">
+            <!-- 显示脱敏、复制完整：`:copyable.text` 才是写进剪贴板的内容（见 maskCode 注释） -->
+            <a-typography-text class="grant-code" :copyable="{ text: record.code }">
+              {{ maskCode(record.code) }}
+            </a-typography-text>
+          </template>
+          <template v-else-if="column.key === 'kind'">
             {{ kindLabel(record.kind) }}
           </template>
           <template v-else-if="column.key === 'expires'">
@@ -213,7 +219,10 @@
       <p class="lead">平台用户凭此码进入本租户。须指定可进的项目及每个项目的角色。到期或停用后进入资格失效。</p>
       <a-form layout="vertical">
         <a-form-item v-if="editingGrant" label="授权码">
-          <a-input :value="editingGrant.code" disabled />
+          <!-- 与列表同一口径：只给看前 4 位，完整值走旁边的复制按钮 -->
+          <a-typography-text class="grant-code" :copyable="{ text: editingGrant.code }">
+            {{ maskCode(editingGrant.code) }}
+          </a-typography-text>
         </a-form-item>
         <a-form-item label="有效期" required>
           <a-radio-group v-model:value="grantForm.permanent">
@@ -404,7 +413,8 @@ const moduleOpts = computed(() => {
 });
 
 const grantCols = [
-  { title: '授权码', dataIndex: 'code' },
+  // 用 key 而不是 dataIndex：这一列要自己渲染（脱敏 + 复制），见 #bodyCell 的 code 分支
+  { title: '授权码', key: 'code', width: 200 },
   { title: '种类', key: 'kind', width: 90 },
   { title: '到期', key: 'expires', width: 160 },
   { title: '范围', key: 'scope' },
@@ -418,6 +428,23 @@ const transferOpts = computed(() =>
     .filter((u) => u.id !== sessionAccount.value?.id && u.status === 'active')
     .map((u) => ({ value: u.id, label: `${u.displayName}（${u.username}）` }))
 );
+
+/**
+ * 授权码的**显示值**：只留前 4 位，其余打点（点数固定，不随原长变化）。
+ *
+ * <p>{@link Grant.code} 仍是明文，复制按钮写进剪贴板的也是完整值 —— 授权码本来就是要
+ * 发给平台用户的凭据，管理员必须取得到，所以不照 Token 那套「只回 hasToken」做。
+ * 这里挡的是**截图与旁人瞟屏**，<b>不是</b>前端调试工具：打开网络面板照样能看到列表
+ * 响应里的完整 `code`。要连响应一起挡住，得后端列表改为只回掩码、另开取明文接口。
+ *
+ * <p>例外：生成成功后的 `message.success` 里带的是**完整码**（见 {@link submitGrant}）——
+ * 那是管理员拿到新码的出口，脱敏了就等于码刚生成就取不到。
+ */
+function maskCode(code?: string) {
+  const s = (code ?? '').trim();
+  if (!s) return '';
+  return s.length <= 4 ? '•'.repeat(6) : `${s.slice(0, 4)}${'•'.repeat(6)}`;
+}
 
 function kindLabel(kind: string) {
   if (kind === 'permanent') return '永久';
@@ -728,6 +755,8 @@ async function submitGrant() {
       const created = await api.org.createGrant(tid.value, body);
       openGrant.value = false;
       await reload();
+      // 这里**故意带完整码**：列表已脱敏，这行提示是管理员拿到刚生成的码最直接的出口。
+      // 别为了「处处不显示明文」把它也掩掉 —— 掩了新码就当场取不到了。
       message.success(`已生成授权码 ${created.code}`);
     }
   } catch (e) {
@@ -812,6 +841,12 @@ onMounted(() => {
 .row-head h3 {
   margin: 0;
   font-size: 15px;
+}
+
+/* 与 index.css 的 .sql 同一套字体栈：授权码逐字符读，等宽比比例字体好认 */
+.grant-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.5px;
 }
 
 .scope-box {

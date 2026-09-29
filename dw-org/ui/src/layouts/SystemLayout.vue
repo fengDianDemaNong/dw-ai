@@ -1,7 +1,7 @@
 <template>
   <div class="shell" :class="`pos-${menuPos}`">
     <AppNav
-      v-if="menuPos === 'left' || menuPos === 'top'"
+      v-if="!embed && (menuPos === 'left' || menuPos === 'top')"
       :items="items"
       :home="home"
       :menu-pos="menuPos"
@@ -21,9 +21,9 @@
         <p>只有项目壳有：原型的工作台壳（它自己的 `SystemLayout.vue`）没有这条栏，
         租户名与切换器都只出现在项目里 —— 工作台本身就是「选项目」的地方。
       -->
-      <header v-if="projectShell" class="bar" :class="{ menu: menuPos === 'drawer' }">
+      <header v-if="projectShell && !embed" class="bar" :class="{ menu: menuPos === 'drawer' }">
         <AppNav
-          v-if="menuPos === 'drawer'"
+          v-if="!embed && menuPos === 'drawer'"
           :items="items"
           :home="home"
           :menu-pos="menuPos"
@@ -36,7 +36,7 @@
         <UserPanel v-if="menuPos === 'drawer' && !standalone" menu-pos="top" />
       </header>
       <div class="body">
-        <AppShortcut v-if="projectShell && menuPos === 'drawer'" :items="items" />
+        <AppShortcut v-if="!embed && projectShell && menuPos === 'drawer'" :items="items" />
         <div class="main">
           <router-view />
         </div>
@@ -55,13 +55,21 @@ import UserPanel from '../components/UserPanel.vue';
 import { ADMIN_HOME, SYS_HOME } from '../config/paths';
 import { buildAdminNav, toNavItems } from '../config/sysNav';
 import { listenMountTrees, mountOrigins } from '../config/navMount';
-import { isStandalone } from '../config/runtime';
+import { isEmbed, isStandalone } from '../config/runtime';
 import { app, canBackHome, currentTenant, leaveProject, navTree } from '../stores/app';
 import { appearanceOf, scopeOfRoute } from '../stores/prefs';
 
 const route = useRoute();
 const router = useRouter();
 const standalone = isStandalone();
+/**
+ * 被别的 org 页面框起来时不画导航（见 `config/runtime.ts` 的 `isEmbed`）。
+ *
+ * <p>只在 setup 里求值一次：这一页从上架到卸载，「是不是被框着」不会变
+ *（同源 iframe 的父窗口不会中途换成别人），而求值要读 `window.top.location`，
+ * 放进 computed 就是每次渲染都去碰一次跨源边界。
+ */
+const embed = isEmbed();
 const adminShell = computed(() => route.matched.some((r) => r.meta.shell === 'admin'));
 const projectShell = computed(() => route.matched.some((r) => r.meta.shell === 'project'));
 /** 项目码从地址里取（`/org/project/{code}/...`）—— 侧栏要按它拼产品页面的完整路由。 */

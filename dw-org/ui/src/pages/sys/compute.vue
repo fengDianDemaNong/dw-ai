@@ -71,7 +71,13 @@
         size="small"
       >
         <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'on'">
+          <template v-if="column.key === 'name'">
+            {{ ENGINE_NAMES[record.kind] ?? record.kind }}
+          </template>
+          <template v-else-if="column.key === 'note'">
+            {{ ENGINE_NOTES[record.kind] ?? '' }}
+          </template>
+          <template v-else-if="column.key === 'on'">
             <a-switch
               :checked="record.enabled"
               :disabled="!isTenantAdmin"
@@ -109,11 +115,32 @@ const loading = ref(false);
 const saving = ref(false);
 const testing = ref(false);
 
+/**
+ * 引擎显示名。接口只回 `{kind, enabled}`，名字必须在这里映射 ——
+ * 漏了它就等于「引擎」那一列整列空白（表格行还能点开关，只是不知道点的是谁）。
+ *
+ * <p>认不出的 kind 直接显示 kind 本身（见模板里的 `?? record.kind`）：后端将来加了引擎，
+ * 页面上至少还能看出是哪一行，而不是一片空白。
+ */
 const ENGINE_NAMES: Record<string, string> = {
   hive: 'Hive',
   spark: 'Spark',
   clickhouse: 'ClickHouse',
   doris: 'Doris',
+};
+
+/**
+ * 「说明」列：每个引擎的定位。
+ *
+ * <p>原型里这一列取的是数据自带的 `note`，而它的 kind 列表里根本没有 `note` ——
+ * 原型自己那一列就是空的。这里补上技术定位，既不是营销文案也不是连接信息
+ * （本版只登记启停，连接信息后续版本再配）。
+ */
+const ENGINE_NOTES: Record<string, string> = {
+  hive: '离线数仓，SQL on Hadoop',
+  spark: '批处理与 SQL 计算',
+  clickhouse: '列式存储，实时分析',
+  doris: 'MPP 架构，实时分析',
 };
 
 const engineCols = [

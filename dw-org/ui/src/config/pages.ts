@@ -15,7 +15,15 @@ export const ORG_PAGES = {
   modules: `${ORG_HOME}/workbench/modules`,
   compute: `${ORG_HOME}/workbench/compute`,
   knowledge: `${ORG_HOME}/workbench/knowledge`,
-  settings: `${ORG_HOME}/workbench/settings`,
+  /**
+   * 工作台「设置」下的三个子页（V28 起，见该迁移的注释）。
+   *
+   * <p>没有单独的 `settings` 键：父节点现在是个**目录**（`nav_nodes.path` 为空串，点不动），
+   * 它自己没有地址。`/org/workbench/settings` 那条旧地址在路由表里重定向到外观页。
+   */
+  settingsAppearance: `${ORG_HOME}/workbench/settings/appearance`,
+  settingsLlm: `${ORG_HOME}/workbench/settings/llm`,
+  settingsPrompts: `${ORG_HOME}/workbench/settings/prompts`,
   platformTenants: `${ORG_HOME}/platform/tenants`,
   platformServices: `${ORG_HOME}/platform/services`,
   platformNav: `${ORG_HOME}/platform/nav-items`,

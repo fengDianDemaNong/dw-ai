@@ -10,6 +10,15 @@
       </template>
     </PageHeader>
 
+    <!-- 这一页只服务**本平台自己的产品**。不写下来的话，管理员会把外部系统的地址也填进来，
+         然后在「菜单管理」里看到「拉不到菜单清单」—— 那一步注定失败，且失败信息里
+         看不出「这一档本来就不适用于外部系统」。外部系统走「外链菜单」，那是另一条路。 -->
+    <p class="muted">
+      只登记本平台自己的产品（产品码固定，就是下方那个下拉里的四个）。<b>外部系统不在这里登记</b>，
+      也不需要：它们的页面不导出菜单清单（菜单由浏览器里的 JS 画出来，服务端拿不到），
+      请直接在「菜单管理」里用<b>外链菜单</b>挂 —— 外链菜单只要一个地址，既不查这张表、也不查清单。
+    </p>
+
     <a-table :data-source="rows" :columns="cols" row-key="product" :pagination="false" size="small" class="card card-flush">
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'product'">{{ productLabel(record.product) }}</template>

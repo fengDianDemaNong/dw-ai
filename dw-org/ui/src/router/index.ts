@@ -62,7 +62,9 @@ const routes: RouteRecordRaw[] = [
       { path: 'nav-items', name: 'admin-nav-items', component: () => import('../pages/admin/nav-items.vue'), meta: { title: '菜单管理' } },
       { path: 'product-roles', name: 'admin-product-roles', component: () => import('../pages/admin/product-roles.vue'), meta: { title: '产品角色' } },
       { path: 'users', name: 'admin-users', component: () => import('../pages/admin/users.vue'), meta: { title: '平台用户' } },
-      { path: 'settings', name: 'admin-settings', component: () => import('../pages/sys/settings.vue'), meta: { title: '外观与布局' } },
+      // 平台后台的「设置」**保持单页**：它本来就只有外观与布局，没有大模型/AI 提示词。
+      // 与工作台的「设置 → 外观」共用同一个组件（那页按 `scope` 分叉标题与作用域）。
+      { path: 'settings', name: 'admin-settings', component: () => import('../pages/sys/settings-appearance.vue'), meta: { title: '外观与布局' } },
     ],
   },
   {
@@ -78,7 +80,12 @@ const routes: RouteRecordRaw[] = [
       { path: 'modules', name: 'sys-modules', component: () => import('../pages/sys/modules.vue'), meta: { title: '模块管理' } },
       { path: 'compute', name: 'sys-compute', component: () => import('../pages/sys/compute.vue'), meta: { title: '计算资源' } },
       { path: 'knowledge', name: 'sys-knowledge', component: () => import('../pages/sys/knowledge.vue'), meta: { title: '知识库' } },
-      { path: 'settings', name: 'sys-settings', component: () => import('../pages/sys/settings.vue'), meta: { title: '设置' } },
+      // 「设置」拆成三个子页（V28）。路径写成「扁平的一段带斜杠」而不是真嵌套 children ——
+      // 与项目壳 `settings/nav` 同一个写法（见该处注释：这样排在 `embed/*` 通配之前）。
+      { path: 'settings', redirect: ORG_PAGES.settingsAppearance },
+      { path: 'settings/appearance', name: 'sys-settings-appearance', component: () => import('../pages/sys/settings-appearance.vue'), meta: { title: '外观' } },
+      { path: 'settings/llm', name: 'sys-settings-llm', component: () => import('../pages/sys/settings-llm.vue'), meta: { title: '大模型' } },
+      { path: 'settings/prompts', name: 'sys-settings-prompts', component: () => import('../pages/sys/settings-prompts.vue'), meta: { title: 'AI 提示词' } },
     ],
   },
   /**
@@ -95,6 +102,28 @@ const routes: RouteRecordRaw[] = [
     component: () => import('../layouts/SystemLayout.vue'),
     meta: { title: '产品页面', member: true, shell: 'sys', owner: 'org' },
     children: [{ path: '', name: 'portal-embed', component: () => import('../pages/embed.vue') }],
+  },
+  /**
+   * 菜单扩展的两页（V29）：**入口页**（一张列出被挂菜单的表格）与**外链内嵌页**。
+   *
+   * <p>与上面的门户嵌入页同理，刻意<b>顶层</b>定义、<b>不</b>带 `meta.tenant` ——
+   * 那一条只放行 `sys-projects`，会把普通成员（这两种页面的主要使用者）静默弹回首页。
+   * 挂进 `/org/workbench` 的 `children` 里就会继承父路由的 `meta.tenant`，正是这个坑。
+   *
+   * <p>两条都是**两段**路径（`entry/{id}`），而 `/org/workbench` 的 children 里没有能匹配
+   * 它们的项，所以不会被上面那个顶层路由先吃掉。
+   */
+  {
+    path: '/org/workbench/entry/:id',
+    component: () => import('../layouts/SystemLayout.vue'),
+    meta: { title: '目录', member: true, shell: 'sys', owner: 'org' },
+    children: [{ path: '', name: 'sys-entry', component: () => import('../pages/entry.vue') }],
+  },
+  {
+    path: '/org/workbench/external/:id',
+    component: () => import('../layouts/SystemLayout.vue'),
+    meta: { title: '外链页面', member: true, shell: 'sys', owner: 'org' },
+    children: [{ path: '', name: 'sys-external', component: () => import('../pages/external.vue') }],
   },
   /**
    * 项目壳：`/org/project/{项目code}/*` —— 进项目**之后**那一级。
@@ -134,6 +163,21 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '外观' },
       },
       {
+        // 入口页与外链内嵌页（V29）。与 `members` / `settings/nav` 一样**排在 `embed/...`
+        // 之前**：通配路由会吃掉后面的一切，而这两条是壳自己的页面，不是产品页面。
+        // 项目壳不带 `meta.tenant`（见父路由的说明），所以普通成员进得来。
+        path: 'entry/:id',
+        name: 'project-entry',
+        component: () => import('../pages/entry.vue'),
+        meta: { title: '目录' },
+      },
+      {
+        path: 'external/:id',
+        name: 'project-external',
+        component: () => import('../pages/external.vue'),
+        meta: { title: '外链页面' },
+      },
+      {
         path: 'embed/:product/:pathMatch(.*)*',
         name: 'project-embed',
         component: () => import('../pages/embed.vue'),
@@ -156,7 +200,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/sys/users', redirect: ORG_PAGES.users },
   { path: '/sys/roles', redirect: ORG_PAGES.roles },
   { path: '/sys/knowledge', redirect: ORG_PAGES.knowledge },
-  { path: '/sys/settings', redirect: ORG_PAGES.settings },
+  { path: '/sys/settings', redirect: ORG_PAGES.settingsAppearance },
   { path: '/sys/projects', redirect: SYS_HOME },
   { path: '/org/users', redirect: ORG_PAGES.users },
   { path: '/projects', redirect: SYS_HOME },
